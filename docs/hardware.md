@@ -8,7 +8,7 @@ ID and SMS work on both lines.
 
 | Part | What is used |
 |---|---|
-| Host | Topton X2E mini PC: Intel N100, 32 GB RAM, one SATA SSD, 4× 2.5 GbE. It has an M.2 slot and a mini-PCIe slot for cellular modules (both are USB inside), plus SIM holders |
+| Host | Topton X2E mini PC: Intel N100, 8 GB RAM is enough (Proxmox, the PBX and ghostline together use about 3 GB), one SATA SSD, 4× 2.5 GbE. It has an M.2 slot and a mini-PCIe slot for cellular modules (both are USB inside), plus SIM holders |
 | Hypervisor | Proxmox VE 9 |
 | PBX | FreePBX 17 / Asterisk 22 in a privileged LXC container |
 | GSM driver | `chan_quectel` ([IchthysMaranatha fork](https://github.com/IchthysMaranatha/asterisk-chan-quectel)) built from source, with a small patch for the EC200A |
