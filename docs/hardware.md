@@ -20,6 +20,33 @@ Both modules appear on the same USB bus of the host. Each one is a composite
 USB device with several serial interfaces (`option` driver), a network
 interface, and — for the EC200A after configuration — USB audio interfaces.
 
+## Compared with a two-SIM gateway
+
+The usual off-the-shelf alternative for two lines is a Yeastar NeoGate
+TG200 (2G/3G) or TG200L (LTE). Approximate retail prices in 2026, USD:
+
+| | This build | Yeastar TG200 / TG200L |
+|---|---|---|
+| Hardware | Topton X2E with 8 GB RAM and an SSD ≈ 150–250; EC200A-EU ≈ 20–50; SIM7600G-H M.2 ≈ 50–60; antennas ≈ 15 | TG200 ≈ 325–350; TG200L ≈ 650–780 |
+| Total | **≈ 250–380** | **≈ 325–780**, plus a PBX host |
+| What you get | A complete PBX with two GSM lines, and a general-purpose host for other containers | A gateway only: it needs a separate IP PBX to make calls from phones |
+
+| Feature | This build | Gateway alone |
+|---|---|---|
+| Mobile network | LTE Cat 4 on both lines | 2G/3G (TG200) or LTE (TG200L) |
+| PBX, extensions, routing per extension | yes (FreePBX) | no, external PBX required |
+| Call recording, separate track per side | yes | no |
+| Call journal with contact names | yes (ghostline) | no |
+| Transcription, dialog with speakers | yes, local Whisper | no |
+| Calls and SMS to Telegram, transcript added later | yes | no |
+| SMS in both directions | yes | yes (AMI/API) |
+| Web interface with search across SMS and transcripts | yes | basic gateway settings only |
+| Vendor support, ready-made firmware | no, DIY (driver patch, configuration below) | yes |
+
+The transcription service is not included in the price: here it runs on an
+existing home server (CPU only). Without it ghostline still keeps recordings,
+the journal and Telegram notifications.
+
 ## The two modules handle voice differently
 
 | | SIM7600G-H | EC200A-EU |

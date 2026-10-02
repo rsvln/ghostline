@@ -310,7 +310,8 @@ configuration, which contains credentials.
 [docs/hardware.md](docs/hardware.md) describes a working setup: a Topton X2E
 mini PC (Intel N100) running Proxmox, with a Quectel EC200A-EU and a SIMCom
 SIM7600G-H, Asterisk with a
-patched `chan_quectel`, USB audio, and the problems solved along the way.
+patched `chan_quectel`, USB audio, the problems solved along the way, and a
+cost and feature comparison with an off-the-shelf two-SIM gateway.
 
 ## License
 
