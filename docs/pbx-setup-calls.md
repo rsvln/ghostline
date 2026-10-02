@@ -87,6 +87,22 @@ outgoing: the other way round).
 After a FreePBX upgrade compare the copied context with the new
 `extensions_additional.conf` and recreate the copy if it changed.
 
+### Routes with a PIN
+
+If an outbound route has a route password (PIN), the stock `[sub-pincheck]`
+calls `ResetCDR()` after `Authenticate()`. That clears `CDR(recordingfile)`,
+which `sub-record-check` has already set: the call is recorded, but the CDR
+row has no file name and ghostline shows the call without a recording. Copy
+the context into `extensions_override_freepbx.conf` with `ResetCDR(v)`, which
+keeps CDR variables:
+
+```
+[sub-pincheck]
+exten => s,1,Authenticate(${ARG1},)
+exten => s,n,ResetCDR(v)
+exten => s,n,Return()
+```
+
 ## 6. Transcription service
 
 Any OpenAI-compatible `/v1/audio/transcriptions` endpoint works. Example with
@@ -128,6 +144,9 @@ On an Intel i5-13500 with 6 threads, large-v3-turbo int8 transcribes about
 ### Accuracy notes
 
 - Separate recordings per side (section 5) give correct speaker turns.
+- ghostline cuts each side at pauses into pieces of up to 30 seconds and
+  transcribes them separately. Sent whole, a long recording with a repeated
+  hold message makes Whisper lose the rest of the call.
 - Echo of the remote voice from the local phone's speaker gets into the local
   side's recording and confuses the model. ghostline attenuates it before
   transcription (a soft gate, about −30 dB, only where the remote side is

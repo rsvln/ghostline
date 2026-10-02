@@ -71,7 +71,10 @@ namespace ghostline
                     {
                         segs = await Transcribe(http, wav, null, call);
                     }
-                    segs = MergeAdjacent(segs);
+                    // Фильтр ещё раз после склейки: галлюцинация может прийти по частям
+                    // («Редактор субтитров» + пауза + имя).
+                    segs = MergeAdjacent(segs).Select(x => x with { t = DropHallucination(x.t) })
+                                              .Where(x => x.t.Length > 0).ToList();
 
                     string text = FormatDialog(segs, L10n.Tg);
                     Store.SetTranscript(call.Id, text, JsonConvert.SerializeObject(segs));
@@ -118,13 +121,35 @@ namespace ghostline
         private static (string rx, string tx) LegSpeakers(string direction) =>
             direction == "in" ? ("them", "me") : ("me", "them");
 
+        // Дорожка режется по паузам, куски расшифровываются по отдельности (см. Recordings.SoundChunks),
+        // время реплик сдвигается на начало куска.
         private static async Task<List<TranscriptSegment>> Transcribe(HttpClient http, byte[] wav, string who, CallRecord call)
+        {
+            var chunks = Recordings.SoundChunks(wav);
+            // Тихий собеседник распознаётся хуже — выравниваем громкость и здесь.
+            // Куски ищутся по исходной дорожке: после выравнивания шум линии тоже громкий.
+            byte[] balanced = await Recordings.Balanced(wav) ?? wav;
+            if (chunks == null)
+                return await TranscribeChunk(http, balanced, who, call);
+
+            var result = new List<TranscriptSegment>();
+            foreach (var (s, e) in chunks)
+            {
+                byte[] piece = Recordings.Slice(balanced, s, e);
+                if (piece == null) continue;
+                foreach (var seg in await TranscribeChunk(http, piece, who, call))
+                    if (!IsPromptEcho(seg.t, settings.calls.transcribe.prompt))
+                        result.Add(seg with { s = Math.Round(seg.s + s, 1), e = Math.Round(seg.e + s, 1) });
+            }
+            Console.WriteLine($"Transcribe call {call.Id} {who ?? "mono"}: {chunks.Count} chunks, {chunks.Sum(c => c.e - c.s):F0}s of sound");
+            return result;
+        }
+
+        private static async Task<List<TranscriptSegment>> TranscribeChunk(HttpClient http, byte[] wav, string who, CallRecord call)
         {
             var t = settings.calls.transcribe;
             // Подсказка: словарь из настроек + имя собеседника.
             string prompt = string.Join(". ", new[] { t.prompt, call.PeerName }.Where(x => !string.IsNullOrWhiteSpace(x)));
-            // Тихий собеседник распознаётся хуже — выравниваем громкость и здесь.
-            wav = await Recordings.Balanced(wav) ?? wav;
             using var form = new MultipartFormDataContent();
             var file = new ByteArrayContent(wav);
             file.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
@@ -238,7 +263,7 @@ namespace ghostline
         // 2) обычные фразы («продолжение следует», «до новых встреч») — их могут сказать и всерьёз,
         //    поэтому выбрасывается только реплика, целиком из такой фразы.
         private static readonly System.Text.RegularExpressions.Regex SubtitleCredits = new(
-            @"\s*\b(субтитры\s+(сделал[аи]?|создавал[аи]?|делал[аи]?|подогнал[аи]?|подготовил[аи]?)\s+[\w.\-«»""]+|редактор\s+субтитров.*?корректор\s+[\w.]+(\s*[\w.]+)?|dimatorzok)[\s,.;:!?—–-]*",
+            @"\s*\b(субтитры\s+(сделал[аи]?|создавал[аи]?|делал[аи]?|подогнал[аи]?|подготовил[аи]?)\s+[\w.\-«»""]+|редактор\s+субтитров.*?корректор\s+[\w.]+(\s*[\w.]+)?|редактор\s+субтитров\s+[\w.]+(\s*[\w.]+)?|dimatorzok)[\s,.;:!?—–-]*",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
         private static readonly string[] Hallucinations =
@@ -256,6 +281,19 @@ namespace ghostline
             text = SubtitleCredits.Replace(text, " ").Trim();
             if (!text.Any(char.IsLetterOrDigit)) return "";
             return Hallucinations.Any(h => Norm(text) == Norm(h)) ? "" : text;
+        }
+
+        // На коротком шуме (дыхание, стук, пока собеседник держит на удержании) Whisper с подсказкой
+        // выдаёт слова из неё: 2026-10-02 «Финанский кодекс» дважды. Короткая реплика, все слова
+        // которой совпадают со словами подсказки по первым четырём буквам, — выбрасывается.
+        private static bool IsPromptEcho(string text, string prompt)
+        {
+            if (string.IsNullOrWhiteSpace(prompt)) return false;
+            string Stem(string w) => w.Length > 4 ? w[..4] : w;
+            var words = Norm(text).Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length >= 3).ToList();
+            if (words.Count == 0 || words.Count > 3) return false;
+            var stems = Norm(prompt).Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(Stem).ToHashSet();
+            return words.All(w => stems.Contains(Stem(w)));
         }
 
         private static string Trim(string s, int max) =>

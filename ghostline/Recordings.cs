@@ -164,10 +164,87 @@ namespace ghostline
             return result;
         }
 
-        // WAV → смещение и длина блока data, если это PCM 16 бит моно (так пишет Asterisk).
-        private static bool TryPcm16(byte[] wav, out int dataOffset, out int dataLength)
+        // Куски дорожки со звуком (начало и конец в секундах) — расшифровываются по отдельности.
+        // Целиком Whisper на длинной дорожке «залипает»: 2026-10-02 после двух минут повторов
+        // «Ваш звонок является первым в очереди» весь остаток звонка (с оператором) пришёл одной
+        // галлюцинацией «Субтитры создавал…», а слова одной фразы разъехались на три минуты.
+        // Звук — кадры 20 мс громче порога; паузы короче MergeGap склеиваются, куски до MaxChunk
+        // (окно Whisper — 30 с) собираются из соседних фраз с паузой не больше ChunkGap.
+        // null — не PCM 16 бит моно, тогда дорожка уходит целиком.
+        public static List<(double s, double e)> SoundChunks(byte[] wav)
         {
-            dataOffset = dataLength = 0;
+            if (!TryPcm16(wav, out int off, out int len, out int rate)) return null;
+            const double Threshold = 200;   // ≈ −44 dBFS: выше шума линии, ниже тихого собеседника
+            const double FrameSec = 0.02, MergeGap = 0.5, MinSound = 0.3, ChunkGap = 2.0, MaxChunk = 28.0, Pad = 0.3;
+            int frame = (int)(rate * FrameSec);
+            int frames = len / (frame * 2);
+            double total = len / 2.0 / rate;
+
+            // Отрезки со звуком
+            var sounds = new List<(double s, double e)>();
+            int start = -1;
+            for (int f = 0; f <= frames; f++)
+            {
+                bool active = false;
+                if (f < frames)
+                {
+                    double sum = 0;
+                    int b = off + f * frame * 2;
+                    for (int i = 0; i < frame; i++)
+                    {
+                        short v = (short)(wav[b + i * 2] | (wav[b + i * 2 + 1] << 8));
+                        sum += (double)v * v;
+                    }
+                    active = Math.Sqrt(sum / frame) >= Threshold;
+                }
+                if (active && start < 0) start = f;
+                else if (!active && start >= 0)
+                {
+                    double s = start * FrameSec, e = f * FrameSec;
+                    if (sounds.Count > 0 && s - sounds[^1].e < MergeGap) sounds[^1] = (sounds[^1].s, e);
+                    else sounds.Add((s, e));
+                    start = -1;
+                }
+            }
+            sounds.RemoveAll(x => x.e - x.s < MinSound);
+
+            // Отрезки → куски: длинный звук (музыка ожидания) режется по MaxChunk
+            var chunks = new List<(double s, double e)>();
+            foreach (var (s0, e0) in sounds)
+            {
+                for (double s = s0; s < e0; s += MaxChunk)
+                {
+                    double e = Math.Min(e0, s + MaxChunk);
+                    if (chunks.Count > 0 && s - chunks[^1].e <= ChunkGap && e - chunks[^1].s <= MaxChunk)
+                        chunks[^1] = (chunks[^1].s, e);
+                    else
+                        chunks.Add((s, e));
+                }
+            }
+            return chunks.Select(c => (Math.Max(0, c.s - Pad), Math.Min(total, c.e + Pad))).ToList();
+        }
+
+        // Кусок WAV с s по e секунд: тот же заголовок, другие размеры.
+        public static byte[] Slice(byte[] wav, double s, double e)
+        {
+            if (!TryPcm16(wav, out int off, out int len, out int rate)) return null;
+            int from = Math.Min(len, (int)(s * rate) * 2), to = Math.Min(len, (int)(e * rate) * 2);
+            if (to <= from) return null;
+            var result = new byte[off + to - from];
+            Array.Copy(wav, result, off);
+            Array.Copy(wav, off + from, result, off, to - from);
+            BitConverter.GetBytes(result.Length - 8).CopyTo(result, 4);
+            BitConverter.GetBytes(to - from).CopyTo(result, off - 4);
+            return result;
+        }
+
+        private static bool TryPcm16(byte[] wav, out int dataOffset, out int dataLength) =>
+            TryPcm16(wav, out dataOffset, out dataLength, out _);
+
+        // WAV → смещение и длина блока data, если это PCM 16 бит моно (так пишет Asterisk).
+        private static bool TryPcm16(byte[] wav, out int dataOffset, out int dataLength, out int rate)
+        {
+            dataOffset = dataLength = rate = 0;
             if (wav == null || wav.Length < 44 || System.Text.Encoding.ASCII.GetString(wav, 0, 4) != "RIFF") return false;
             int pos = 12;
             short format = 0, channels = 0, bits = 0;
@@ -179,13 +256,14 @@ namespace ghostline
                 {
                     format = BitConverter.ToInt16(wav, pos + 8);
                     channels = BitConverter.ToInt16(wav, pos + 10);
+                    rate = BitConverter.ToInt32(wav, pos + 12);
                     bits = BitConverter.ToInt16(wav, pos + 22);
                 }
                 else if (id == "data")
                 {
                     dataOffset = pos + 8;
                     dataLength = Math.Min(size, wav.Length - dataOffset);
-                    return format == 1 && channels == 1 && bits == 16;
+                    return format == 1 && channels == 1 && bits == 16 && rate > 0;
                 }
                 pos += 8 + size + (size & 1);
             }
