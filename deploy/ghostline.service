@@ -1,0 +1,24 @@
+[Unit]
+Description=ghostline - GSM lines to Telegram and web (SMS, calls, transcripts)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ghostline
+Group=ghostline
+WorkingDirectory=/opt/ghostline/app
+# contacts.csv and ghostline.db live next to the config; logs go to /var/log/ghostline.
+ExecStart=/opt/ghostline/app/ghostline /etc/ghostline/ghostline.yaml
+# No ICU in minimal Debian images.
+Environment=DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=true
+CacheDirectory=ghostline
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/cache/ghostline
+Restart=always
+RestartSec=5
+# The process does not exit on SIGTERM by itself; SQLite writes are atomic,
+# so there is no point waiting the default 90 s.
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

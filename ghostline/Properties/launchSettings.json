@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "ghostline": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}
