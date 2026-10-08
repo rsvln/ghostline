@@ -1,0 +1,25 @@
+<Project>
+  <PropertyGroup>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <!--
+    Version comes from version.txt ("Major.Minor.Patch"), read at evaluation time.
+    It is bumped by scripts/bump-version.ps1 before a release build, never during a build.
+  -->
+  <PropertyGroup>
+    <GhostlineVersionFile>$(MSBuildThisFileDirectory)version.txt</GhostlineVersionFile>
+    <GhostlineVersion Condition="Exists('$(GhostlineVersionFile)')">$([System.IO.File]::ReadAllText('$(GhostlineVersionFile)').Trim())</GhostlineVersion>
+    <GhostlineVersion Condition="'$(GhostlineVersion)' == ''">1.0.0</GhostlineVersion>
+
+    <GhostlineMajor>$([System.Version]::Parse('$(GhostlineVersion)').Major)</GhostlineMajor>
+    <GhostlineMinor>$([System.Version]::Parse('$(GhostlineVersion)').Minor)</GhostlineMinor>
+    <GhostlinePatch>$([System.Version]::Parse('$(GhostlineVersion)').Build)</GhostlinePatch>
+
+    <Version>$(GhostlineVersion)</Version>
+    <AssemblyVersion>$(GhostlineMajor).$(GhostlineMinor).$(GhostlinePatch).0</AssemblyVersion>
+    <FileVersion>$(GhostlineMajor).$(GhostlineMinor).$(GhostlinePatch).0</FileVersion>
+    <GhostlineBuildDate>$([System.DateTime]::UtcNow.ToString("yyyy.MM.dd"))</GhostlineBuildDate>
+    <InformationalVersion>$(GhostlineVersion)+$(GhostlineBuildDate)</InformationalVersion>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="{{web.lang}}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ghostline</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=%VERSION%">
+<meta name="theme-color" content="#0d1117">
+<link rel="stylesheet" href="/css/app.css?v=%VERSION%">
+</head>
+<body>
+
+<header>
+  <div class="dot"></div>
+  <h1><a href="/">ghostline</a></h1>
+  <div class="header-status" id="header-status"></div>
+  <div class="tabs">
+    <a class="tab" data-tab="calls" href="/calls" id="tab-calls" hidden>{{web.tab.calls}}</a>
+    <a class="tab" data-tab="sms" href="/sms">{{web.tab.sms}}</a>
+    <a class="tab" data-tab="log" href="/log">{{web.tab.log}}</a>
+    <a class="tab" data-tab="status" href="/status">{{web.tab.status}}</a>
+    <a class="tab" data-tab="config" href="/config">{{web.tab.config}}</a>
+    <a class="tab" data-tab="about" href="/about">{{web.tab.about}}</a>
+  </div>
+</header>
+
+<div class="panels">
+
+  <div class="panel" id="panel-calls">
+    <div class="toolbar">
+      <select id="calls-line" onchange="navigate(callsUrl())"><option value="">{{web.calls.all_lines}}</option></select>
+      <select id="calls-dir" onchange="navigate(callsUrl())">
+        <option value="">{{web.all}}</option>
+        <option value="in">{{web.calls.dir.in}}</option>
+        <option value="out">{{web.calls.dir.out}}</option>
+      </select>
+      <label><input type="checkbox" id="calls-rec" checked onchange="navigate(callsUrl())"> {{web.calls.with_recording}}</label>
+      <label><input type="checkbox" id="calls-missed" onchange="if (this.checked) document.getElementById('calls-rec').checked = false; navigate(callsUrl())"> {{web.calls.missed_only}}</label>
+      <input type="text" id="calls-q" placeholder="{{web.calls.search}}" oninput="debounced(() => navigate(callsUrl(), true))" style="width:220px">
+      <!-- Даты — текстом: у <input type="date"> формат навязывает браузер. -->
+      <label>{{web.calls.date_from}}</label>
+      <input type="text" id="calls-from" class="date" placeholder="{{web.calls.date_format}}" onchange="navigate(callsUrl())">
+      <label>{{web.calls.date_to}}</label>
+      <input type="text" id="calls-to" class="date" placeholder="{{web.calls.date_format}}" onchange="navigate(callsUrl())">
+      <button class="btn" onclick="loadCalls()">{{web.refresh}}</button>
+      <a class="btn" href="/calls">{{web.clear}}</a>
+      <span class="count" id="calls-count"></span>
+    </div>
+    <div class="scroll" id="calls-container"></div>
+  </div>
+
+  <div class="panel" id="panel-sms">
+    <div class="toolbar">
+      <label>{{web.sms.rows}}</label>
+      <input type="number" id="sms-limit" value="200" min="10" max="5000" style="width:70px" onchange="loadSms()">
+      <label>{{web.sms.dir}}</label>
+      <select id="sms-dir" onchange="navigate(smsUrl())">
+        <option value="">{{web.all}}</option>
+        <option value="in">in</option>
+        <option value="out">out</option>
+      </select>
+      <label>{{web.sms.channel}}</label>
+      <select id="sms-line" onchange="navigate(smsUrl())"><option value="">{{web.all}}</option></select>
+      <label>{{web.sms.text}}</label>
+      <input type="text" id="sms-q" placeholder="{{web.sms.search}}" oninput="debounced(() => navigate(smsUrl(), true))" style="width:150px">
+      <button class="btn" onclick="loadSms()">{{web.refresh}}</button>
+      <button class="btn" onclick="exportSms()">{{web.sms.export}}</button>
+      <button class="btn primary" onclick="openSendModal()">{{web.sms.send}}</button>
+      <div class="autoscroll-toggle">
+        <label>{{web.autorefresh}}</label>
+        <select id="sms-refresh" onchange="setSmsRefresh()">
+          <option value="0">{{web.off}}</option>
+          <option value="5000">5s</option>
+          <option value="10000">10s</option>
+          <option value="30000">30s</option>
+        </select>
+      </div>
+    </div>
+    <div class="mono-scroll" id="sms-container"></div>
+  </div>
+
+  <div class="panel" id="panel-log">
+    <div class="toolbar">
+      <label>{{web.log.lines}}</label>
+      <input type="number" id="log-lines" value="200" min="10" max="2000" style="width:70px" onchange="loadLog()">
+      <button class="btn" onclick="loadLog()">{{web.refresh}}</button>
+      <div class="autoscroll-toggle">
+        <label>{{web.autorefresh}}</label>
+        <select id="log-refresh" onchange="setLogRefresh()">
+          <option value="0">{{web.off}}</option>
+          <option value="5000" selected>5s</option>
+          <option value="10000">10s</option>
+          <option value="30000">30s</option>
+        </select>
+      </div>
+    </div>
+    <div class="mono-scroll" id="log-container"></div>
+  </div>
+
+  <div class="panel" id="panel-status">
+    <div class="toolbar">
+      <button class="btn" onclick="loadStatus()">{{web.refresh}}</button>
+    </div>
+    <div class="scroll">
+      <div class="status-grid" id="status-cards"></div>
+      <div class="section">
+        <table class="stat-table">
+          <thead><tr><th>{{web.status.channel}}</th><th>{{web.status.in}}</th><th>{{web.status.out}}</th></tr></thead>
+          <tbody id="status-stats-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-config">
+    <div class="toolbar">
+      <button class="btn" id="config-mode-form" onclick="navigate('/config')">{{web.config.form}}</button>
+      <button class="btn" id="config-mode-yaml" onclick="navigate('/config/yaml')">{{web.config.yaml}}</button>
+      <button class="btn" onclick="saveConfig(false)">{{web.config.save}}</button>
+      <button class="btn" onclick="restartService()">{{web.config.restart}}</button>
+      <button class="btn primary" onclick="saveConfig(true)">{{web.config.save_restart}}</button>
+      <span class="config-hint">{{web.config.hint}}</span>
+    </div>
+    <div id="config-form" class="settings-tree"></div>
+    <div id="config-yaml">
+      <div id="config-editor-host" style="display:none"></div>
+      <textarea id="config-editor" spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-about">
+    <div class="scroll">
+      <div class="about-head">
+        <div class="about-name">ghostline</div>
+        <div class="about-meta">
+          <span>{{web.about.version}} <b>%VERSION%</b></span>
+          <span>{{web.about.build}} <b>%BUILD%</b></span>
+          <a href="%URL%" target="_blank" rel="noopener">GitHub</a>
+          <span>Apache-2.0</span>
+        </div>
+      </div>
+      <div class="markdown" id="about-readme"></div>
+    </div>
+  </div>
+
+</div>
+
+<footer class="app-footer">
+  <span>ghostline <b>v%VERSION%</b></span>
+  <span>{{web.about.build}} %BUILD%</span>
+  <span id="footer-mode"></span>
+  <a href="%URL%" target="_blank" rel="noopener">GitHub</a>
+</footer>
+
+<div class="modal-overlay" id="send-modal">
+  <div class="modal">
+    <h2>{{web.sms.modal.title}}</h2>
+    <div class="modal-field">
+      <label>{{web.sms.modal.channel}}</label>
+      <select id="send-channel"></select>
+    </div>
+    <div class="modal-field">
+      <label>{{web.sms.modal.number}}</label>
+      <input type="text" id="send-number" placeholder="+79000000000">
+    </div>
+    <div class="modal-field">
+      <label>{{web.sms.modal.message}}</label>
+      <textarea id="send-text" placeholder="{{web.sms.modal.message_placeholder}}"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeSendModal()">{{web.sms.modal.cancel}}</button>
+      <button class="btn primary" onclick="submitSend()">{{web.sms.modal.send}}</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="busy" id="busy"><div class="spinner"></div><div id="busy-text"></div></div>
+
+<script src="/js/app.js?v=%VERSION%"></script>
+</body>
+</html>

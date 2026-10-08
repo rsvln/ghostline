@@ -278,6 +278,11 @@ text.
 authentication: it gives access to messages, recordings and to the
 configuration, which contains credentials.
 
+Every tab has its own address (`/calls`, `/sms`, `/log`, `/status`,
+`/config`, `/about`) with the filters in the query string, so a view can be
+reloaded, bookmarked or shared, and the browser's Back and Forward buttons
+work. `/` opens the tab used last.
+
 - **Calls** (`mode: full`) — journal with filters (line, direction,
   recorded, missed, dates) and search by name, number or words from the
   conversation. A click on a row opens the transcript. Buttons: play, download
@@ -287,9 +292,23 @@ configuration, which contains credentials.
 - **SMS** — history, filters, export, sending.
 - **Log** — the text log, newest first.
 - **Status** — state of gateways, Telegram and queues.
-- **Config** — YAML editor with syntax highlighting and validation;
-  **Save and restart** applies the changes (relies on `Restart=always` in
-  systemd).
+- **Config** — two editors for the same file:
+  - **Form**: sections in a tree (general, Telegram, web, gateways, lines,
+    calls, transcription, GoIP); gateways and lines can be added and removed.
+    Only changed values are written, in place, so comments and the layout of
+    the file stay as they are.
+  - **YAML** (`/config/yaml`): the whole file with syntax highlighting.
+
+  The file is checked before saving and the previous version is kept in
+  `ghostline.yaml.bak`. **Save and restart** and **Restart** restart the
+  service (relies on `Restart=always` in systemd or a restart policy in
+  Docker); the page reloads when it is back.
+- **About** — version and this README.
+
+The footer shows the version and the build date. The version is
+`Major.Minor.Patch` in `ghostline/version.txt`;
+[scripts/bump-version.ps1](scripts/bump-version.ps1) raises the patch number
+before a build when the sources changed since the previous one.
 
 ## Storage and reliability
 

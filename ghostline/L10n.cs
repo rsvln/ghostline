@@ -24,6 +24,8 @@ namespace ghostline
             return args.Length == 0 ? s : string.Format(s, args);
         }
 
+        public bool Has(string key) => strings.ContainsKey(key) || fallback.ContainsKey(key);
+
         // Строки с заданными префиксами (с учётом en) — для скриптов веб-страницы.
         public Dictionary<string, string> Export(params string[] prefixes)
         {
