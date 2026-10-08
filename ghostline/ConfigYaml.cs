@@ -5,19 +5,19 @@ using YamlDotNet.RepresentationModel;
 
 namespace ghostline
 {
-    // Правка ghostline.yaml из веб-интерфейса. Значения меняются по месту (по позиции в тексте),
-    // поэтому комментарии и порядок ключей сохраняются. Как в lookout.
+    // Editing ghostline.yaml from the web UI. Values are replaced in place (by their position in the text),
+    // so comments and the order of keys are kept. As in lookout.
     public static class ConfigYaml
     {
-        // Имя шлюза или линии: на него ссылаются селекторы путей (gateways[id=…], channels[name=…]).
+        // Name of a gateway or a line: path selectors refer to it (gateways[id=...], channels[name=...]).
         public static readonly Regex NameOk = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.CultureInvariant);
 
-        // Ключи-списки: значение из формы — через запятую, в YAML — [a, b].
+        // List keys: a comma-separated value in the form, [a, b] in the YAML.
         static readonly HashSet<string> ListKeys = new(StringComparer.OrdinalIgnoreCase) { "chat_ids" };
 
-        // Значение по пути: "web.password", "gateways[id=pbx].ami_port", "channels[name=home].calls.voice".
-        // Нет ключа — добавляется (с недостающими промежуточными разделами), нет элемента списка
-        // с таким селектором — добавляется элемент. Пустое значение для отсутствующего ключа не пишется.
+        // Value at a path: "web.password", "gateways[id=pbx].ami_port", "channels[name=home].calls.voice".
+        // A missing key is added (with any missing intermediate sections); a missing list item with
+        // this selector is added. An empty value for a missing key is not written.
         public static string Set(string yaml, string path, string value)
         {
             yaml ??= "";
@@ -39,8 +39,8 @@ namespace ghostline
             catch (YamlDotNet.Core.YamlException) { return yaml; }
         }
 
-        // Поля формы → YAML. Поле-селектор (id шлюза, name линии) применяется последним:
-        // иначе после переименования остальные поля того же элемента его не найдут.
+        // Form fields to YAML. The selector field (gateway id, line name) is applied last;
+        // otherwise, after a rename, the other fields of the same item would not find it.
         public static string Apply(string yaml, IDictionary<string, string> fields)
         {
             if (fields == null) return yaml;
@@ -58,7 +58,7 @@ namespace ghostline
             return yaml;
         }
 
-        // Удаляет элемент списка, например "gateways[id=goip1]". Последний элемент — список становится [].
+        // Removes a list item, for example "gateways[id=goip1]". When the last item goes, the list becomes [].
         public static string Remove(string yaml, string path)
         {
             if (string.IsNullOrEmpty(yaml) || string.IsNullOrEmpty(path)) return yaml;
@@ -102,7 +102,7 @@ namespace ghostline
             return "\"" + v.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
         }
 
-        // ---- обход дерева --------------------------------------------------------------------------
+        // ---- walking the tree --------------------------------------------------------------------------
 
         static YamlNode Root(string yaml)
         {
@@ -119,8 +119,8 @@ namespace ghostline
             return parts;
         }
 
-        // Конец текста узла: последний скаляр или закрывающая скобка списка. У пустого "[]"
-        // YamlDotNet отдаёт конец до скобок — новая строка вставлялась внутрь "chat_ids: []".
+        // End of the node text: the last scalar or the closing bracket of a list. For an empty "[]"
+        // YamlDotNet reports the end before the brackets, and a new line was inserted inside "chat_ids: []".
         static int ContentEnd(string yaml, YamlNode node)
         {
             switch (node)
@@ -152,7 +152,7 @@ namespace ghostline
             return i >= 0 && i < yaml.Length && yaml[i] is '[' or '{';
         }
 
-        // Конец строки, на которой стоит pos (новая строка вставляется после неё, комментарий остаётся на месте).
+        // End of the line pos is on (a new line is inserted after it, a comment stays where it is).
         static int LineEnd(string yaml, int pos)
         {
             pos = Math.Clamp(pos, 0, yaml.Length);
@@ -198,8 +198,8 @@ namespace ghostline
             return true;
         }
 
-        // Ключа нет: ищется самый глубокий существующий раздел пути, в него дописываются
-        // недостающие разделы и ключ — с отступом соседних ключей.
+        // Missing key: find the deepest existing section of the path and add the missing
+        // sections and the key to it, indented like the neighbouring keys.
         static string TryInsert(string yaml, YamlNode root, List<(string key, string selector)> parts, string value)
         {
             YamlMappingNode map = null;
@@ -283,7 +283,7 @@ namespace ghostline
             return null;
         }
 
-        // Нет элемента списка с селектором field=value — добавляет "- field: value" (и сам список, если его нет).
+        // No list item with the selector field=value: adds "- field: value" (and the list itself if missing).
         static bool TryEnsureSelector(string yaml, YamlNode root, List<(string key, string selector)> parts, out string next)
         {
             next = yaml;
@@ -341,7 +341,7 @@ namespace ghostline
             string line = "- " + field + ": " + FormatScalar(want);
             if (seq.Children.Count == 0)
             {
-                // "key: []" → блочный список с одним элементом
+                // "key: []" to a block list with one item
                 if (!SpanOf(seq, yaml, out int start, out int end) || end < start) return yaml;
                 int i = start;
                 while (i > 0 && yaml[i - 1] != '\n' && yaml[i - 1] != '\r') i--;
@@ -387,7 +387,7 @@ namespace ghostline
         }
     }
 
-    // Форма настроек: разделы с полями, которые веб рисует деревом; обратно поля ложатся в YAML по path.
+    // Settings form: sections with fields that the web UI draws as a tree; fields go back into the YAML by path.
     public static class SettingsForm
     {
         public record Field(string path, string type, string value, string label, string[] options = null);
@@ -488,7 +488,7 @@ namespace ghostline
         static string n(int? v) => v is null or 0 ? "" : v.Value.ToString(CultureInfo.InvariantCulture);
         static string b(bool v) => v ? "true" : "false";
 
-        // Подпись поля: web.field.<путь без селекторов>, например web.field.calls.cdr_db.host → web.field.cdr_db.host.
+        // Field label: web.field.<path without selectors>, for example web.field.calls.cdr_db.host.
         static string Label(string path)
         {
             string plain = string.Join(".", ConfigYaml.ParsePath(path).Select(p => p.key));

@@ -9,8 +9,8 @@ namespace ghostline
         public string Direction { get; set; }   // "in" / "out"
         public string Gateway { get; set; }      // "y" / "g" / "q"
         public string Channel { get; set; }
-        public string Peer { get; set; }         // номер отправителя (in) или получателя (out)
-        public string Note { get; set; }         // контакт (in) / источник отправки (out)
+        public string Peer { get; set; }         // sender number (in) or recipient number (out)
+        public string Note { get; set; }         // contact (in) / origin of the send (out)
         public string Content { get; set; }
     }
 
@@ -39,8 +39,8 @@ namespace ghostline
         public int Out { get; set; }
     }
 
-    // Хранилище ghostline: один SQLite-файл рядом с конфигом. Здесь — подключение,
-    // история SMS и очереди отправки; звонки — в Store.Calls.cs.
+    // ghostline storage: one SQLite file next to the config. Here: the connection,
+    // SMS history and send queues; calls are in Store.Calls.cs.
     public static partial class Store
     {
         private static string _dbPath;
@@ -162,7 +162,7 @@ namespace ghostline
             return result;
         }
 
-        // --- Персистентная очередь отправки в Telegram ---
+        // --- Persistent queue of messages to Telegram ---
 
         public static void EnqueueTelegramMessage(string chatId, string text)
         {
@@ -244,7 +244,7 @@ namespace ghostline
             }
         }
 
-        // --- Персистентная очередь отправки исходящих SMS (yeastar/goip/quectel) ---
+        // --- Persistent queue of outgoing SMS (yeastar/goip/quectel) ---
 
         public static void EnqueueOutgoingSms(string channelName, string number, string text, string sourceLabel)
         {
@@ -331,7 +331,7 @@ namespace ghostline
             }
         }
 
-        // --- Статистика для вкладки Status ---
+        // --- Statistics for the Status tab ---
 
         public static List<ChannelStat> GetStats()
         {

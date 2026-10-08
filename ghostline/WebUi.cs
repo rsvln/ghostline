@@ -50,21 +50,21 @@ namespace ghostline
                         await context.Response.WriteAsync("Unauthorized");
                     });
 
-                    // Страница — по адресу каждого вида (вид выбирает скрипт по адресу).
+                    // The page, at the address of every view (the script picks the view from the address).
                     foreach (var path in new[] { "/", "/calls", "/sms", "/log", "/status", "/config", "/config/yaml", "/about" })
                         app.MapGet(path, () => Results.Content(Localize(Asset("index.html")), "text/html; charset=utf-8"));
                     app.MapGet("/js/app.js", () => Results.Content(Localize(Asset("app.js")), "text/javascript; charset=utf-8"));
                     app.MapGet("/css/app.css", () => Results.Content(Asset("app.css"), "text/css; charset=utf-8"));
                     app.MapGet("/favicon.svg", () => Results.Content(Asset("favicon.svg"), "image/svg+xml"));
 
-                    // Редактор YAML для вкладки Config — бандл CodeMirror, отдаётся локально (без интернета).
+                    // YAML editor for the Config tab: a CodeMirror bundle served locally (no internet needed).
                     app.MapGet("/js/yaml-editor.js", () =>
                     {
                         string path = Path.Combine(AppContext.BaseDirectory, "web", "yaml-editor.js");
                         return File.Exists(path) ? Results.File(path, "text/javascript") : Results.NotFound();
                     });
 
-                    // Версия и README для вкладки About.
+                    // Version and README for the About tab.
                     app.MapGet("/api/about", () =>
                     {
                         string readmePath = Path.Combine(AppContext.BaseDirectory, "README.md");
@@ -87,7 +87,7 @@ namespace ghostline
                         var gateways = (Program.settings?.gateways ?? new List<Gateway>())
                             .Select(g => new { g.id, g.type, g.ip })
                             .ToList();
-                        // Telegram — не физический шлюз из конфига, но карточка/точка в UI нужна и для него.
+                        // Telegram is not a physical gateway from the config, but the UI needs a card and a dot for it too.
                         gateways.Add(new { id = "telegram", type = "telegram", ip = "" });
                         return Results.Ok(new
                         {
@@ -137,7 +137,7 @@ namespace ghostline
                         return Results.Ok(new { ok, error, queued = ok });
                     });
 
-                    // --- Звонки (mode "full") ---
+                    // --- Calls (mode "full") ---
 
                     app.MapGet("/api/mode", () => Results.Ok(new
                     {
@@ -154,8 +154,8 @@ namespace ghostline
                         return Results.Ok(rows);
                     });
 
-                    // Запись берётся с АТС при каждом запросе (файлы небольшие: ~1 МБ на минуту),
-                    // Range отдаёт сам ASP.NET — перемотка в плеере работает.
+                    // The recording is fetched from the PBX on every request (files are small: ~1 MB per minute);
+                    // ASP.NET handles Range itself, so seeking in the player works.
                     app.MapGet("/api/calls/{id:long}/audio", async (long id, bool? download) =>
                     {
                         var call = Store.GetCall(id);
@@ -169,7 +169,7 @@ namespace ghostline
                         return Results.File(wav, "audio/wav", name, enableRangeProcessing: true);
                     });
 
-                    // Расшифровка текстовым файлом: шапка звонка и реплики с отметками времени.
+                    // Transcript as a text file: the call header and lines with timestamps.
                     app.MapGet("/api/calls/{id:long}/transcript", (long id) =>
                     {
                         var call = Store.GetCall(id);
@@ -184,7 +184,7 @@ namespace ghostline
                                             "text/plain; charset=utf-8", Program.CallFileBase(call) + ".txt");
                     });
 
-                    // Расшифровка в PDF — тот же вид, что во вкладке: для почты и печати.
+                    // Transcript as PDF, looking like the tab: for e-mail and printing.
                     app.MapGet("/api/calls/{id:long}/transcript.pdf", (long id) =>
                     {
                         var call = Store.GetCall(id);
@@ -243,7 +243,7 @@ namespace ghostline
                         return SaveYaml(configPath, data.content, data.restart);
                     });
 
-                    // Форма настроек (дерево разделов) — поля из текущего файла.
+                    // Settings form (a tree of sections): fields from the current file.
                     app.MapGet("/api/settings", () =>
                     {
                         try
@@ -256,7 +256,7 @@ namespace ghostline
                         }
                     });
 
-                    // Изменённые поля формы ложатся в YAML по месту; удалённые шлюзы и линии вырезаются.
+                    // Changed form fields are written into the YAML in place; removed gateways and lines are cut out.
                     app.MapPost("/api/settings", async (HttpRequest req) =>
                     {
                         var data = await ReadJson<SettingsPayload>(req);
@@ -300,7 +300,7 @@ namespace ghostline
 
         private static string CallFileName(CallRecord c) => Program.CallFileBase(c) + ".wav";
 
-        // Сохраняет конфиг, если он читается; предыдущая версия — в .bak. С restart — перезапуск.
+        // Saves the config if it parses; the previous version goes to .bak. With restart, restarts.
         private static IResult SaveYaml(string configPath, string content, bool restart)
         {
             try
@@ -326,8 +326,8 @@ namespace ghostline
             return Results.Ok(new { ok = true, restarting = restart });
         }
 
-        // Выходим — systemd (Restart=always) или Docker (restart: unless-stopped) поднимет службу
-        // уже с новыми настройками.
+        // Exit: systemd (Restart=always) or Docker (restart: unless-stopped) brings the service
+        // back with the new settings.
         private static void RestartSoon() =>
             _ = Task.Run(async () => { await Task.Delay(500); Environment.Exit(0); });
 
@@ -341,14 +341,14 @@ namespace ghostline
                 new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         }
 
-        // Файл страницы из web/ рядом с приложением.
+        // A page file from web/ next to the app.
         private static string Asset(string name)
         {
             string path = Path.Combine(AppContext.BaseDirectory, "web", name);
             return File.Exists(path) ? File.ReadAllText(path) : "";
         }
 
-        // {{ключ}} в странице — строка веб-языка; скриптам — словарь web.* как I18N; %VERSION% и др. — версия.
+        // {{key}} in the page is a string of the web language; scripts get the web.* dictionary as I18N; %VERSION% etc. is the version.
         private static string Localize(string html)
         {
             html = System.Text.RegularExpressions.Regex.Replace(html, @"\{\{([\w.]+)\}\}",

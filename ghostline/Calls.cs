@@ -2,9 +2,9 @@ using MySqlConnector;
 
 namespace ghostline
 {
-    // Журнал звонков: опрос CDR АТС (asteriskcdrdb.cdr) и превращение строк в звонки.
-    // Опрос, а не события AMI: переживает перезапуски обеих сторон и сам догоняет пропущенное.
-    // Одна строка CDR = один звонок (на этой АТС каждый звонок — одна строка, свой linkedid).
+    // Call journal: polling the PBX CDR (asteriskcdrdb.cdr) and turning rows into calls.
+    // Polling rather than AMI events: survives restarts of both sides and catches up on its own.
+    // One CDR row = one call (on this PBX every call is one row with its own linkedid).
     internal partial class Program
     {
         private const string KvInitialized = "calls_initialized";
@@ -44,9 +44,9 @@ namespace ghostline
             }
         }
 
-        // Строка CDR пишется при отбое, а calldate — время начала. Длинный разговор,
-        // начавшийся раньше последнего увиденного, появится позже — поэтому окно
-        // перекрывается на сутки назад, а дубли отсекает UNIQUE(uniqueid).
+        // A CDR row is written at hangup while calldate is the start time. A long call that
+        // started before the last one seen shows up later, so the window overlaps one day
+        // back and duplicates are dropped by UNIQUE(uniqueid).
         private static async Task<int> PollCdrOnce(string connectionString)
         {
             bool initialized = Store.GetKv(KvInitialized) != null;
@@ -88,14 +88,14 @@ namespace ghostline
             {
                 if (row.CallDate > max) max = row.CallDate;
 
-                // Окно опроса перекрывается на сутки — известные звонки пропускаем сразу:
-                // без HEAD к АТС и без траты номеров AUTOINCREMENT на INSERT OR IGNORE.
+                // The poll window overlaps by a day, so known calls are skipped right away:
+                // no HEAD to the PBX and no AUTOINCREMENT numbers wasted on INSERT OR IGNORE.
                 if (Store.CallExists(row.UniqueId)) continue;
 
                 var (call, ch) = MapCdr(row);
                 if (call == null) continue;
 
-                // Размер записи узнаём сразу (HEAD), чтобы не показывать и не расшифровывать пустые.
+                // The recording size is checked right away (HEAD) so empty ones are neither shown nor transcribed.
                 if (call.RecPath != null)
                     call.RecSize = await Recordings.HeadSize(call.RecPath);
 
@@ -103,12 +103,12 @@ namespace ghostline
                 call.TrState = TranscribeEnabled && call.Billsec > 0 && recOk ? "pending" : "none";
 
                 long id = Store.InsertCall(call);
-                if (id == 0) continue;   // уже есть
+                if (id == 0) continue;   // already there
                 call.Id = id;
                 added++;
                 Console.WriteLine($"Call {call.Ts} {call.Direction} {call.Channel} {call.Peer} {call.Billsec}s rec={call.RecSize}");
 
-                // При первом запуске импортируется вся история — её в Telegram и журнал не шлём.
+                // On the first start the whole history is imported; it is not sent to Telegram or the log.
                 if (initialized)
                 {
                     EnqueueCallNotifications(call, ch);
@@ -148,9 +148,9 @@ namespace ghostline
             return dash > 0 ? rest.Substring(0, dash) : rest;
         }
 
-        // Входящий: GSM-канал — источник (channel), либо линия в did (звонок пришёл через
-        // Local-канал). Исходящий: GSM-канал — получатель (dstchannel). Остальное
-        // (внутренние звонки 11↔12, служебные каналы SMS/USSD) — не звонки по линиям.
+        // Incoming: the GSM channel is the source (channel), or the line is in did (the call came
+        // through a Local channel). Outgoing: the GSM channel is the destination (dstchannel). Everything
+        // else (internal calls 11<->12, service channels for SMS/USSD) are not line calls.
         private static (CallRecord, Channel) MapCdr(CdrRow r)
         {
             if (r.Dst is "sms" or "ussd") return (null, null);
@@ -187,7 +187,7 @@ namespace ghostline
             }, ch);
         }
 
-        // Звонок в текстовый журнал — рядом с SMS, тем же форматом: «📞 Входящий 0:52».
+        // A call in the text log, next to SMS and in the same format: "📞 Incoming 0:52".
         private static void LogCall(CallRecord c)
         {
             if (!settings.logger.file) return;

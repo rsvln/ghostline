@@ -3,8 +3,8 @@ using YamlDotNet.Serialization.NamingConventions;
 
 namespace ghostline
 {
-    // Физический шлюз. Может быть несколько шлюзов одного типа (например,
-    // два GoIP-бокса на разных IP) — каждый со своим id, адресом и кредами.
+    // A physical gateway. There can be several gateways of the same type (for example
+    // two GoIP boxes on different IPs), each with its own id, address and credentials.
     public class Gateway
     {
         public string id { get; set; }
@@ -18,33 +18,33 @@ namespace ghostline
 
     public class Channel
     {
-        // Id шлюза (Gateway.id), которому принадлежит эта SIM-линия.
+        // Id of the gateway (Gateway.id) this SIM line belongs to.
         public string gateway { get; set; }
         public string name { get; set; }
         public string pattern { get; set; }
-        // Для yeastar/goip — номер линии/порта в виде строки.
-        // Для quectel — имя устройства из quectel.conf ("gsm1", "gsm2", ...).
+        // For yeastar/goip: the line/port number as a string.
+        // For quectel: the device name from quectel.conf ("gsm1", "gsm2", ...).
         public string line { get; set; }
-        // Номер SIM этой линии (+7…) — в шапке расшифровки «Звонил / Кому» для внешних
-        // получателей; не задан — подставляется название линии.
+        // Own number of this SIM (+7...), shown in the "From / To" header of transcripts for
+        // external readers; when empty, the line name is used.
         public string number { get; set; }
-        // Что слать в Telegram по звонкам этой линии (только mode "full").
-        // Секции нет — всё включено, чаты общие.
+        // What to send to Telegram for calls on this line (mode "full" only).
+        // No section: everything on, common chats.
         public ChannelCalls calls { get; set; }
     }
 
     public class ChannelCalls
     {
-        public bool voice { get; set; } = true;       // голосовое с записью разговора
-        public bool transcript { get; set; } = true;  // расшифровка, дописывается в подпись позже
-        public bool missed { get; set; } = true;      // уведомление о пропущенном входящем
-        public List<string> chatIds { get; set; }     // пусто — общие telegram.chat_ids
+        public bool voice { get; set; } = true;       // voice message with the call recording
+        public bool transcript { get; set; } = true;  // transcript, added to the caption later
+        public bool missed { get; set; } = true;      // notification about a missed incoming call
+        public List<string> chatIds { get; set; }     // empty: the common telegram.chat_ids
     }
 
     public class CallsSettings
     {
         public CdrDbSettings cdrDb { get; set; }
-        // Каталог записей АТС по HTTP (Apache alias на /var/spool/asterisk/monitor).
+        // PBX recordings directory over HTTP (Apache alias to /var/spool/asterisk/monitor).
         public string recordingsUrl { get; set; }
         public int pollSeconds { get; set; } = 15;
         public TranscribeSettings transcribe { get; set; }
@@ -62,21 +62,21 @@ namespace ghostline
     public class TranscribeSettings
     {
         public bool enabled { get; set; }
-        // OpenAI-совместимый /v1/audio/transcriptions (speaches / faster-whisper).
+        // OpenAI-compatible /v1/audio/transcriptions (speaches / faster-whisper).
         public string url { get; set; }
         public string model { get; set; }
         public string language { get; set; } = "ru";
-        // Подсказка Whisper (initial_prompt): имена и термины, которые встречаются в разговорах —
-        // на именах собственных и терминах без неё больше всего ошибок. К ней автоматически
-        // добавляется имя собеседника из контактов.
+        // Whisper prompt (initial_prompt): names and terms that occur in the calls;
+        // proper names and terms produce most errors without it. The contact name of the
+        // other side is added automatically.
         public string prompt { get; set; }
     }
 
-    // Разделы настроек — как у frte2tg: telegram, web, logger, ...
+    // Settings sections, as in frte2tg: telegram, web, logger, ...
     public class Settings
     {
-        // "sms" — только SMS, как было; "full" — плюс звонки: журнал, записи,
-        // расшифровка, Telegram.
+        // "sms": SMS only, as before; "full": also calls (journal, recordings,
+        // transcription, Telegram).
         public string mode { get; set; } = "sms";
         public LocaleSettings locale { get; set; } = new();
         public TelegramSettings telegram { get; set; } = new();
@@ -91,24 +91,24 @@ namespace ghostline
         public bool FullMode => string.Equals(mode, "full", StringComparison.OrdinalIgnoreCase);
     }
 
-    // Языки — файлы locales/<язык>.json рядом с приложением (en, ru). Как в frte2tg.
+    // Languages: files locales/<language>.json next to the app (en, ru). As in frte2tg.
     public class LocaleSettings
     {
         public string @default { get; set; } = "en";
-        public string web { get; set; }        // пусто — default
-        public string telegram { get; set; }   // пусто — default
-        public string transcript { get; set; } // скачиваемая расшифровка (PDF, .txt); пусто — default
+        public string web { get; set; }        // empty: default
+        public string telegram { get; set; }   // empty: default
+        public string transcript { get; set; } // downloaded transcripts (PDF, .txt); empty: default
     }
 
     public class TelegramSettings
     {
         public string token { get; set; }
-        // Куда идут SMS (и звонки, если у линии нет своих). Только из этих чатов бот
-        // принимает команды на отправку SMS.
+        // Where SMS go (and calls, unless a line has its own chats). The bot accepts
+        // commands to send SMS only from these chats.
         public List<string> chatIds { get; set; } = new();
     }
 
-    // Веб-интерфейс; пустые user и password — без авторизации.
+    // Web interface; empty user and password: no authentication.
     public class WebSettings
     {
         public int port { get; set; } = 8889;
@@ -118,13 +118,13 @@ namespace ghostline
 
     public class LoggerSettings
     {
-        // Дублировать SMS в /var/log/ghostline/ghostline_ДАТА.log.
+        // Also write SMS to /var/log/ghostline/ghostline_DATE.log.
         public bool file { get; set; }
     }
 
     public class GoipSettings
     {
-        // SMTP-приёмник: GoIP-шлюзы шлют входящие SMS письмами.
+        // SMTP receiver: GoIP gateways deliver incoming SMS by e-mail.
         public SmtpSettings smtp { get; set; } = new();
     }
 
@@ -134,8 +134,8 @@ namespace ghostline
         public int port { get; set; } = 25;
     }
 
-    // Формат ghostline.json (yetgsms, до 2026-09-27): всё в корне, camelCase.
-    // Нужен только для миграции.
+    // Format of ghostline.json (yetgsms, before 2026-09-27): everything at the root, camelCase.
+    // Only needed for the migration.
     internal class LegacyJsonSettings
     {
         public string mode { get; set; } = "sms";
@@ -163,10 +163,10 @@ namespace ghostline
         };
     }
 
-    // Файл настроек — YAML с разделами (telegram, web, logger, calls...), ключи в snake_case.
-    // Незнакомый ключ — ошибка (опечатка не должна молча выключать опцию).
-    // До 2026-09-27 настройки были в JSON (ghostline.json) — при первом запуске
-    // конвертируются в YAML, старый файл переименовывается в .json.migrated.
+    // Settings file: YAML with sections (telegram, web, logger, calls...), keys in snake_case.
+    // An unknown key is an error (a typo must not silently disable an option).
+    // Before 2026-09-27 the settings were JSON (ghostline.json); on the first start
+    // they are converted to YAML and the old file is renamed to .json.migrated.
     internal static class SettingsFile
     {
         private static IDeserializer Deserializer => new DeserializerBuilder()
@@ -182,7 +182,7 @@ namespace ghostline
             .Build()
             .Serialize(s);
 
-        // Ошибка YAML → «строка N, столбец M: что не так» — для веб-редактора и лога.
+        // YAML error to "line N, column M: what is wrong", for the web editor and the log.
         public static string Describe(Exception ex)
         {
             if (ex is not YamlDotNet.Core.YamlException yex) return ex.Message;
@@ -195,14 +195,14 @@ namespace ghostline
             return $"line {inner.Start.Line}, column {inner.Start.Column}: {message}";
         }
 
-        // ghostline.yaml нет, а ghostline.json рядом есть — конвертируем.
+        // No ghostline.yaml but a ghostline.json next to it: convert.
         public static void MigrateFromJson(string yamlPath)
         {
             string jsonPath = Path.ChangeExtension(yamlPath, ".json");
             if (File.Exists(yamlPath) || !File.Exists(jsonPath)) return;
 
             var s = Newtonsoft.Json.JsonConvert.DeserializeObject<LegacyJsonSettings>(File.ReadAllText(jsonPath)).ToSettings();
-            File.WriteAllText(yamlPath, "# ghostline — настройки. Сконвертировано из " + Path.GetFileName(jsonPath) +
+            File.WriteAllText(yamlPath, "# ghostline settings. Converted from " + Path.GetFileName(jsonPath) +
                                         " " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + "\n" + Serialize(s));
             File.Move(jsonPath, jsonPath + ".migrated");
             Console.WriteLine($"Config migrated: {jsonPath} -> {yamlPath}");
@@ -211,11 +211,11 @@ namespace ghostline
 
     internal partial class Program
     {
-        // gatewayId == null — искать по всем каналам (нужно для SMTPReadData/goip,
-        // где pattern уже сам по себе уникален по серийнику устройства).
-        // gatewayId задан — искать только среди каналов этого шлюза (нужно для
-        // AMI-событий: два одинаковых по виду события с разных физических боксов
-        // не должны матчиться на канал чужого шлюза).
+        // gatewayId == null: search all channels (needed for SMTPReadData/goip,
+        // where the pattern is already unique by the device serial number).
+        // gatewayId set: search only the channels of that gateway (needed for
+        // AMI events: two identical-looking events from different physical boxes
+        // must not match a channel of the other gateway).
         private static Channel getChannel(string str, string gatewayId = null)
         {
             foreach (Channel ch in settings.channels)

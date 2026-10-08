@@ -2,8 +2,8 @@ using Newtonsoft.Json;
 
 namespace ghostline
 {
-    // Строки одного языка из locales/<язык>.json рядом с приложением. Ключа нет в выбранном
-    // языке — берётся из en.json, нет нигде — возвращается сам ключ. Как в frte2tg.
+    // Strings of one language from locales/<language>.json next to the app. A key missing in the
+    // chosen language is taken from en.json; missing everywhere, the key itself is returned. As in frte2tg.
     public class Strings
     {
         readonly Dictionary<string, string> strings;
@@ -26,7 +26,7 @@ namespace ghostline
 
         public bool Has(string key) => strings.ContainsKey(key) || fallback.ContainsKey(key);
 
-        // Строки с заданными префиксами (с учётом en) — для скриптов веб-страницы.
+        // Strings with the given prefixes (with en as fallback), for the scripts of the web page.
         public Dictionary<string, string> Export(params string[] prefixes)
         {
             var result = new Dictionary<string, string>();
@@ -37,8 +37,8 @@ namespace ghostline
         }
     }
 
-    // Языки приложения: веб-интерфейс, Telegram и скачиваемая расшифровка
-    // (locale.web, locale.telegram, locale.transcript; пусто — locale.default).
+    // Languages of the app: web interface, Telegram and downloaded transcripts
+    // (locale.web, locale.telegram, locale.transcript; empty: locale.default).
     public static class L10n
     {
         public const string DefaultLocale = "en";

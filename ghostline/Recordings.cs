@@ -3,18 +3,18 @@ using System.Net;
 
 namespace ghostline
 {
-    // Записи разговоров живут на АТС (/var/spool/asterisk/monitor, в её ночном бэкапе)
-    // и отдаются по HTTP только адресу ghostline. Здесь не копируются — берутся по требованию.
+    // Call recordings live on the PBX (/var/spool/asterisk/monitor, covered by its nightly backup)
+    // and are served over HTTP only to the ghostline address. They are not copied here, only fetched on demand.
     internal static class Recordings
     {
         private static readonly HttpClient http = new() { Timeout = TimeSpan.FromMinutes(2) };
 
-        // Имена файлов содержат '+' (external-11-+7926...), поэтому каждый сегмент экранируется.
+        // File names contain '+' (external-11-+7926...), so every path segment is escaped.
         private static string Url(string recPath) =>
             Program.settings.calls.recordingsUrl.TrimEnd('/') + "/" +
             string.Join("/", recPath.Split('/').Select(Uri.EscapeDataString));
 
-        // Размер файла; 0 — файла нет; -1 — АТС недоступна (узнаем позже).
+        // File size; 0: no file; -1: PBX unavailable (find out later).
         public static async Task<long> HeadSize(string recPath)
         {
             try
@@ -31,7 +31,7 @@ namespace ghostline
             }
         }
 
-        // null — файла нет. Недоступность АТС — исключение, пусть вызывающий повторит позже.
+        // null: no file. PBX unavailable is an exception, the caller retries later.
         public static async Task<byte[]> Fetch(string recPath)
         {
             using var resp = await http.GetAsync(Url(recPath));
@@ -40,11 +40,11 @@ namespace ghostline
             return await resp.Content.ReadAsByteArrayAsync();
         }
 
-        // Голос собеседника приходит из GSM-модуля заметно тише, чем свой с SIP-телефона.
-        // Для прослушивания, Telegram и расшифровки громкость выравнивается (dynaudnorm
-        // подтягивает тихие места, не трогая громкие). Есть дорожки по сторонам —
-        // каждая выравнивается отдельно и сводится заново: так уровни ровные.
-        // Оригиналы на АТС не меняются. null — ffmpeg не справился.
+        // The remote side comes from the GSM module much quieter than our own SIP phone.
+        // For playback, Telegram and transcription the loudness is balanced (dynaudnorm
+        // raises quiet parts without touching loud ones). With per-side legs each leg is
+        // balanced separately and mixed again, which gives even levels.
+        // The originals on the PBX are not changed. null: ffmpeg failed.
         public static async Task<byte[]> Balanced(byte[] mixed, byte[] rx = null, byte[] tx = null)
         {
             const string norm = "dynaudnorm=f=150:g=15:p=0.9";
@@ -56,8 +56,8 @@ namespace ghostline
                 : await Ffmpeg(new[] { mixed }, "wav", "-af", norm, "-ac", "1", "-ar", "8000", "-c:a", "pcm_s16le");
         }
 
-        // Звонок → выровненная запись с кэшем: браузер при перемотке делает несколько
-        // Range-запросов подряд, ffmpeg на каждый не нужен.
+        // Call to balanced recording, cached: while seeking the browser sends several Range
+        // requests in a row, and ffmpeg is not needed for each of them.
         private static readonly Dictionary<long, byte[]> cache = new();
         private static readonly Queue<long> cacheOrder = new();
 
@@ -84,26 +84,26 @@ namespace ghostline
             return result;
         }
 
-        // wav 8 кГц → ogg/opus: только такой формат Telegram показывает как голосовое.
-        // null — ffmpeg не справился (тогда шлём исходный wav аудиофайлом).
+        // 8 kHz wav to ogg/opus: the only format Telegram shows as a voice message.
+        // null: ffmpeg failed (the original wav is then sent as an audio file).
         public static Task<byte[]> ToOggOpus(byte[] wav) =>
             Ffmpeg(new[] { wav }, "ogg", "-ac", "1", "-c:a", "libopus", "-b:a", "24k");
 
-        // Подавление эха в моей дорожке (half-duplex gate). Эхо — голос собеседника,
-        // вернувшийся из динамика моего телефона в его микрофон: оно тише оригинала и звучит
-        // одновременно с ним или с задержкой до ~300 мс. Кадр 20 мс моей дорожки глушится,
-        // если собеседник в окне [кадр − 300 мс, кадр] громкий, а я — заметно тише его.
-        // Когда говорю я сам (в том числе поверх собеседника), мой голос громче эха — кадр
-        // остаётся. Только для расшифровки; записи на АТС не меняются.
+        // Echo suppression in my leg (half-duplex gate). Echo is the other side's voice coming
+        // back from my phone's speaker into its microphone: it is quieter than the original and
+        // comes at the same time or up to ~300 ms later. A 20 ms frame of my leg is muted when
+        // the other side is loud within [frame - 300 ms, frame] and I am clearly quieter.
+        // When I speak myself (including over the other side) my voice is louder than the echo
+        // and the frame stays. Only for transcription; recordings on the PBX are not changed.
         public static byte[] EchoGate(byte[] me, byte[] them)
         {
             if (!TryPcm16(me, out int meOff, out int meLen) || !TryPcm16(them, out int thOff, out int thLen))
                 return me;
-            const int Frame = 160;          // 20 мс при 8 кГц
-            const int DelayFrames = 15;     // 300 мс
-            const double FarActive = 400;   // собеседник говорит (RMS ≈ −38 dBFS)
-            // Мой голос с SIP-телефона заметно громче голоса из GSM-модуля, эхо — тише оригинала:
-            // всё, что в моей дорожке тише собеседника, — эхо. На 0.6 эхо «Выберите?» проскакивало.
+            const int Frame = 160;          // 20 ms at 8 kHz
+            const int DelayFrames = 15;     // 300 ms
+            const double FarActive = 400;   // the other side speaks (RMS about -38 dBFS)
+            // My voice from the SIP phone is clearly louder than the voice from the GSM module, echo is
+            // quieter than the original: anything in my leg quieter than the other side is echo. At 0.6 echo slipped through.
             const double EchoRatio = 1.0;
 
             double Rms(byte[] b, int off, int len, int frame)
@@ -124,12 +124,12 @@ namespace ghostline
             var far = new double[thFrames];
             for (int f = 0; f < thFrames; f++) far[f] = Rms(them, thOff, thLen, f);
 
-            // Мягкое приглушение, а не обнуление: жёсткие нули рубили мой голос на куски по 20 мс,
-            // и Whisper выдавал мои реплики строчными, без пунктуации, с обрывками слов.
-            // Решение по кадрам, после «моего» кадра дорожка ещё Hangover кадров открыта (не
-            // обрезать окончания слов), усиление меняется плавно внутри кадра.
-            const double Attenuate = 0.03;  // ≈ −30 дБ
-            const int Hangover = 10;        // 200 мс
+            // Soft attenuation, not zeroing: hard zeros chopped my voice into 20 ms pieces and
+            // Whisper returned my lines in lower case, without punctuation, with broken words.
+            // Decided per frame; after a frame of mine the leg stays open for Hangover frames (so
+            // word endings are not cut), the gain changes smoothly within a frame.
+            const double Attenuate = 0.03;  // about -30 dB
+            const int Hangover = 10;        // 200 ms
             var gain = new double[frames];
             int open = 0;
             for (int f = 0; f < frames; f++)
@@ -151,7 +151,7 @@ namespace ghostline
                 int baseIdx = meOff + f * Frame * 2;
                 for (int i = 0; i < Frame; i++)
                 {
-                    double g = prev + (gain[f] - prev) * (i + 1) / Frame;   // плавный переход
+                    double g = prev + (gain[f] - prev) * (i + 1) / Frame;   // smooth transition
                     int idx = baseIdx + i * 2;
                     short v = (short)(result[idx] | (result[idx + 1] << 8));
                     short o = (short)Math.Clamp(Math.Round(v * g), short.MinValue, short.MaxValue);
@@ -164,23 +164,23 @@ namespace ghostline
             return result;
         }
 
-        // Куски дорожки со звуком (начало и конец в секундах) — расшифровываются по отдельности.
-        // Целиком Whisper на длинной дорожке «залипает»: 2026-10-02 после двух минут повторов
-        // «Ваш звонок является первым в очереди» весь остаток звонка (с оператором) пришёл одной
-        // галлюцинацией «Субтитры создавал…», а слова одной фразы разъехались на три минуты.
-        // Звук — кадры 20 мс громче порога; паузы короче MergeGap склеиваются, куски до MaxChunk
-        // (окно Whisper — 30 с) собираются из соседних фраз с паузой не больше ChunkGap.
-        // null — не PCM 16 бит моно, тогда дорожка уходит целиком.
+        // Pieces of a leg with sound (start and end in seconds), transcribed separately.
+        // Sent whole, a long leg makes Whisper get stuck: on 2026-10-02, after two minutes of a repeated
+        // "your call is first in the queue", the rest of the call (with the operator) came back as a single
+        // subtitle-credit hallucination, and the words of one phrase ended up three minutes apart.
+        // Sound is 20 ms frames above the threshold; gaps shorter than MergeGap are joined, pieces up to
+        // MaxChunk (the Whisper window is 30 s) are built from adjacent phrases with gaps up to ChunkGap.
+        // null: not 16-bit mono PCM, the leg is then sent whole.
         public static List<(double s, double e)> SoundChunks(byte[] wav)
         {
             if (!TryPcm16(wav, out int off, out int len, out int rate)) return null;
-            const double Threshold = 200;   // ≈ −44 dBFS: выше шума линии, ниже тихого собеседника
+            const double Threshold = 200;   // about -44 dBFS: above line noise, below a quiet speaker
             const double FrameSec = 0.02, MergeGap = 0.5, MinSound = 0.3, ChunkGap = 2.0, MaxChunk = 28.0, Pad = 0.3;
             int frame = (int)(rate * FrameSec);
             int frames = len / (frame * 2);
             double total = len / 2.0 / rate;
 
-            // Отрезки со звуком
+            // Stretches with sound
             var sounds = new List<(double s, double e)>();
             int start = -1;
             for (int f = 0; f <= frames; f++)
@@ -208,7 +208,7 @@ namespace ghostline
             }
             sounds.RemoveAll(x => x.e - x.s < MinSound);
 
-            // Отрезки → куски: длинный звук (музыка ожидания) режется по MaxChunk
+            // Stretches to pieces: a long sound (hold music) is cut at MaxChunk
             var chunks = new List<(double s, double e)>();
             foreach (var (s0, e0) in sounds)
             {
@@ -224,7 +224,7 @@ namespace ghostline
             return chunks.Select(c => (Math.Max(0, c.s - Pad), Math.Min(total, c.e + Pad))).ToList();
         }
 
-        // Кусок WAV с s по e секунд: тот же заголовок, другие размеры.
+        // Piece of a WAV from s to e seconds: the same header with other sizes.
         public static byte[] Slice(byte[] wav, double s, double e)
         {
             if (!TryPcm16(wav, out int off, out int len, out int rate)) return null;
@@ -241,7 +241,7 @@ namespace ghostline
         private static bool TryPcm16(byte[] wav, out int dataOffset, out int dataLength) =>
             TryPcm16(wav, out dataOffset, out dataLength, out _);
 
-        // WAV → смещение и длина блока data, если это PCM 16 бит моно (так пишет Asterisk).
+        // WAV to the offset and length of the data chunk, if it is 16-bit mono PCM (as Asterisk writes).
         private static bool TryPcm16(byte[] wav, out int dataOffset, out int dataLength, out int rate)
         {
             dataOffset = dataLength = rate = 0;
@@ -270,11 +270,11 @@ namespace ghostline
             return false;
         }
 
-        // MP3 — для чатов, где голосовые запрещены: обычный аудиофайл с плеером.
+        // MP3 for chats where voice messages are forbidden: a regular audio file with a player.
         public static Task<byte[]> ToMp3(byte[] wav) =>
             Ffmpeg(new[] { wav }, "mp3", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "32k");
 
-        // Входы и выход — через временные файлы (wav с заголовком ffmpeg читает из файла надёжнее, чем из pipe).
+        // Inputs and output go through temp files (ffmpeg reads a wav with a header from a file more reliably than from a pipe).
         private static async Task<byte[]> Ffmpeg(byte[][] inputs, string outExt, params string[] args)
         {
             string tmp = Path.Combine(Path.GetTempPath(), "ghostline-" + Guid.NewGuid().ToString("N"));

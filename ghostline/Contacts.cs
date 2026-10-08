@@ -83,8 +83,8 @@ namespace ghostline
                                 EmailAddress = r.EmailAddress,
                                 Photo = r.Photo,
                                 PhoneNumberLabel = label,
-                                // Тем же ToE164, что и входящие/исходящие номера —
-                                // иначе матчинг сравнивал бы две разные нотации.
+                                // Through the same ToE164 as incoming and outgoing numbers;
+                                // otherwise matching would compare two different notations.
                                 PhoneNumberValue = ToE164(value)
                             });
                     }
@@ -94,20 +94,20 @@ namespace ghostline
             return result;
         }
 
-        // Снимает форматирование, оставляя только содержательные символы номера.
+        // Strips formatting, keeping only the meaningful characters of the number.
         private static string NormalizePhone(string raw)
         {
             return raw.Replace("+", "").Replace(" ", "").Replace("-", "")
                       .Replace("(", "").Replace(")", "").Replace(".", "");
         }
 
-        // Приводит "адрес" SMS к единому каноническому виду — им пользуются и БД, и
-        // UI, и Telegram, и матчинг контактов. Различает три класса:
-        //   * буквенный sender ID ("VTB", "Greenatom") — не трогаем вообще;
-        //   * короткий сервисный код ("900", "0867") — только цифры, без "+";
-        //   * телефон — E.164 ("+79001234567", "+37366600941").
-        // Формат набора под конкретный шлюз выводится из результата отдельно,
-        // см. FormatForGateway в OutboundSms.cs.
+        // Brings an SMS "address" to one canonical form, used by the DB, the UI,
+        // Telegram and contact matching. Three classes:
+        //   * alphanumeric sender ID ("VTB", "Greenatom"): left untouched;
+        //   * short service code ("900", "0867"): digits only, no "+";
+        //   * phone number: E.164 ("+79001234567", "+37366600941").
+        // The dial format for a particular gateway is derived from the result separately,
+        // see FormatForGateway in OutboundSms.cs.
         private static string ToE164(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return raw;
@@ -116,43 +116,43 @@ namespace ghostline
             bool hadPlus = trimmed.StartsWith("+");
             string digits = NormalizePhone(trimmed);
 
-            // Буквенный sender ID (банки/сервисы шлют не с номера, а с имени).
+            // Alphanumeric sender ID (banks and services send from a name, not a number).
             if (digits.Length == 0 || !digits.All(char.IsDigit))
                 return trimmed;
 
-            // Короткий сервисный номер. Проверка идёт до всего остального и игнорирует
-            // "+": в E.164 не бывает номера из <= 6 цифр, значит "+900" — это не
-            // международный номер, а короткий код с ошибочно приклеенным плюсом.
+            // Short service number. Checked before everything else and ignores
+            // "+": E.164 has no numbers of <= 6 digits, so "+900" is not an
+            // international number but a short code with a plus added by mistake.
             if (digits.Length <= 6)
                 return digits;
 
-            // Явный международный формат — доверяем ему как есть.
+            // Explicit international format: trusted as is.
             if (hadPlus)
                 return "+" + digits;
 
-            // "810" — российский выход на международную линию, дальше код страны и
-            // номер. Требуем длину >= 12: "810" + код страны + номер короче не бывает.
+            // "810" is the Russian international prefix, then the country code and the
+            // number. Length >= 12 is required: "810" + country code + number is never shorter.
             if (digits.StartsWith("810") && digits.Length >= 12)
                 return "+" + digits.Substring(3);
 
-            // Домашний российский номер с "8" вместо "+7".
+            // Domestic Russian number with "8" instead of "+7".
             if (digits.Length == 11 && digits.StartsWith("8"))
                 return "+7" + digits.Substring(1);
 
-            // Уже "7XXXXXXXXXX", просто без "+".
+            // Already "7XXXXXXXXXX", just without "+".
             if (digits.Length == 11 && digits.StartsWith("7"))
                 return "+" + digits;
 
-            // Голый 10-значный номер без префикса — считаем российским домашним.
+            // A bare 10-digit number without a prefix: treated as Russian domestic.
             if (digits.Length == 10)
                 return "+7" + digits;
 
-            // 11+ цифр с чужим кодом страны, записанные без "+".
+            // 11+ digits with a foreign country code, written without "+".
             if (digits.Length >= 11)
                 return "+" + digits;
 
-            // 7-9 цифр: местный номер без кода города либо длинный сервисный.
-            // Приписать код страны наугад = соврать, поэтому оставляем как есть.
+            // 7-9 digits: a local number without the area code or a long service number.
+            // Adding a country code by guessing would be lying, so it stays as is.
             return digits;
         }
 
@@ -164,17 +164,17 @@ namespace ghostline
             string canonical = ToE164(rawNumber);
             if (string.IsNullOrWhiteSpace(canonical)) return null;
 
-            // Контакты канонизированы тем же ToE164 при загрузке, так что сравниваем
-            // одну нотацию с другой такой же. Точное совпадение — единственный
-            // допустимый вариант для коротких кодов и буквенных ID: старый
-            // подстрочный матчинг находил на "900" первого встречного абонента,
-            // в чьём номере эти цифры просто где-то встречались.
+            // Contacts were made canonical with the same ToE164 when loaded, so one
+            // notation is compared with the same notation. An exact match is the only
+            // acceptable option for short codes and alphanumeric ids: the old substring
+            // matching found the first random subscriber for "900" whose number simply
+            // contained these digits somewhere.
             var exact = contacts.FirstOrDefault(c =>
                 string.Equals(c.PhoneNumberValue, canonical, StringComparison.OrdinalIgnoreCase));
             if (exact != null) return exact;
 
-            // Подстраховка для телефонов, записанных в контактах в форме, которая не
-            // сошлась к той же канонической строке: сверяем последние 10 цифр.
+            // Fallback for phone numbers stored in the contacts in a form that did not
+            // reduce to the same canonical string: compare the last 10 digits.
             if (IsPhoneNumber(canonical))
             {
                 string? tail = Tail10(canonical);

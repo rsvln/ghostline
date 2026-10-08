@@ -3,16 +3,16 @@ using Telegram.Bot.Types;
 
 namespace ghostline
 {
-    // Звонки в Telegram — ленивая доставка, как в frte2tg (AIQueueService): сообщение
-    // уходит сразу после звонка, а расшифровка дописывается в него позже правкой
-    // подписи/текста. Очередь — таблица call_tg: pending → sent (с «⏳») → final.
+    // Calls to Telegram, lazy delivery as in frte2tg (AIQueueService): the message
+    // goes out right after the call and the transcript is added to it later by editing
+    // the caption/text. The queue is the call_tg table: pending -> sent (with the hourglass) -> final.
     internal partial class Program
     {
-        private const int CaptionLimit = 1024;   // подпись к голосовому
-        private const int TextLimit = 4096;      // обычное сообщение
+        private const int CaptionLimit = 1024;   // caption of a voice message
+        private const int TextLimit = 4096;      // regular message
         private const int MaxCallTgAttempts = 20;
 
-        // Решает по настройкам линии, что и кому слать про новый звонок.
+        // Decides from the line settings what to send about a new call and to whom.
         private static void EnqueueCallNotifications(CallRecord c, Channel ch)
         {
             var cc = ch.calls ?? new ChannelCalls();
@@ -21,7 +21,7 @@ namespace ghostline
 
             if (c.Missed)
             {
-                // Исходящий без ответа — вы и так знаете, что не дозвонились.
+                // Outgoing without an answer: you already know you did not get through.
                 if (c.Direction == "in" && cc.missed)
                     Store.EnqueueCallTg(c.Id, chats, "text", wantTranscript: false);
                 return;
@@ -71,7 +71,7 @@ namespace ghostline
                     }
                 }
 
-                // Текстовое уведомление — и как запасной вариант, если записи не оказалось.
+                // Text notification, also the fallback when there is no recording.
                 if (msg == null)
                 {
                     msg = await bot.SendMessage(item.ChatId, Fit(text, TextLimit, out bool cut));
@@ -79,7 +79,7 @@ namespace ghostline
                         await SendFullTranscript(item.ChatId, msg.Id, call);
                 }
 
-                // Расшифровка не нужна или уже готова (догоняли очередь) — дописывать нечего.
+                // No transcript needed or it is already done (catching up with the queue): nothing to add.
                 Store.MarkCallTgSent(item.Id, msg.Id, final: !item.WantTranscript || trFinished);
                 HealthStatus.MarkActivity("telegram");
             }
@@ -89,11 +89,11 @@ namespace ghostline
             }
         }
 
-        // Голосовое (ogg/opus). Если получатель запретил голосовые (приватность Telegram
-        // «Голосовые сообщения — никто», ошибка VOICE_MESSAGES_FORBIDDEN) или ffmpeg не
-        // справился — аудиофайлом MP3: у него тоже плеер, и подпись правится так же.
-        // Именно MP3: ogg/opus Telegram считает голосовым и через sendAudio — тот же отказ
-        // (2026-09-28 так и не доходили звонки в чат с запретом голосовых).
+        // Voice message (ogg/opus). If the recipient forbade voice messages (Telegram privacy
+        // "Voice messages: nobody", error VOICE_MESSAGES_FORBIDDEN) or ffmpeg failed,
+        // an MP3 audio file: it has a player too, and its caption is edited the same way.
+        // MP3 specifically: Telegram treats ogg/opus as voice even via sendAudio, the same refusal
+        // (on 2026-09-28 calls never reached a chat that forbade voice messages).
         private static async Task<Message> SendRecording(string chatId, CallRecord call, byte[] wav, string caption)
         {
             string name = CallFileBase(call);
@@ -157,12 +157,12 @@ namespace ghostline
             Store.MarkCallTgFailed(item.Id, err);
             HealthStatus.MarkError("telegram", err);
             Console.WriteLine($"Call {item.CallId} Telegram {what} to {item.ChatId} failed (attempt {item.Attempts + 1}): {err}");
-            // Например, сообщение удалили — править больше нечего.
+            // For example the message was deleted: nothing left to edit.
             if (item.Attempts + 1 >= MaxCallTgAttempts)
                 Store.MarkCallTgFinal(item.Id);
         }
 
-        // Полный текст ответом на сообщение, если в подпись не влез. Кусками по 4096.
+        // The full text as a reply to the message if it did not fit into the caption. In chunks of 4096.
         private static async Task SendFullTranscript(string chatId, int replyTo, CallRecord call)
         {
             string text = "📝 " + TranscriptText(call);
@@ -179,8 +179,8 @@ namespace ghostline
             return text.Substring(0, limit - tail.Length) + tail;
         }
 
-        // 📞 Входящий · home · 27.09 14:05
-        // Иван Петров +79161234567
+        // 📞 Incoming · home · 27.09 14:05
+        // John Smith +79001234567
         // ⏱ 2:31
         internal static string CallHeader(CallRecord c)
         {
@@ -195,8 +195,8 @@ namespace ghostline
             return s;
         }
 
-        // Текст расшифровки собирается из реплик на языке Telegram (а не берётся готовым
-        // из tr_text) — чтобы смена языка в настройках действовала и на старые звонки.
+        // The transcript text is built from the lines in the Telegram language (not taken ready
+        // from tr_text), so a language change in the settings applies to old calls too.
         private static string TranscriptText(CallRecord c)
         {
             var segs = Segments(c);

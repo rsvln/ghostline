@@ -4,17 +4,17 @@ using QuestPDF.Infrastructure;
 
 namespace ghostline
 {
-    // Расшифровка звонка в PDF — для почты и печати. Тот же вид, что во вкладке «Звонки»:
-    // реплики пузырями, мои — синие, собеседника — серые, над каждой сторона и время.
-    // Светлое оформление (печать), шрифт IBM Plex Sans с кириллицей вшит в файл.
+    // Call transcript as PDF, for e-mail and printing. Looks like the Calls tab:
+    // lines as bubbles, mine blue, the other side's grey, with the side and time above each.
+    // Light theme (for printing); the IBM Plex Sans font with Cyrillic is embedded in the file.
     internal static class TranscriptPdf
     {
         private const string Font = "IBM Plex Sans";
         private static readonly object initLock = new();
         private static bool initialized;
 
-        // QuestPDF: бесплатная Community-лицензия (частные лица и компании до $1 млн оборота).
-        // Шрифты — web/fonts/*.ttf рядом с приложением (OFL).
+        // QuestPDF: free Community license (individuals and companies under $1M revenue).
+        // Fonts: web/fonts/*.ttf next to the app (OFL).
         private static void Init()
         {
             lock (initLock)
@@ -29,8 +29,8 @@ namespace ghostline
             }
         }
 
-        // Шапка расшифровки — для внешних получателей, поэтому номерами, а не названиями линий:
-        // кто звонил и кому. Общая для PDF и .txt.
+        // Transcript header, for external readers, so numbers rather than line names:
+        // who called whom. Shared by the PDF and the .txt.
         internal record Header(string Title, string Meta, string FromLabel, string From, string ToLabel, string To);
 
         internal static Header MakeHeader(CallRecord call, Strings l)
@@ -53,7 +53,7 @@ namespace ghostline
                 l.T("web.pdf.to"), incoming ? mine : peer);
         }
 
-        // +79001234567 → +7 900 123-45-67; остальное как есть.
+        // +79001234567 -> +7 900 123-45-67; anything else as is.
         internal static string FormatPhone(string n)
         {
             if (string.IsNullOrEmpty(n)) return n;
@@ -108,7 +108,7 @@ namespace ghostline
                         {
                             if (s.who == null)
                             {
-                                // Старая моно-запись: сторона неизвестна — просто реплика со временем.
+                                // Old mono recording: the side is unknown, just a line with its time.
                                 item.Item().Text(time).FontSize(8).FontColor(Muted);
                                 item.Item().Text(s.t);
                                 return;
@@ -116,7 +116,7 @@ namespace ghostline
                             bool me = s.who == "me";
                             item.Item().Text($"{(me ? l.T("web.calls.me") : them)} · {time}")
                                 .FontSize(8).FontColor(me ? MeHead : Muted);
-                            // Пузырь не шире ~80% страницы, по ширине текста.
+                            // A bubble no wider than ~80% of the page, sized to the text.
                             item.Item().PaddingRight(90).AlignLeft()
                                 .Background(me ? Me : Them).CornerRadius(7)
                                 .PaddingVertical(5).PaddingHorizontal(9)

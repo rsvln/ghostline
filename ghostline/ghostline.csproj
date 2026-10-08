@@ -23,16 +23,16 @@
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
   <ItemGroup>
-    <!-- Редактор YAML для вкладки Config (CodeMirror 6): бандл из frte2tg/webui (npm run build),
-         отдаётся самим приложением — страница работает без интернета. -->
+    <!-- YAML editor for the Config tab (CodeMirror 6): the bundle from frte2tg/webui (npm run build),
+         served by the app itself, so the page works without internet. -->
     <None Update="web\*.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <!-- Страница веб-интерфейса: разметка, стили, значок. -->
+    <!-- The web page: markup, styles, icon. -->
     <None Update="web\*.html;web\*.css;web\*.svg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <!-- README для вкладки About. -->
+    <!-- README for the About tab. -->
     <None Include="..\README.md" Link="README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <!-- Шрифт для PDF расшифровки (IBM Plex Sans, OFL — web/fonts/OFL.txt). -->
+    <!-- Font for PDF transcripts (IBM Plex Sans, OFL: web/fonts/OFL.txt). -->
     <None Update="web\fonts\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <!-- Строки веба и Telegram по языкам; выбор — раздел locale в ghostline.yaml. -->
+    <!-- Web and Telegram strings per language; chosen in the locale section of ghostline.yaml. -->
     <None Update="locales\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

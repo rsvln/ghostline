@@ -5,29 +5,29 @@ using Newtonsoft.Json.Linq;
 
 namespace ghostline
 {
-    // Реплика расшифровки: время от начала записи (с), сторона и текст.
-    // who: "me" / "them" — если есть дорожки по сторонам; null — общая моно-запись.
+    // A transcript line: time from the start of the recording (s), side and text.
+    // who: "me" / "them" when there are per-side legs; null for an old mono recording.
     public record TranscriptSegment(double s, double e, string who, string t);
 
-    // Расшифровка записей: очередь в БД (calls.tr_state = 'pending'), сервис —
-    // OpenAI-совместимый /v1/audio/transcriptions (например, speaches).
-    // Сервис или АТС недоступны — звонок остаётся в очереди, попытка не засчитывается.
-    // Сервис ответил ошибкой — попытка засчитывается, после MaxAttempts звонок уходит в 'error'.
+    // Transcription of recordings: the queue is in the DB (calls.tr_state = 'pending'), the service is
+    // an OpenAI-compatible /v1/audio/transcriptions (for example speaches).
+    // Service or PBX unavailable: the call stays queued and the attempt is not counted.
+    // The service returned an error: the attempt counts, after MaxAttempts the call goes to 'error'.
     //
-    // Диалог. АТС пишет, кроме общей записи X.wav, ещё X-r.wav и X-t.wav — каждую сторону
-    // отдельно (override [sub-record-check] на АТС, с 2026-09-27). Тогда дорожки
-    // расшифровываются по отдельности и реплики сводятся по времени. Для старых звонков
-    // дорожек нет — общая запись разбивается на реплики без указания стороны.
+    // Dialog. Besides the mixed X.wav the PBX writes X-r.wav and X-t.wav, one per side
+    // (override of [sub-record-check] on the PBX, since 2026-09-27). The legs are then
+    // transcribed separately and the lines merged by time. Older calls have no legs:
+    // the mixed recording is split into lines without a side.
     internal partial class Program
     {
         private const int MaxTranscribeAttempts = 5;
 
         private class TranscribeHttpException(string message) : Exception(message);
 
-        // requested = true — воркер очереди «по кнопке», false — фоновый (новые звонки, пересчёт).
+        // requested = true: the worker for the "Transcribe again" button; false: the background one (new calls).
         private static async Task TranscribeWorker(bool requested)
         {
-            // Длинный разговор на CPU расшифровывается минуты — таймаут с запасом.
+            // A long call on CPU takes minutes to transcribe, so the timeout is generous.
             using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(60) };
             HealthStatus.MarkConfigured("transcribe");
 
@@ -47,7 +47,7 @@ namespace ghostline
                     if (wav == null || wav.Length <= Store.MinRecordingBytes)
                     {
                         Store.SetRecSize(call.Id, wav?.Length ?? 0);
-                        Store.SetTranscriptError(call.Id, "нет записи", final: true);
+                        Store.SetTranscriptError(call.Id, "no recording", final: true);
                         continue;
                     }
 
@@ -60,8 +60,8 @@ namespace ghostline
                     if (legs)
                     {
                         var (rxWho, txWho) = LegSpeakers(call.Direction);
-                        // В мою дорожку из динамика телефона попадает эхо собеседника — Whisper
-                        // путается в нём и ставит мои слова не на то время. Глушим эхо до расшифровки.
+                        // Echo of the other side from my phone's speaker gets into my leg; Whisper gets
+                        // confused by it and puts my words at the wrong time. The echo is muted before transcription.
                         if (rxWho == "me") rx = Recordings.EchoGate(rx, tx);
                         else tx = Recordings.EchoGate(tx, rx);
                         segs = (await Transcribe(http, rx, rxWho, call)).Concat(await Transcribe(http, tx, txWho, call))
@@ -71,8 +71,8 @@ namespace ghostline
                     {
                         segs = await Transcribe(http, wav, null, call);
                     }
-                    // Фильтр ещё раз после склейки: галлюцинация может прийти по частям
-                    // («Редактор субтитров» + пауза + имя).
+                    // Filter again after merging: a hallucination can arrive in parts
+                    // ("subtitle editor" + pause + a name).
                     segs = MergeAdjacent(segs).Select(x => x with { t = DropHallucination(x.t) })
                                               .Where(x => x.t.Length > 0).ToList();
 
@@ -93,7 +93,7 @@ namespace ghostline
                 }
                 catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
                 {
-                    // Сервис расшифровки или АТС недоступны — ждём, звонок остаётся в очереди.
+                    // Transcription service or PBX unavailable: wait, the call stays queued.
                     string err = DescribeException(ex);
                     HealthStatus.MarkError("transcribe", err);
                     Console.WriteLine($"Transcribe unavailable (call {call?.Id}): {err}, retrying in 60s");
@@ -115,19 +115,19 @@ namespace ghostline
         internal static string LegPath(string recPath, string leg) =>
             Path.ChangeExtension(recPath, null) + "-" + leg + Path.GetExtension(recPath);
 
-        // MixMonitor запускается на канале, где сработала проверка записи: у входящего —
-        // на GSM-канале звонящего, у исходящего — на канале нашего телефона.
-        // r — что пришло ОТ этого канала, t — что ушло В него.
+        // MixMonitor runs on the channel where the recording check happened: for incoming calls the
+        // caller's GSM channel, for outgoing calls the channel of our own phone.
+        // r is what came FROM that channel, t is what went INTO it.
         private static (string rx, string tx) LegSpeakers(string direction) =>
             direction == "in" ? ("them", "me") : ("me", "them");
 
-        // Дорожка режется по паузам, куски расшифровываются по отдельности (см. Recordings.SoundChunks),
-        // время реплик сдвигается на начало куска.
+        // Each leg is cut at pauses and the pieces are transcribed separately (see Recordings.SoundChunks);
+        // line times are shifted by the start of the piece.
         private static async Task<List<TranscriptSegment>> Transcribe(HttpClient http, byte[] wav, string who, CallRecord call)
         {
             var chunks = Recordings.SoundChunks(wav);
-            // Тихий собеседник распознаётся хуже — выравниваем громкость и здесь.
-            // Куски ищутся по исходной дорожке: после выравнивания шум линии тоже громкий.
+            // A quiet remote side is recognized worse, so the loudness is balanced here too.
+            // Pieces are found on the original leg: after balancing, line noise is loud as well.
             byte[] balanced = await Recordings.Balanced(wav) ?? wav;
             if (chunks == null)
                 return (await TranscribeChunk(http, balanced, who, call, true)).segs;
@@ -145,10 +145,10 @@ namespace ghostline
             return result;
         }
 
-        // Подсказка помогает с именами и терминами в длинных фразах, но короткие реплики Whisper
-        // под неё подгоняет: 2026-10-08 «Алло» с подсказкой стало «Альфа-Банк, Малу»
-        // (уверенность в словах 0,04–0,21), без подсказки — «Алло». Если с подсказкой Whisper
-        // не уверен, кусок расшифровывается ещё раз без неё и берётся более уверенный вариант.
+        // The prompt helps with names and terms in long phrases, but Whisper bends short lines
+        // towards it: on 2026-10-08 "hello" with the prompt became the bank name from the prompt
+        // plus noise (word confidence 0.04-0.21), without the prompt it was right. When Whisper is
+        // unsure with the prompt, the piece is transcribed again without it and the surer result wins.
         private const double PromptConfidence = 0.7;
 
         private static async Task<List<TranscriptSegment>> TranscribePiece(HttpClient http, byte[] wav, string who, CallRecord call)
@@ -160,12 +160,12 @@ namespace ghostline
             return plain.confidence > withPrompt.confidence ? plain.segs : withPrompt.segs;
         }
 
-        // confidence — средняя вероятность слов (1, если слов нет).
+        // confidence: mean word probability (1 when there are no words).
         private static async Task<(List<TranscriptSegment> segs, double confidence, bool prompted)> TranscribeChunk(
             HttpClient http, byte[] wav, string who, CallRecord call, bool usePrompt)
         {
             var t = settings.calls.transcribe;
-            // Подсказка: словарь из настроек + имя собеседника.
+            // Prompt: the vocabulary from the settings plus the contact name of the other side.
             string prompt = usePrompt
                 ? string.Join(". ", new[] { t.prompt, call.PeerName }.Where(x => !string.IsNullOrWhiteSpace(x)))
                 : "";
@@ -179,12 +179,12 @@ namespace ghostline
             form.Add(new StringContent("verbose_json"), "response_format");
             if (prompt.Length > 0)
                 form.Add(new StringContent(prompt), "prompt");
-            // Время по словам: у отрезков Whisper начало ненадёжно — отрезок может начаться
-            // с эха или шума задолго до слов (2026-09-28 «Мобильная связь», сказанная на 15 с,
-            // пришла отрезком с 2,6 с и встала раньше вопроса автоответчика).
+            // Word timestamps: Whisper segment starts are unreliable, a segment can start with echo
+            // or noise long before the words (2026-09-28: a phrase said at 15 s came as a segment
+            // starting at 2.6 s and was placed before the answering machine's question).
             form.Add(new StringContent("word"), "timestamp_granularities[]");
             form.Add(new StringContent("segment"), "timestamp_granularities[]");
-            // Без VAD Whisper на тишине «слышит» титры и прочий мусор.
+            // Without VAD Whisper "hears" subtitle credits and other junk in silence.
             form.Add(new StringContent("true"), "vad_filter");
 
             using var resp = await http.PostAsync(t.url, form);
@@ -208,8 +208,8 @@ namespace ghostline
             return (result, 1.0, prompted);
         }
 
-        // Слова → реплики: новая реплика после паузы больше WordGap. Начало реплики — начало
-        // её первого слова, поэтому стороны сводятся по времени в правильном порядке.
+        // Words to lines: a new line after a pause longer than WordGap. A line starts at its first
+        // word, so the sides are merged by time in the right order.
         private const double WordGap = 1.0;
 
         private static List<TranscriptSegment> FromWords(JArray words, string who)
@@ -240,7 +240,7 @@ namespace ghostline
             return result;
         }
 
-        // Соседние реплики одной стороны с паузой меньше 2 с — одна реплика.
+        // Adjacent lines of one side with a pause under 2 s are one line.
         private static List<TranscriptSegment> MergeAdjacent(List<TranscriptSegment> segs)
         {
             var merged = new List<TranscriptSegment>();
@@ -255,7 +255,7 @@ namespace ghostline
             return merged;
         }
 
-        // Текст по реплике на строку: для поиска, Telegram и выгрузки. withTime — с отметками [м:сс].
+        // One line per utterance: for search, Telegram and export. withTime adds [m:ss] marks.
         internal static string FormatDialog(List<TranscriptSegment> segs, Strings l, bool withTime = false, string prefix = "tg.call")
         {
             string me = l.T(prefix + ".me"), them = l.T(prefix + ".them");
@@ -275,13 +275,13 @@ namespace ghostline
             catch { return new(); }
         }
 
-        // На тишине и шуме Whisper «слышит» титры из обучающих данных (YouTube-субтитры).
-        // Два вида:
-        // 1) подписи субтитров («Субтитры создавал DimaTorzok», «Редактор субтитров … Корректор …») —
-        //    в разговоре их не бывает, вырезаются из любого места: Whisper приклеивает их к концу
-        //    настоящей реплики (2026-10-01: «…До свидания. Субтитры создавал DimaTorzok»);
-        // 2) обычные фразы («продолжение следует», «до новых встреч») — их могут сказать и всерьёз,
-        //    поэтому выбрасывается только реплика, целиком из такой фразы.
+        // On silence and noise Whisper "hears" credits from its training data (YouTube subtitles).
+        // Two kinds:
+        // 1) subtitle credits ("subtitles by ...", "subtitle editor ... proofreader ...") never occur
+        //    in a call and are cut from anywhere: Whisper glues them to the end of a real
+        //    line (2026-10-01: a goodbye followed by such a credit);
+        // 2) ordinary phrases ("to be continued", "see you next time") can be said for real,
+        //    so only a line that consists entirely of such a phrase is dropped.
         private static readonly System.Text.RegularExpressions.Regex SubtitleCredits = new(
             @"\s*\b(субтитры\s+(сделал[аи]?|создавал[аи]?|делал[аи]?|подогнал[аи]?|подготовил[аи]?)\s+[\w.\-«»""]+|редактор\s+субтитров.*?корректор\s+[\w.]+(\s*[\w.]+)?|редактор\s+субтитров\s+[\w.]+(\s*[\w.]+)?|dimatorzok)[\s,.;:!?—–-]*",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
@@ -291,7 +291,7 @@ namespace ghostline
             "продолжение следует", "спасибо за просмотр", "подписывайтесь на канал", "до новых встреч"
         };
 
-        // Только буквы и цифры через одиночный пробел, в нижнем регистре.
+        // Only letters and digits, single spaces, lower case.
         private static string Norm(string s) =>
             string.Join(" ", new string(s.ToLowerInvariant().Select(ch => char.IsLetterOrDigit(ch) ? ch : ' ').ToArray())
                              .Split(' ', StringSplitOptions.RemoveEmptyEntries));
@@ -303,9 +303,9 @@ namespace ghostline
             return Hallucinations.Any(h => Norm(text) == Norm(h)) ? "" : text;
         }
 
-        // На коротком шуме (дыхание, стук, пока собеседник держит на удержании) Whisper с подсказкой
-        // выдаёт слова из неё: 2026-10-02 «Финанский кодекс» дважды. Короткая реплика, все слова
-        // которой совпадают со словами подсказки по первым четырём буквам, — выбрасывается.
+        // On short noise (breathing, knocks, while the other side keeps you on hold) Whisper with a prompt
+        // outputs words from it: twice on 2026-10-02. A short line whose words all match prompt words
+        // by their first four letters is dropped.
         private static bool IsPromptEcho(string text, string prompt)
         {
             if (string.IsNullOrWhiteSpace(prompt)) return false;

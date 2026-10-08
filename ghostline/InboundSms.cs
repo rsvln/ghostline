@@ -58,9 +58,9 @@ namespace ghostline
                     contactName = (people.LastName + " " + people.FirstName + " " + people.MiddleName).Trim();
                 string ppl = string.IsNullOrEmpty(contactName) ? "" : "\n" + contactName;
                 string recvTime = DateTime.Now.ToString("yyyy-MM-dd") + " " + xxxl[0].Substring(xxxl[0].Length - 8, 8);
-                // Некоторые отправители (например, автоматические СМС-рассылки служб доставки)
-                // кладут в текст буквальные "+" или "\n" вместо настоящих переводов строк —
-                // разворачиваем оба варианта в реальный перевод строки для читаемости.
+                // Some senders (for example automated SMS of delivery services) put literal
+                // "+" or "\n" into the text instead of real line breaks; both are turned
+                // into a real line break for readability.
                 string content = xxxl[2].Replace("+", "\n").Replace("\\n", "\n");
 
                 EnqueueTelegramBroadcast(sender + " " + chan.name + " " + recvTime + ppl + "\n------------------\n\n" + content);

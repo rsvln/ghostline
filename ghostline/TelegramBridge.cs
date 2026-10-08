@@ -6,9 +6,9 @@ namespace ghostline
 {
     internal partial class Program
     {
-        // Ставит текст в персистентную очередь на отправку каждому чату из telegram.chat_ids.
-        // Очередь хранится в SQLite (та же БД, что и история SMS) и переживает рестарт
-        // процесса — временная недоступность Telegram API не роняет уведомления молча.
+        // Puts the text into the persistent queue for sending to every chat in telegram.chat_ids.
+        // The queue is stored in SQLite (the same DB as the SMS history) and survives a process
+        // restart, so a temporary Telegram API outage does not silently drop notifications.
         private static void EnqueueTelegramBroadcast(string text)
         {
             foreach (string schatid in settings.telegram.chatIds)
@@ -17,11 +17,11 @@ namespace ghostline
             }
         }
 
-        // Фоновый воркер персистентной очереди: раз в 5с забирает накопившиеся
-        // сообщения и пытается отправить. Успех — удаляет из очереди, неудача —
-        // фиксирует попытку и оставляет на следующий цикл. Попытки не ограничены —
-        // сообщение остаётся в очереди, пока не уйдёт (в т.ч. переживает рестарт,
-        // т.к. очередь лежит в БД, а не в памяти).
+        // Background worker of the persistent queue: every 5 s takes the pending messages
+        // and tries to send them. Success removes them from the queue; failure records the
+        // attempt and keeps them for the next cycle. Attempts are unlimited: a message
+        // stays queued until it goes out (and survives a restart, since the queue lives in
+        // the DB, not in memory).
         private static async Task TelegramOutboxWorker()
         {
             while (true)
@@ -97,10 +97,10 @@ namespace ghostline
 
         }
 
-        // Поллер Telegram.Bot после возврата из обработчика ошибок сразу делает
-        // следующий запрос. Без сети (DNS отвечает мгновенно EAI_AGAIN) это цикл
-        // без пауз: 2026-09-27 за 10 минут без сети — 682 тыс. строк в журнале.
-        // Пауза 5с, как у переподключения к AMI.
+        // After returning from the error handler the Telegram.Bot poller immediately makes
+        // the next request. Without network (DNS answers EAI_AGAIN instantly) this is a loop
+        // without pauses: on 2026-09-27, 10 minutes offline produced 682k log lines.
+        // Pause 5 s, as for the AMI reconnect.
         static async Task TgHandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, HandleErrorSource source, CancellationToken cancellationToken)
         {
             var ErrorMessage = exception switch
@@ -115,10 +115,10 @@ namespace ghostline
             try { await Task.Delay(5000, cancellationToken); } catch (OperationCanceledException) { }
         }
 
-        // Тип внешнего исключения (+ контекст вроде "(host:port)", если он есть в
-        // сообщении где-то по цепочке) -> тип и сообщение корневой причины. Без
-        // exception.ToString() и без промежуточных звеньев цепочки — для сетевых
-        // сбоев (таймаут/DNS/нехватка сокетов) они обычно дублируют друг друга.
+        // Type of the outer exception (plus context like "(host:port)" if it appears in a
+        // message somewhere along the chain) -> type and message of the root cause. Without
+        // exception.ToString() and without the intermediate links: for network failures
+        // (timeout, DNS, socket exhaustion) they usually repeat each other.
         private static string DescribeException(Exception ex)
         {
             if (ex.InnerException == null)

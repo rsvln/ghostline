@@ -1,10 +1,10 @@
-// Строки веб-языка (locale.web) подставляет сервер. t('ключ', арг0, арг1...).
+// Strings of the web language (locale.web) are put in by the server. t('key', arg0, arg1...).
 const I18N = /*I18N*/{};
 const t = (k, ...a) => (I18N[k] ?? k).replace(/\{(\d+)\}/g, (_, i) => a[i]);
 
-// У каждого вида свой адрес: /calls, /sms, /log, /status, /config, /config/yaml, /about,
-// фильтры — в строке запроса. F5 показывает тот же вид, ссылкой можно поделиться,
-// «Назад»/«Вперёд» браузера ходят между видами. "/" открывает вид, где были в прошлый раз.
+// Every view has its own address: /calls, /sms, /log, /status, /config, /config/yaml, /about,
+// with the filters in the query string. F5 shows the same view, links can be shared and
+// the browser's Back / Forward move between views. "/" opens the view seen last.
 const TABS = ['calls', 'sms', 'log', 'status', 'config', 'about'];
 const val = id => document.getElementById(id).value;
 const checked = id => document.getElementById(id).checked;
@@ -13,7 +13,7 @@ function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// Настройки этого браузера (строки, автообновление) и последний адрес каждой вкладки — в localStorage.
+// Settings of this browser (lines, auto-refresh) and the last address of every tab stay in localStorage.
 const PREFS_KEY = 'ghostline.prefs';
 const PREFS = ['sms-limit', 'sms-refresh', 'log-lines', 'log-refresh'];
 
@@ -29,7 +29,7 @@ document.addEventListener('change', e => {
   if (PREFS.includes(e.target.id)) writePrefs({ fields: Object.fromEntries(PREFS.map(id => [id, val(id)])) });
 });
 
-// Значение select'у — даже если такого варианта ещё нет (линия из ссылки), чтобы вид совпадал с адресом.
+// A select gets the value even if the option isn't there yet (a line from a link), so the view matches the address.
 function setSelect(id, value) {
   const el = document.getElementById(id);
   if (value && ![...el.options].some(o => o.value === value))
@@ -53,7 +53,7 @@ function parseRoute() {
   return { view, sub: parts[1], q };
 }
 
-// Адреса из значений панелей. Значения по умолчанию в адрес не попадают.
+// Addresses built from the toolbar values. Defaults are left out.
 function callsUrl() {
   return buildUrl('/calls', {
     line: val('calls-line'), dir: val('calls-dir'),
@@ -66,7 +66,7 @@ function smsUrl() {
   return buildUrl('/sms', { line: val('sms-line'), dir: val('sms-dir'), q: val('sms-q').trim() });
 }
 
-// history.state.n — сколько видов открыто в этой вкладке браузера.
+// history.state.n counts the views opened in this browser tab.
 let navIndex = history.state?.n ?? 0;
 
 function navigate(url, replace) {
@@ -79,8 +79,8 @@ function navigate(url, replace) {
 
 window.addEventListener('popstate', e => { navIndex = e.state?.n ?? 0; render(); });
 
-// Вкладки и ссылки страницы меняют вид без перезагрузки; вкладка открывается там, где её оставили,
-// клик по открытой вкладке — в её начало.
+// Tabs and links inside the page change the view without reloading it; a tab opens where it was left,
+// a click on the open tab goes to its start.
 document.addEventListener('click', e => {
   const a = e.target.closest('a[href^="/"]');
   if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || a.target || a.hasAttribute('download')) return;
@@ -128,7 +128,7 @@ async function render() {
   } else if (r.view === 'status') {
     loadStatus();
   } else if (r.view === 'config') {
-    // Уже открытый вид конфига при смене раздела дерева не перечитываем — правки не теряются.
+    // The open config view is not reloaded when another tree section is chosen, so edits are kept.
     const mode = r.sub === 'yaml' ? 'yaml' : 'form';
     if (entering || mode !== configMode) setConfigMode(mode);
     else if (mode === 'form' && q.s) showConfigNode(q.s, true);
@@ -156,7 +156,7 @@ function setBusy(text) {
   document.getElementById('busy').classList.toggle('show', !!text);
 }
 
-// ---- линии (для фильтров и отправки SMS) ----
+// ---- lines (for the filters and for sending SMS) ----
 
 let channelsCache = [];
 
@@ -171,12 +171,12 @@ async function loadChannels() {
     channelsCache.map(c => `<option value="${esc(c.name)}">${esc(c.name)} (${esc(c.type)})</option>`).join('');
 }
 
-// ---- Звонки (mode: full) ----
+// ---- Calls (mode: full) ----
 
 function fmtDur(s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 function fmtSec(x) { x = Math.floor(x); return Math.floor(x / 60) + ':' + String(x % 60).padStart(2, '0'); }
 
-// "2026-09-26 13:16:43" → "26.09 13:16" (год — только если не текущий)
+// "2026-09-26 13:16:43" -> "26.09 13:16" (the year only if it is not the current one)
 function fmtTs(ts) {
   const [d, time] = ts.split(' ');
   const [y, mo, da] = d.split('-');
@@ -192,8 +192,8 @@ function highlight(text, q) {
   return html;
 }
 
-// Дата из текстового поля → yyyy-mm-dd. Понимает дд.мм.гггг, дд.мм.гг, дд.мм (текущий год)
-// и yyyy-mm-dd. '' — поле пустое; false — не распознана (поле краснеет).
+// Date from a text field to yyyy-mm-dd. Understands dd.mm.yyyy, dd.mm.yy, dd.mm (current year)
+// and yyyy-mm-dd. '': the field is empty; false: not recognized (the field turns red).
 function readDate(id) {
   const el = document.getElementById(id);
   const v = el.value.trim();
@@ -214,7 +214,7 @@ function readDate(id) {
   return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
-// Иконки — SVG одним контурным стилем: одинаково везде, без интернета.
+// Icons are SVG in one outline style: the same everywhere, no internet needed.
 const svg = d => `<svg viewBox="0 0 24 24">${d}</svg>`;
 const ICON_PLAY = svg('<path d="M7 4.5v15l12.5-7.5z" fill="currentColor" stroke="none"/>');
 const ICON_DOWNLOAD = svg('<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>');
@@ -235,7 +235,7 @@ async function loadCalls(keepOpen) {
   if (q.from) params.set('from', q.from);
   if (q.to) params.set('to', q.to);
 
-  if (keepOpen && document.querySelector('.call audio')) return;   // не сбиваем воспроизведение
+  if (keepOpen && document.querySelector('.call audio')) return;   // do not interrupt playback
   const open = keepOpen
     ? [...document.querySelectorAll('.call-text:not([hidden])')].map(e => e.closest('.call').dataset.id)
     : [];
@@ -258,8 +258,8 @@ function formatCall(r) {
     ? `<b>${esc(r.peerName)}</b><span class="num">${esc(r.peer)}</span>`
     : `<b class="num" style="margin:0">${esc(r.peer)}</b>`;
   const rec = r.hasRecording;
-  // Расшифровка: готова — кнопка скачивает PDF (открывается кликом по строке); в очереди — часы;
-  // не удалась — раскрывает строку с ошибкой и «Повторить».
+  // Transcript: done, the button downloads the PDF (it opens with a click on the row); queued, a clock;
+  // failed, the button opens the row with the error and Retry.
   const trBtn = {
     done: `<a class="icon-btn" data-tr="done" title="${esc(t('web.calls.transcript_download'))}" href="/api/calls/${r.id}/transcript.pdf" download>${ICON_TEXT}</a>`,
     pending: `<span class="icon-btn" data-tr="pending" title="${esc(t('web.calls.tr_pending'))}">${ICON_PENDING}</span>`,
@@ -283,7 +283,7 @@ function formatCall(r) {
   </div>`;
 }
 
-// Клик по строке (не по кнопкам) — развернуть/свернуть расшифровку.
+// A click on the row (not on the buttons) opens or closes the transcript.
 function rowClick(e, id) {
   if (e.target.closest('.call-actions')) return;
   if (callsCache[id]?.trState) toggleText(id);
@@ -304,8 +304,8 @@ function playCall(id, at) {
   }
 }
 
-// Расшифровка как переписка: все реплики слева, мои — синим, собеседника — серым.
-// Старые моно-записи — реплики по времени, без стороны.
+// Transcript as a chat: all lines on the left, mine in blue, the other side's in grey.
+// Old mono recordings: lines by time, without a side.
 function renderDialog(r, q) {
   let segs = [];
   try { segs = JSON.parse(r.trSegments || '[]'); } catch { }
@@ -412,7 +412,7 @@ async function submitSend() {
   else showToast(t('web.error', data.error || 'unknown'), 'err');
 }
 
-// ---- Лог ----
+// ---- Log ----
 
 let logTimer = null;
 function setLogRefresh() {
@@ -423,7 +423,7 @@ function setLogRefresh() {
 
 async function loadLog() {
   const data = await (await fetch('/api/log?lines=' + val('log-lines'))).json();
-  // Новое сверху — как на вкладках «Звонки» и SMS.
+  // Newest first, as on the Calls and SMS tabs.
   document.getElementById('log-container').innerHTML = data.lines.slice().reverse().map(line => {
     const p = line.split('\t');
     if (p.length < 8) return `<div class="log-line"><span>${esc(line)}</span></div>`;
@@ -436,11 +436,11 @@ async function loadLog() {
   }).join('');
 }
 
-// ---- Состояние: точки в шапке и вкладка «Статус» ----
+// ---- State: dots in the header and the Status tab ----
 
 function statusClass(h, gwType) {
   if (!h) return 'warn';
-  // connected есть только у AMI-шлюзов (постоянный сокет); goip и telegram — по активности и ошибкам.
+  // Only AMI gateways have connected (a permanent socket); goip and telegram go by activity and errors.
   if ((gwType === 'yeastar' || gwType === 'quectel') && h.connected === false) return 'err';
   const lastErr = h.lastErrorAt ? new Date(h.lastErrorAt).getTime() : 0;
   const lastAct = h.lastActivityAt ? new Date(h.lastActivityAt).getTime() : 0;
@@ -499,9 +499,9 @@ async function loadAbout() {
   } catch { }
 }
 
-// ---- Конфиг: форма деревом или YAML ----
+// ---- Config: a form with a tree or YAML ----
 
-// Редактор YAML: CodeMirror из /js/yaml-editor.js; не загрузился — обычное текстовое поле.
+// YAML editor: CodeMirror from /js/yaml-editor.js; if it fails to load, a plain text area.
 let configEditor = null;
 function getConfigEditor() {
   return configEditor ??= (async () => {
@@ -538,7 +538,7 @@ async function loadConfigYaml() {
   (await getConfigEditor()).setValue(data.content);
 }
 
-// Списки дерева: шлюзы и линии. Элемент списка — узел "<prefix><ключ>", его поля — по пути с селектором.
+// Lists in the tree: gateways and lines. A list item is the node "<prefix><key>", its fields use a path with a selector.
 const LISTS = {
   gateways: { prefix: 'gw:', sel: 'id', add: 'web.config.add_gateway', remove: 'web.config.remove_gateway_confirm', hint: 'web.config.gateways_hint' },
   channels: { prefix: 'ch:', sel: 'name', add: 'web.config.add_channel', remove: 'web.config.remove_channel_confirm', hint: 'web.config.channels_hint' },
@@ -549,7 +549,7 @@ let formTree = [];
 let templates = {};
 let removedItems = [];
 
-// Разделы с подразделами: calls → cdr_db, transcribe.
+// Sections with subsections: calls -> cdr_db, transcribe.
 function settingsTree(data) {
   const byId = Object.fromEntries((data.groups || []).map(g => [g.id, g]));
   const node = id => ({ id, title: byId[id].title, fields: byId[id].fields || [] });
@@ -615,7 +615,7 @@ function renderTreePanes() {
   return html;
 }
 
-// Значения из полей → в дерево (перед перерисовкой, чтобы правки не терялись).
+// Values from the inputs into the tree (before re-rendering, so edits are not lost).
 function captureFields() {
   document.querySelectorAll('#config-form [data-path]').forEach(el => {
     const v = el.type === 'checkbox' ? (el.checked ? 'true' : 'false') : el.value;
@@ -644,7 +644,7 @@ function markChanged(e) {
   el.classList.toggle('changed', v !== orig);
 }
 
-// Раздел дерева — в адресе (?s=…), без новой записи в истории.
+// The tree section goes into the address (?s=...), without a new history entry.
 function showConfigNode(id, fromRoute) {
   const host = document.getElementById('config-form');
   host.querySelectorAll('.tree-item[data-node]').forEach(el => el.classList.toggle('on', el.dataset.node === id));
@@ -685,7 +685,7 @@ function commitAdd(listId, name) {
   const id = LISTS[listId].prefix + name;
   if (list.children.some(c => c.id === id)) { showToast(t('web.config.name_exists', name), 'err'); return; }
   removedItems = removedItems.filter(x => x !== `${listId}[${LISTS[listId].sel}=${name}]`);
-  // Поля нового элемента — из шаблона; orig у них нет, поэтому при сохранении уходят все непустые.
+  // Fields of a new item come from the template; they have no orig, so all non-empty ones are saved.
   const fields = (templates[listId] || []).map(f => Object.assign({}, f, {
     path: f.path.split('{key}').join(name),
     value: f.path.endsWith('.' + LISTS[listId].sel) ? name : f.value,
@@ -722,7 +722,7 @@ async function loadConfigForm() {
   renderSettings();
 }
 
-// В YAML уходят только изменённые поля (и все непустые поля новых элементов) — остальной файл не трогается.
+// Only changed fields (and all non-empty fields of new items) go to the YAML; the rest of the file is untouched.
 function collectFields() {
   captureFields();
   const fields = {};
@@ -769,8 +769,8 @@ async function restartService() {
   }
 }
 
-// Служба выходит, systemd поднимает её через несколько секунд. Страница перезагружается:
-// с новыми настройками могли смениться язык и режим.
+// The service exits and systemd brings it back in a few seconds. The page reloads:
+// the new settings may have changed the language and the mode.
 async function waitForRestart() {
   setBusy(t('web.config.restarting'));
   await new Promise(r => setTimeout(r, 3000));
@@ -787,7 +787,7 @@ async function waitForRestart() {
   showToast(t('web.config.restart_timeout'), 'err');
 }
 
-// ---- старт ----
+// ---- start ----
 
 (async () => {
   const fields = readPrefs().fields || {};
@@ -806,7 +806,7 @@ async function waitForRestart() {
   setLogRefresh();
   loadStatus();
   setInterval(loadStatus, 15000);
-  // Пока есть звонки в очереди на расшифровку — обновляем, чтобы часы сменились текстом.
+  // While calls are queued for transcription, refresh so the clock turns into text.
   if (full) setInterval(() => {
     if (parseRoute().view === 'calls' && document.querySelector('.call [data-tr="pending"]')) loadCalls(true);
   }, 15000);

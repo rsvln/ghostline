@@ -7,17 +7,17 @@ namespace ghostline
         public long Id { get; set; }
         public string UniqueId { get; set; }
         public string Ts { get; set; }
-        public string Channel { get; set; }      // имя линии из конфига (home/work)
+        public string Channel { get; set; }      // line name from the config (home/work)
         public string Device { get; set; }       // gsm1/gsm2
         public string Direction { get; set; }    // "in" / "out"
-        public string Peer { get; set; }         // номер собеседника, E.164
-        public string PeerName { get; set; }     // имя из contacts.csv
-        public string Ext { get; set; }          // внутренний номер (11/12)
+        public string Peer { get; set; }         // number of the other side, E.164
+        public string PeerName { get; set; }     // name from contacts.csv
+        public string Ext { get; set; }          // extension (11/12)
         public string Disposition { get; set; }
         public int Duration { get; set; }
-        public int Billsec { get; set; }         // длительность разговора; 0 — не состоялся
-        public string RecPath { get; set; }      // YYYY/MM/DD/file.wav относительно monitor/
-        public long RecSize { get; set; }        // -1 неизвестно, иначе размер файла на АТС
+        public int Billsec { get; set; }         // talk time; 0: the call did not take place
+        public string RecPath { get; set; }      // YYYY/MM/DD/file.wav relative to monitor/
+        public long RecSize { get; set; }        // -1 unknown, otherwise the file size on the PBX
         public string TrState { get; set; }      // none / pending / done / error
         public string TrText { get; set; }
         public string TrError { get; set; }
@@ -38,11 +38,11 @@ namespace ghostline
         public int Attempts { get; set; }
     }
 
-    // Звонки (из CDR АТС), очередь расшифровки и очередь уведомлений о звонках в Telegram.
-    // Схема звонков версионируется через PRAGMA user_version.
+    // Calls (from the PBX CDR), the transcription queue and the queue of call notifications to Telegram.
+    // The calls schema is versioned with PRAGMA user_version.
     public static partial class Store
     {
-        // Пустой wav — один заголовок (44 байта): неотвеченный звонок или канал SMS.
+        // An empty wav is just a header (44 bytes): an unanswered call or the SMS channel.
         public const long MinRecordingBytes = 1024;
 
         internal static void MigrateCalls(SqliteConnection db)
@@ -105,9 +105,9 @@ namespace ghostline
 
             if (version < 2)
             {
-                // Реплики с отметками времени (и стороной, если есть дорожки по сторонам).
-                // Старые расшифровки — сплошной текст: переставляем в очередь, чтобы
-                // разбились на реплики.
+                // Lines with timestamps (and a side when there are per-side legs).
+                // Old transcripts are plain text: queue them again so that they
+                // are split into lines.
                 using var cmd = db.CreateCommand();
                 cmd.CommandText = @"
                     ALTER TABLE calls ADD COLUMN tr_segments TEXT;
@@ -119,7 +119,7 @@ namespace ghostline
 
             if (version < 3)
             {
-                // Перерасшифровка по кнопке — вне очереди, раньше фоновых.
+                // Transcribing again from the button jumps the queue, ahead of the background ones.
                 using var cmd = db.CreateCommand();
                 cmd.CommandText = @"
                     ALTER TABLE calls ADD COLUMN tr_requested_at TEXT;
@@ -160,7 +160,7 @@ namespace ghostline
             return cmd.ExecuteScalar() != null;
         }
 
-        // Возвращает id новой записи или 0, если звонок с таким uniqueid уже есть.
+        // Returns the id of the new row, or 0 if a call with this uniqueid already exists.
         public static long InsertCall(CallRecord c)
         {
             using var db = Open();
@@ -221,8 +221,8 @@ namespace ghostline
             return r.Read() ? ReadCall(r) : null;
         }
 
-        // Строка поиска → запрос FTS5: каждое слово в кавычках с префиксом, все слова обязательны.
-        // Кавычки и спецсимволы FTS из пользовательского ввода не пропускаем.
+        // Search string to an FTS5 query: every word quoted with a prefix match, all words required.
+        // Quotes and FTS special characters from user input are not passed through.
         private static string FtsQuery(string q)
         {
             var words = q.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)
@@ -243,8 +243,8 @@ namespace ghostline
             if (!string.IsNullOrEmpty(channel)) { where.Add("channel = $ch"); cmd.Parameters.AddWithValue("$ch", channel); }
             if (!string.IsNullOrEmpty(direction)) { where.Add("direction = $dir"); cmd.Parameters.AddWithValue("$dir", direction); }
             if (missedOnly) where.Add("billsec = 0");
-            // «С записью» — был разговор и он записан. У неотвеченных запись бывает непустой
-            // (гудки, «абонент не отвечает»), но разговора в ней нет.
+            // "Recorded": there was a conversation and it was recorded. Unanswered calls can have a
+            // non-empty recording (ringback, an operator announcement), but no conversation in it.
             if (withRecordingOnly) { where.Add("billsec > 0 AND rec_path IS NOT NULL AND rec_size > $minrec"); cmd.Parameters.AddWithValue("$minrec", MinRecordingBytes); }
             if (!string.IsNullOrEmpty(from)) { where.Add("ts >= $from"); cmd.Parameters.AddWithValue("$from", from); }
             if (!string.IsNullOrEmpty(to)) { where.Add("ts < date($to, '+1 day')"); cmd.Parameters.AddWithValue("$to", to); }
@@ -278,12 +278,12 @@ namespace ghostline
             cmd.ExecuteNonQuery();
         }
 
-        // --- расшифровка ---
+        // --- transcription ---
 
-        // Сначала новые звонки: свежий разговор важнее, чем догонять архив.
-        // Две очереди, у каждой свой воркер, чтобы запрос кнопкой не ждал за фоновой
-        // расшифровкой длинных звонков: requested = true — запрошенные кнопкой (последний
-        // запрос первым), false — все остальные (новые звонки первыми).
+        // New calls first: a fresh conversation matters more than catching up with the archive.
+        // Two queues, each with its own worker, so a button request does not wait behind the
+        // background transcription of long calls: requested = true, requested with the button (latest
+        // request first); false, all others (newest calls first).
         public static CallRecord NextPendingTranscription(bool requested)
         {
             using var db = Open();
@@ -313,7 +313,7 @@ namespace ghostline
             tx.Commit();
         }
 
-        // final — больше не пытаться (ошибка в самих данных, а не недоступность сервиса).
+        // final: do not try again (a problem with the data itself, not an unavailable service).
         public static void SetTranscriptError(long id, string error, bool final)
         {
             using var db = Open();
@@ -339,8 +339,8 @@ namespace ghostline
         {
             using var db = Open();
             using var cmd = db.CreateCommand();
-            // Отправленные уведомления этого звонка — снова «ждут расшифровку»: когда новая
-            // будет готова, подпись в Telegram обновится.
+            // The sent notifications of this call are "waiting for the transcript" again: when the new
+            // one is ready, the Telegram caption is updated.
             cmd.CommandText = @"UPDATE calls SET tr_state = 'pending', tr_error = NULL, tr_attempts = 0,
                                                  tr_requested_at = $now
                                 WHERE id = $id AND rec_path IS NOT NULL;
@@ -374,7 +374,7 @@ namespace ghostline
             return Convert.ToInt32(cmd.ExecuteScalar());
         }
 
-        // --- уведомления в Telegram ---
+        // --- Telegram notifications ---
 
         public static void EnqueueCallTg(long callId, IEnumerable<string> chatIds, string kind, bool wantTranscript)
         {
@@ -411,7 +411,7 @@ namespace ghostline
 
         private const string TgColumns = "t.id, t.call_id, t.chat_id, t.kind, t.want_transcript, t.message_id, t.attempts";
 
-        // Ещё не отправленные уведомления.
+        // Notifications not sent yet.
         public static List<CallTgItem> PendingCallTg(int limit)
         {
             using var db = Open();
@@ -421,8 +421,8 @@ namespace ghostline
             return ReadTg(cmd);
         }
 
-        // Отправленные с «⏳», у которых расшифровка уже завершилась (готова или не удалась) —
-        // пора дописать её в сообщение.
+        // Sent with the hourglass whose transcription has finished (done or failed):
+        // time to add it to the message.
         public static List<CallTgItem> CallTgReadyForEdit(int limit)
         {
             using var db = Open();

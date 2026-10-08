@@ -12,9 +12,9 @@ namespace ghostline
         public string LastError { get; set; }
     }
 
-    // Оперативное состояние шлюзов/Telegram — только в памяти, не история.
-    // Ключ — тип шлюза ("yeastar" / "goip" / "quectel" / "telegram"), не имя SIM-канала:
-    // физическое соединение одно на шлюз, а не на каждый channel.name в конфиге.
+    // Current state of gateways and Telegram, in memory only, not a history.
+    // Key: the gateway type ("yeastar" / "goip" / "quectel" / "telegram"), not the SIM channel name:
+    // there is one physical connection per gateway, not per channel.name in the config.
     public static class HealthStatus
     {
         private static readonly ConcurrentDictionary<string, ChannelHealth> _health = new();

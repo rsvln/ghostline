@@ -169,7 +169,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 }
 .call-text[hidden] { display: none !important; }
 .call-text mark { background: var(--yellow); color: #000; border-radius: 2px; }
-/* Диалог узкой колонкой, все реплики слева; стороны различаются подписью и цветом. */
+/* Dialog in a narrow column, all lines on the left; the sides differ by label and color. */
 .call-text.dialog { white-space: normal; display: flex; flex-direction: column; gap: 4px; max-width: 860px; }
 .dl { display: flex; flex-direction: column; max-width: 80%; align-self: flex-start; }
 .dl.mono { max-width: 100%; }

@@ -2,7 +2,7 @@ using System.Reflection;
 
 namespace ghostline
 {
-    // Версия приложения из атрибутов сборки: "1.0.124+2026.10.08" (номер — version.txt, дата сборки).
+    // App version from the assembly attributes: "1.1.0+2026.10.08" (version.txt and the build date).
     public static class VersionInfo
     {
         public static string Informational { get; } =
@@ -10,7 +10,7 @@ namespace ghostline
 
         public static string Version => Informational.Split('+')[0];
 
-        // "2026-10-08"; пусто, если дата сборки неизвестна (отладочная сборка)
+        // "2026-10-08"; empty when the build date is unknown
         public static string BuildDate => Informational.Contains('+') ? Informational.Split('+')[1].Replace('.', '-') : "";
 
         public const string ProjectUrl = "https://github.com/rsvln/ghostline";

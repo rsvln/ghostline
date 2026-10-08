@@ -2,58 +2,58 @@ namespace ghostline
 {
     internal partial class Program
     {
-        // Быстрая проверка + постановка исходящего SMS в персистентную очередь.
-        // Используется и из Telegram-бота, и из веб-UI (/api/sms/send). Реальная
-        // отправка идёт асинхронно из SmsOutboxWorker с ретраями — временная
-        // недоступность шлюза (HTTP или AMI) больше не теряет сообщение молча.
+        // Quick check and queuing of an outgoing SMS in the persistent queue.
+        // Used both by the Telegram bot and by the web UI (/api/sms/send). The actual
+        // sending happens asynchronously in SmsOutboxWorker with retries, so a temporary
+        // gateway outage (HTTP or AMI) no longer loses a message silently.
         internal static (bool ok, string? error) QueueSmsSend(Channel chanOut, string rawNumber, string mcontent, string sourceLabel)
         {
-            // Раз шлюз есть в gateways[] — клиент для него уже создан в Main, отдельно
-            // проверять "настроен ли IP" не нужно: gateways[] сам по себе источник
-            // правды о том, что реально поднято. Несуществующий gateway — ошибка конфига.
+            // If the gateway is in gateways[], its client was already created in Main; there is
+            // no need to check separately whether "the IP is set": gateways[] itself is the source
+            // of truth about what is running. An unknown gateway is a config error.
             var gw = getGatewayById(chanOut.gateway);
             if (gw == null)
                 return (false, "channel '" + chanOut.name + "' references unknown gateway '" + chanOut.gateway + "'");
 
-            // AMI и большинство прошивок шлюзов ожидают однострочный текст команды;
-            // "сырые" переводы строк (например, из многострочной textarea веб-UI) ломают
-            // построчный протокол AMI (Action: Command у quectel), поэтому сворачиваем их
-            // в пробелы здесь же, одинаково для всех типов каналов.
+            // AMI and most gateway firmwares expect a single-line command text; raw line breaks
+            // (for example from the multi-line textarea of the web UI) break the line-based AMI
+            // protocol (Action: Command for quectel), so they are folded into spaces here, the
+            // same for all channel types.
             mcontent = mcontent.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ");
 
-            // Канонизируем номер сразу на входе (E.164) — в очереди/БД/UI всегда один
-            // и тот же вид, независимо от того, как ввёл его пользователь. Формат под
-            // конкретный шлюз/диалплан выводится из этого канонического вида в DispatchSms.
+            // The number is made canonical (E.164) right at the input, so the queue, DB and UI always
+            // show the same form whatever the user typed. The dial format for a particular
+            // gateway or dial plan is derived from this canonical form in DispatchSms.
             string canonical = ToE164(rawNumber);
 
             Store.EnqueueOutgoingSms(chanOut.name, canonical, mcontent, sourceLabel);
             return (true, null);
         }
 
-        // Переводит канонический номер в формат набора для конкретного шлюза.
-        // Короткие коды ("900") и буквенные ID набираются как есть — приписать им
-        // "810"/"8" значит отправить в никуда.
+        // Converts the canonical number to the dial format of a particular gateway.
+        // Short codes ("900") and alphanumeric ids are dialed as is: prefixing them with
+        // "810"/"8" would send them nowhere.
         private static string FormatForGateway(string canonical, string gatewayType)
         {
             if (string.IsNullOrEmpty(canonical) || !canonical.StartsWith("+"))
                 return canonical;
 
-            // quectel ожидает E.164 с "+" — он и так уже в этом виде.
+            // quectel expects E.164 with "+", which is already the case.
             if (gatewayType == "quectel")
                 return canonical;
 
-            // goip / yeastar — российский диалплан: "8" для домашних, "810" + код
-            // страны для международных.
+            // goip / yeastar: Russian dial plan, "8" for domestic numbers, "810" plus the
+            // country code for international ones.
             return canonical.StartsWith("+7")
                 ? "8" + canonical.Substring(2)
                 : "810" + canonical.Substring(1);
         }
 
-        // Собственно попытка отправки через нужный шлюз. Бросает исключение при
-        // неудаче — вызывающий (SmsOutboxWorker) ловит и решает, ретраить ли.
-        // rawNumber приходит уже в каноническом виде (см. QueueSmsSend) — здесь из
-        // него выводится формат набора под диалплан шлюза (dest), а в историю/UI/
-        // Telegram всегда идёт исходный канонический rawNumber, не dest.
+        // The actual send attempt through the right gateway. Throws on failure; the
+        // caller (SmsOutboxWorker) catches it and decides whether to retry.
+        // rawNumber is already canonical (see QueueSmsSend); here the dial format for the
+        // gateway's dial plan (dest) is derived from it, while history, UI and Telegram
+        // always get the original canonical rawNumber, not dest.
         private static async Task DispatchSms(Channel chanOut, Gateway gw, string rawNumber, string mcontent, string sourceLabel)
         {
             if (gw.type == "yeastar")
@@ -98,10 +98,10 @@ namespace ghostline
             }
         }
 
-        // Фоновый воркер очереди исходящих SMS: раз в 5с забирает накопившиеся
-        // отправки и пытается их выполнить. Успех — удаляет из очереди, неудача —
-        // фиксирует попытку и оставляет на следующий цикл (без ограничения по числу
-        // попыток — переживает и временную недоступность шлюза, и рестарт процесса).
+        // Background worker of the outgoing SMS queue: every 5 s takes the pending sends
+        // and tries them. Success removes the item from the queue; failure records the
+        // attempt and keeps it for the next cycle (no limit on attempts, so it survives
+        // both a temporary gateway outage and a process restart).
         private static async Task SmsOutboxWorker()
         {
             while (true)
@@ -161,9 +161,9 @@ namespace ghostline
                 Content = mcontent
             });
 
-            // Уведомление в Telegram-чаты о факте отправки — одинаково для команд из бота
-            // и для отправки через веб-UI (раньше это делал только бот-путь, и отправленные
-            // через веб SMS были в Telegram не видны).
+            // Notification to the Telegram chats that an SMS was sent, the same for bot commands
+            // and for sending from the web UI (before, only the bot path did this, so SMS sent
+            // from the web were not visible in Telegram).
             string body = "sent to " + peer + " from " + sourceLabel + " via " + chan.name + " at " + ts + "\n----------------\n\n" + mcontent;
             EnqueueTelegramBroadcast(body);
         }

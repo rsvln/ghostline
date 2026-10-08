@@ -37,7 +37,7 @@
       <label><input type="checkbox" id="calls-rec" checked onchange="navigate(callsUrl())"> {{web.calls.with_recording}}</label>
       <label><input type="checkbox" id="calls-missed" onchange="if (this.checked) document.getElementById('calls-rec').checked = false; navigate(callsUrl())"> {{web.calls.missed_only}}</label>
       <input type="text" id="calls-q" placeholder="{{web.calls.search}}" oninput="debounced(() => navigate(callsUrl(), true))" style="width:220px">
-      <!-- Даты — текстом: у <input type="date"> формат навязывает браузер. -->
+      <!-- Dates as text: with <input type="date"> the browser forces its own format. -->
       <label>{{web.calls.date_from}}</label>
       <input type="text" id="calls-from" class="date" placeholder="{{web.calls.date_format}}" onchange="navigate(callsUrl())">
       <label>{{web.calls.date_to}}</label>

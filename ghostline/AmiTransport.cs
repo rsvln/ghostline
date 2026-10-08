@@ -7,11 +7,11 @@ namespace ghostline
 {
     internal partial class Program
     {
-        // Подключение к AMI с ретраем: если сервер недоступен (при первом старте
-        // или при переподключении после обрыва) — не падаем, а повторяем попытку
-        // каждые 5с, пока не получится. Общая точка входа и для начального
-        // подключения (запускается через Task.Run из Main — недоступность одного
-        // шлюза не блокирует остальные), и для реконнекта после разрыва.
+        // Connects to AMI with retries: if the server is unavailable (on the first start
+        // or when reconnecting after a drop), do not fail but retry every 5 s until it
+        // works. One entry point both for the initial connection (started with Task.Run
+        // from Main, so one unavailable gateway does not block the others) and for the
+        // reconnect after a drop.
         private static void ConnectAmiWithRetry(Gateway gw, TcpClient client)
         {
             while (true)
@@ -19,9 +19,9 @@ namespace ghostline
                 try
                 {
                     client.Client.Connect(IPAddress.Parse(gw.ip), gw.amiPort);
-                    // Если за это время по сокету не придёт вообще ничего (в т.ч. ответ
-                    // на keepalive-пинг из AmiKeepaliveLoop) — чтение бросит исключение
-                    // по таймауту, что заведёт "тихий" обрыв в тот же реконнект-цикл.
+                    // If nothing at all arrives on the socket in this time (including the reply to
+                    // the keepalive ping from AmiKeepaliveLoop), the read throws on timeout, which
+                    // sends a "silent" drop into the same reconnect loop.
                     client.Client.ReceiveTimeout = 90000;
                     HealthStatus.MarkConnected(gw.id);
                     break;
@@ -39,12 +39,12 @@ namespace ghostline
             client.Client.Send(Encoding.UTF8.GetBytes(payload));
         }
 
-        // На Linux (Alpine в контейнере) .NET после Disconnect(reuseSocket: true)
-        // запрещает синхронный Connect() повторно на том же Socket-объекте — только
-        // асинхронный, и то на другой EndPoint (иначе кидает "Once the socket has
-        // been disconnected..."). Поэтому не реюзаем объект — создаём новый TcpClient
-        // и подменяем его в общем словаре; всё остальное (DispatchSms, AmiKeepaliveLoop)
-        // уже берёт клиента заново по id шлюза, а не хранит прямую ссылку.
+        // On Linux (Alpine in a container) .NET does not allow a synchronous Connect() again
+        // on the same Socket object after Disconnect(reuseSocket: true), only an asynchronous
+        // one and only to another EndPoint (otherwise it throws "Once the socket has been
+        // disconnected..."). So the object is not reused: a new TcpClient is created and
+        // replaced in the shared dictionary; everything else (DispatchSms, AmiKeepaliveLoop)
+        // gets the client by gateway id each time instead of keeping a direct reference.
         private static void ReconnectClient(TcpClient oldClient, Gateway gw)
         {
             try { oldClient.Close(); } catch { }
@@ -54,12 +54,12 @@ namespace ghostline
             ConnectAmiWithRetry(gw, newClient);
         }
 
-        // Раз в 30с шлёт "Action: Ping" по живому соединению — если сокет уже мёртв,
-        // либо сама отправка упадёт (игнорируем — обрыв всё равно поймает
-        // receive-timeout на чтении), либо в течение 90с не придёт вообще ничего и
-        // чтение само запустит реконнект. Запускается один раз на шлюз и переживает
-        // все последующие реконнекты — текущий клиент берётся из _amiClients на
-        // каждый тик, чтобы не держать протухшую ссылку после подмены соединения.
+        // Sends "Action: Ping" every 30 s on a live connection. If the socket is already dead,
+        // either the send fails (ignored, the receive timeout on the read catches the drop
+        // anyway) or nothing at all arrives within 90 s and the read itself starts the
+        // reconnect. Started once per gateway and survives all later reconnects: the current
+        // client is taken from _amiClients on every tick, so no stale reference is kept after
+        // the connection is replaced.
         private static async Task AmiKeepaliveLoop(string gatewayId)
         {
             while (true)
@@ -74,8 +74,8 @@ namespace ghostline
             }
         }
 
-        // Копит байты сокета в буфер до появления полного AMI-пакета (\r\n\r\n),
-        // разбирает и раздаёт события по одному, остаток держит в буфере до следующего чтения.
+        // Collects socket bytes in a buffer until a full AMI packet (\r\n\r\n) arrives,
+        // parses it and dispatches events one by one; the rest stays in the buffer until the next read.
         private static void SocketReadDataLoop(TcpClient client, Gateway gw)
         {
             string buffer = "";
@@ -118,8 +118,8 @@ namespace ghostline
             return Encoding.UTF8.GetString(buf, 0, n);
         }
 
-        // Разбор одного AMI-пакета ("Key: Value" построчно) в словарь.
-        // Порядок полей AMI не гарантирован спецификацией — читать только по имени ключа.
+        // Parses one AMI packet ("Key: Value" per line) into a dictionary.
+        // The order of AMI fields is not guaranteed by the spec, so read by key name only.
         private static Dictionary<string, string> ParseAmiEvent(string block)
         {
             var dict = new Dictionary<string, string>();
@@ -148,24 +148,24 @@ namespace ghostline
             {
                 HandleYeastarSms(evt, gw);
             }
-            // Явная ошибка AMI (например, неудачный логин) — иначе она бы прошла
-            // абсолютно незаметно: TCP-подключение при этом успешно, событий просто
-            // никогда не будет, и выглядит это как "подключились, но тишина".
+            // An explicit AMI error (for example a failed login); otherwise it would go
+            // completely unnoticed: the TCP connection succeeds, events simply never
+            // come, and it looks like "connected, but silence".
             else if (evt.TryGetValue("Response", out var response) && response == "Error")
             {
                 Console.WriteLine($"AMI ({gw.id}) error response: {evt.GetValueOrDefault("Message", "(no message)")}");
                 HealthStatus.MarkError(gw.id, "AMI error: " + evt.GetValueOrDefault("Message", "(no message)"));
             }
-            // остальное (QuectelNewCMGR, Newchannel/Hangup служебного Local-канала,
-            // успешный ответ на Action: Login / Action: Command и т.п.) — не парсим, не нужно.
+            // everything else (QuectelNewCMGR, Newchannel/Hangup of the service Local channel,
+            // a successful reply to Action: Login / Action: Command, etc.) is not parsed, not needed.
         }
 
         private static void HandleYeastarSms(Dictionary<string, string> evt, Gateway gw)
         {
             string txt = HttpUtility.UrlDecode(evt.GetValueOrDefault("Content", "").Replace("%EF%BB%BF", ""));
-            // NB: поле идентификации порта в оригинальном коде сопоставлялось по позиции без
-            // явного имени; по конвенции AMI это "Channel". Если у реального события Yeastar
-            // ключ называется иначе — поправить здесь единственную строку.
+            // NB: the port id field was matched by position without an explicit name in the original
+            // code; by AMI convention it is "Channel". If a real Yeastar event names the key
+            // differently, fix this single line.
             string channelField = evt.GetValueOrDefault("Channel", "");
             Channel chan = getChannel("Channel: " + channelField, gw.id);
             if (chan == null)
@@ -220,7 +220,7 @@ namespace ghostline
                 if (evt.TryGetValue("MessageLine" + i, out var line))
                     lines.Add(line);
 
-            // MessageLine0 нередко приходит с ведущим BOM (U+FEFF) — убираем, как и для yeastar.
+            // MessageLine0 often comes with a leading BOM (U+FEFF); strip it, as for yeastar.
             string full = string.Join("\n", lines).Replace("﻿", "");
             string recvTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
