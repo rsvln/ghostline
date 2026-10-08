@@ -30,6 +30,7 @@ if ! id ghostline >/dev/null 2>&1; then
 fi
 mkdir -p /opt/ghostline "$CONF" /var/log/ghostline
 chown ghostline: "$CONF" /var/log/ghostline
+chmod 750 "$CONF"   # tokens and passwords
 
 first=0
 [ -f "$CONF/ghostline.yaml" ] || [ -f "$CONF/ghostline.json" ] || first=1
