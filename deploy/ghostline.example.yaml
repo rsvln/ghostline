@@ -1,0 +1,56 @@
+# ghostline configuration. All keys are described in README.md (Configuration).
+# An unknown key stops the service at startup, so a typo cannot silently disable an option.
+# After the first start the file can also be edited in the web interface (Config tab).
+
+mode: sms                     # sms | full (full also handles calls)
+
+locale:
+  default: en                 # en | ru
+  web:
+  telegram:
+  transcript:
+
+telegram:
+  token: 123456789:AAExampleTelegramBotToken
+  chat_ids:
+    - "100000001"
+
+web:                          # empty user and password disable authentication
+  port: 8889
+  user: admin
+  password: change-me
+
+logger:
+  file: true
+
+gateways:
+  - id: pbx
+    type: quectel             # quectel | yeastar | goip
+    ip: 10.0.0.10
+    ami_port: 5038
+    user: ghostline
+    password: ami-secret
+
+channels:
+  - name: personal
+    gateway: pbx
+    pattern: gsm1
+    line: gsm1
+    number: "+79001234567"
+
+# mode: full only
+# calls:
+#   cdr_db:
+#     host: 10.0.0.10
+#     port: 3306
+#     database: asteriskcdrdb
+#     user: ghostline
+#     password: cdr-secret
+#   recordings_url: http://10.0.0.10/ghostline-rec/
+#   poll_seconds: 15
+#   transcribe:
+#     enabled: true
+#     url: http://10.0.0.20:8000/v1/audio/transcriptions
+#     model: deepdml/faster-whisper-large-v3-turbo-ct2
+#     language: ru
+#     prompt: "Names and terms that often occur in your calls."

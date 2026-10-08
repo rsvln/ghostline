@@ -77,39 +77,43 @@ SQLite file next to the configuration file.
 
 ## Installation
 
-### systemd (recommended)
+Every release on the [Releases](https://github.com/rsvln/ghostline/releases)
+page has self-contained archives for `linux-x64` and `linux-arm64` and a
+Docker image on `ghcr.io/rsvln/ghostline`.
 
-Build a self-contained binary (requires the .NET 10 SDK):
+### systemd: LXC container, VM or bare metal (recommended)
 
-```bash
-dotnet publish ghostline/ghostline.csproj -c Release -r linux-x64 \
-  --self-contained true -p:PublishSingleFile=true -o publish
-```
-
-Copy the contents of `publish/` (binary, `web/`, `locales/`, native
-libraries) to `/opt/ghostline/app`, create the user and directories, and
-install the unit from [deploy/ghostline.service](deploy/ghostline.service):
+An LXC container (for example on Proxmox) is an ordinary Linux system for
+ghostline, so the same archive works there, in a VM and on a physical host.
+The binary is self-contained: no .NET is needed on the machine.
 
 ```bash
-useradd --system --no-create-home ghostline
-mkdir -p /etc/ghostline /var/log/ghostline
-chown ghostline: /etc/ghostline /var/log/ghostline
-cp deploy/ghostline.service /etc/systemd/system/
-systemctl enable --now ghostline
+curl -fsSL https://github.com/rsvln/ghostline/releases/latest/download/ghostline-linux-x64.tar.gz | tar xz
+sudo ./ghostline/install.sh
 ```
+
+On the first run [install.sh](deploy/install.sh) creates the `ghostline`
+user, `/etc/ghostline/ghostline.yaml` from
+[the example](deploy/ghostline.example.yaml), `/var/log/ghostline` and the
+systemd unit. Edit the config and start the service:
+
+```bash
+systemctl start ghostline
+journalctl -u ghostline -f
+```
+
+To update, unpack a newer archive and run `install.sh` again: it replaces
+`/opt/ghostline/app`, keeps the previous version in `/opt/ghostline/app.old`
+and rolls back automatically if the new version does not start.
 
 For `mode: full` install `ffmpeg` (`apt install ffmpeg`).
 
 ### Docker
 
-```bash
-docker build -t ghostline -f ghostline/Dockerfile .
-```
-
 ```yaml
 services:
   ghostline:
-    image: ghostline:latest
+    image: ghcr.io/rsvln/ghostline:latest
     restart: unless-stopped
     environment:
       - TZ=Europe/Berlin            # your time zone
@@ -121,8 +125,24 @@ services:
       - /srv/ghostline/log:/var/log/ghostline
 ```
 
-The image runs as a non-root user (`$APP_UID`); the mounted directories must
-be writable by it.
+Put `ghostline.yaml` into the config directory first
+([example](deploy/ghostline.example.yaml)). The image runs as a non-root user
+(`$APP_UID`); the mounted directories must be writable by it.
+
+### Building from source
+
+Requires the .NET 10 SDK:
+
+```bash
+dotnet publish ghostline/ghostline.csproj -c Release -r linux-x64 \
+  --self-contained true -p:PublishSingleFile=true -o publish
+docker build -t ghostline -f ghostline/Dockerfile .
+```
+
+GitHub Actions ([.github/workflows](.github/workflows)) build both on every
+push to `master`, start each with the example config as a smoke test, push the
+image and, when `ghostline/version.txt` has a new version, create a tag and a
+release with the archives.
 
 ## Configuration
 

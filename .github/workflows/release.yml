@@ -1,0 +1,162 @@
+name: Build and release
+
+# Every push to master: release archives (self-contained, for systemd on LXC / VM / bare metal)
+# and the Docker image on ghcr.io. A new version in ghostline/version.txt also gets a tag and a release.
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  archives:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rid: [ linux-x64, linux-arm64 ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read version
+        id: version
+        run: echo "version=$(tr -d '[:space:]' < ghostline/version.txt)" >> $GITHUB_OUTPUT
+
+      - name: Publish
+        run: |
+          dotnet publish ghostline/ghostline.csproj -c Release -r ${{ matrix.rid }} \
+            --self-contained true -p:PublishSingleFile=true -o out/ghostline
+          cp deploy/install.sh deploy/ghostline.service deploy/ghostline.example.yaml out/ghostline/
+          chmod 755 out/ghostline/install.sh out/ghostline/ghostline
+          echo "${{ steps.version.outputs.version }}" > out/ghostline/VERSION
+
+      # The binary starts with the example config and serves the web interface and the API.
+      - name: Smoke test
+        if: matrix.rid == 'linux-x64'
+        run: |
+          mkdir -p /tmp/gl
+          sed 's/^  file: true/  file: false/' deploy/ghostline.example.yaml > /tmp/gl/ghostline.yaml
+          DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=true out/ghostline/ghostline /tmp/gl/ghostline.yaml > /tmp/gl/run.log 2>&1 &
+          ok=0
+          for i in $(seq 1 30); do
+            curl -sf -u admin:change-me http://127.0.0.1:8889/api/mode >/dev/null && { ok=1; break; }
+            sleep 1
+          done
+          cat /tmp/gl/run.log
+          [ "$ok" = 1 ]
+          for u in /sms /config /js/app.js /css/app.css /api/settings /api/about /api/status; do
+            curl -sf -o /dev/null -u admin:change-me "http://127.0.0.1:8889$u" || { echo "FAILED: $u"; exit 1; }
+          done
+          kill %1
+
+      - name: Pack
+        run: tar czf ghostline-${{ matrix.rid }}.tar.gz -C out ghostline
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghostline-${{ matrix.rid }}
+          path: ghostline-*.tar.gz
+
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: echo "version=$(tr -d '[:space:]' < ghostline/version.txt)" >> $GITHUB_OUTPUT
+
+      - name: Build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./ghostline/Dockerfile
+          load: true
+          tags: |
+            ghcr.io/rsvln/ghostline:latest
+            ghcr.io/rsvln/ghostline:${{ steps.version.outputs.version }}
+
+      - name: Smoke test
+        run: |
+          mkdir -p /tmp/glc
+          sed 's/^  file: true/  file: false/' deploy/ghostline.example.yaml > /tmp/glc/ghostline.yaml
+          chmod -R 777 /tmp/glc
+          docker run -d --name gl -p 8889:8889 -v /tmp/glc:/etc/ghostline ghcr.io/rsvln/ghostline:latest
+          ok=0
+          for i in $(seq 1 30); do
+            curl -sf -u admin:change-me http://127.0.0.1:8889/api/mode >/dev/null && { ok=1; break; }
+            sleep 1
+          done
+          docker logs gl
+          [ "$ok" = 1 ]
+          curl -sf -o /dev/null -u admin:change-me http://127.0.0.1:8889/api/settings
+          docker rm -f gl
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        run: |
+          docker push ghcr.io/rsvln/ghostline:${{ steps.version.outputs.version }}
+          docker push ghcr.io/rsvln/ghostline:latest
+
+  # One release per version: created on the first push of a new version.txt, skipped afterwards.
+  release:
+    needs: [ archives, docker ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: echo "version=$(tr -d '[:space:]' < ghostline/version.txt)" >> $GITHUB_OUTPUT
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          TAG="v$VERSION"
+          git fetch --tags --quiet
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          cat > notes.md <<EOF
+          ### Install or update (systemd: LXC container, VM, bare metal)
+
+          \`\`\`bash
+          curl -fsSL https://github.com/${{ github.repository }}/releases/download/$TAG/ghostline-linux-x64.tar.gz | tar xz
+          sudo ./ghostline/install.sh
+          \`\`\`
+
+          For ARM64 (Raspberry Pi and similar) take \`ghostline-linux-arm64.tar.gz\`.
+
+          ### Docker image
+
+          \`\`\`bash
+          docker pull ghcr.io/${{ github.repository }}:$VERSION
+          \`\`\`
+          EOF
+          gh release create "$TAG" dist/*.tar.gz --title "ghostline $TAG" --notes-file notes.md --generate-notes --latest
