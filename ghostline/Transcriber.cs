@@ -130,14 +130,14 @@ namespace ghostline
             // Куски ищутся по исходной дорожке: после выравнивания шум линии тоже громкий.
             byte[] balanced = await Recordings.Balanced(wav) ?? wav;
             if (chunks == null)
-                return await TranscribeChunk(http, balanced, who, call);
+                return (await TranscribeChunk(http, balanced, who, call, true)).segs;
 
             var result = new List<TranscriptSegment>();
             foreach (var (s, e) in chunks)
             {
                 byte[] piece = Recordings.Slice(balanced, s, e);
                 if (piece == null) continue;
-                foreach (var seg in await TranscribeChunk(http, piece, who, call))
+                foreach (var seg in await TranscribePiece(http, piece, who, call))
                     if (!IsPromptEcho(seg.t, settings.calls.transcribe.prompt))
                         result.Add(seg with { s = Math.Round(seg.s + s, 1), e = Math.Round(seg.e + s, 1) });
             }
@@ -145,11 +145,30 @@ namespace ghostline
             return result;
         }
 
-        private static async Task<List<TranscriptSegment>> TranscribeChunk(HttpClient http, byte[] wav, string who, CallRecord call)
+        // Подсказка помогает с именами и терминами в длинных фразах, но короткие реплики Whisper
+        // под неё подгоняет: 2026-10-08 «Алло» с подсказкой стало «Альфа-Банк, Малу»
+        // (уверенность в словах 0,04–0,21), без подсказки — «Алло». Если с подсказкой Whisper
+        // не уверен, кусок расшифровывается ещё раз без неё и берётся более уверенный вариант.
+        private const double PromptConfidence = 0.7;
+
+        private static async Task<List<TranscriptSegment>> TranscribePiece(HttpClient http, byte[] wav, string who, CallRecord call)
+        {
+            var withPrompt = await TranscribeChunk(http, wav, who, call, true);
+            if (!withPrompt.prompted || withPrompt.confidence >= PromptConfidence)
+                return withPrompt.segs;
+            var plain = await TranscribeChunk(http, wav, who, call, false);
+            return plain.confidence > withPrompt.confidence ? plain.segs : withPrompt.segs;
+        }
+
+        // confidence — средняя вероятность слов (1, если слов нет).
+        private static async Task<(List<TranscriptSegment> segs, double confidence, bool prompted)> TranscribeChunk(
+            HttpClient http, byte[] wav, string who, CallRecord call, bool usePrompt)
         {
             var t = settings.calls.transcribe;
             // Подсказка: словарь из настроек + имя собеседника.
-            string prompt = string.Join(". ", new[] { t.prompt, call.PeerName }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            string prompt = usePrompt
+                ? string.Join(". ", new[] { t.prompt, call.PeerName }.Where(x => !string.IsNullOrWhiteSpace(x)))
+                : "";
             using var form = new MultipartFormDataContent();
             var file = new ByteArrayContent(wav);
             file.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
@@ -174,8 +193,9 @@ namespace ghostline
                 throw new TranscribeHttpException($"HTTP {(int)resp.StatusCode}: {Trim(body, 200)}");
 
             var json = JObject.Parse(body);
+            bool prompted = prompt.Length > 0;
             if (json["words"] is JArray words && words.Count > 0)
-                return FromWords(words, who);
+                return (FromWords(words, who), words.Average(w => (double?)w["probability"] ?? 1.0), prompted);
 
             var result = new List<TranscriptSegment>();
             foreach (var seg in json["segments"] ?? new JArray())
@@ -185,7 +205,7 @@ namespace ghostline
                 result.Add(new TranscriptSegment(Math.Round((double)seg["start"], 1),
                                                  Math.Round((double)seg["end"], 1), who, text));
             }
-            return result;
+            return (result, 1.0, prompted);
         }
 
         // Слова → реплики: новая реплика после паузы больше WordGap. Начало реплики — начало
