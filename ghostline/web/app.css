@@ -214,7 +214,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .log-gw { color: var(--accent); }
 
 /* ---- status ---- */
-.status-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+.status-grid { display: flex; flex-wrap: wrap; gap: 12px; }
 .status-card {
   background: var(--bg2);
   border: 1px solid var(--border);
@@ -227,6 +227,15 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .status-card .row { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .status-card .row b { color: var(--text); font-weight: 500; }
 .status-card .row.err { color: var(--red); }
+.status-card .row.old { color: var(--muted); opacity: 0.7; }
+.status-card .row { overflow-wrap: anywhere; }
+.status-card h3 .state { margin-left: auto; font-family: 'IBM Plex Sans', sans-serif; font-weight: 400; font-size: 12px; color: var(--muted); }
+.status-card h3 .state.ok { color: var(--green); }
+.status-card h3 .state.err { color: var(--red); }
+.section h3 { font-size: 13px; font-weight: 500; color: var(--muted); margin-bottom: 8px; }
+.stat-table tr.gone td { color: var(--muted); }
+.stat-table caption { caption-side: bottom; text-align: left; color: var(--muted); font-size: 11px; padding-top: 6px; font-family: 'IBM Plex Sans', sans-serif; }
+.hdot.unknown { background: var(--muted); }
 .section { margin-bottom: 24px; overflow-x: auto; }
 .stat-table { border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 12px; min-width: 320px; }
 .stat-table th, .stat-table td { border: 1px solid var(--border); padding: 5px 10px; text-align: right; }

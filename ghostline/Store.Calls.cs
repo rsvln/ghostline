@@ -374,6 +374,26 @@ namespace ghostline
             return Convert.ToInt32(cmd.ExecuteScalar());
         }
 
+        public record CallStat(string channel, int inAnswered, int inMissed, int outAnswered, int outNoAnswer, string last);
+
+        // Calls per line for the Status tab: answered and missed, by direction, and the time of the last one.
+        public static List<CallStat> CallStatsByChannel()
+        {
+            using var db = Open();
+            using var cmd = db.CreateCommand();
+            cmd.CommandText = @"SELECT channel,
+                                       SUM(direction='in' AND billsec>0), SUM(direction='in' AND billsec=0),
+                                       SUM(direction='out' AND billsec>0), SUM(direction='out' AND billsec=0),
+                                       MAX(ts)
+                                FROM calls GROUP BY channel ORDER BY channel;";
+            using var r = cmd.ExecuteReader();
+            var list = new List<CallStat>();
+            int Get(int i) => r.IsDBNull(i) ? 0 : r.GetInt32(i);
+            while (r.Read())
+                list.Add(new CallStat(r.IsDBNull(0) ? "" : r.GetString(0), Get(1), Get(2), Get(3), Get(4), r.IsDBNull(5) ? null : r.GetString(5)));
+            return list;
+        }
+
         // --- Telegram notifications ---
 
         public static void EnqueueCallTg(long callId, IEnumerable<string> chatIds, string kind, bool wantTranscript)

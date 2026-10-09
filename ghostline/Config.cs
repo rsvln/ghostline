@@ -252,14 +252,5 @@ namespace ghostline
             return null;
         }
 
-        private static string getAllChannelNames()
-        {
-            string str = "";
-            foreach (Channel ch in settings.channels)
-            {
-                str = str + ch.name + "\n";
-            }
-            return str.Trim();
-        }
     }
 }

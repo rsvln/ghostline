@@ -23,6 +23,7 @@ namespace ghostline
     {
         public static Settings settings;
         public static ITelegramBotClient bot;
+        public static readonly DateTime StartedAt = DateTime.Now;
         public static List<GoogleContactNormalized> contacts = new List<GoogleContactNormalized>();
         // One shared HttpClient is safe for all yeastar gateways at once: credentials go
         // in the query string of each request and are not stored in the client.
@@ -119,18 +120,8 @@ namespace ghostline
                 AllowedUpdates = Array.Empty<UpdateType>()
             };
             bot.StartReceiving(updateHandler: TgHandleUpdateAsync, errorHandler: TgHandlePollingErrorAsync, receiverOptions: tgreceiverOptions, cancellationToken: cts.Token);
-            Task.Run(async () =>
-            {
-                try
-                {
-                    await bot.GetMe();
-                    HealthStatus.MarkConnected("telegram");
-                }
-                catch (Exception ex)
-                {
-                    HealthStatus.MarkError("telegram", ex.Message);
-                }
-            });
+            Task.Run(() => TelegramHealthLoop());
+            Task.Run(() => SetBotCommands());
             Task.Run(() => TelegramOutboxWorker());
             Task.Run(() => SmsOutboxWorker());
 

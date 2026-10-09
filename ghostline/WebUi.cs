@@ -84,19 +84,50 @@ namespace ghostline
 
                     app.MapGet("/api/status", () =>
                     {
-                        var gateways = (Program.settings?.gateways ?? new List<Gateway>())
-                            .Select(g => new { g.id, g.type, g.ip })
+                        var s = Program.settings;
+                        bool full = s?.FullMode == true;
+                        var components = (s?.gateways ?? new List<Gateway>())
+                            .Select(g => Component(g.id, g.id, g.type, g.ip, g.type is "quectel" or "yeastar"))
+                            .Append(Component("telegram", "Telegram", "telegram", null, true))
                             .ToList();
-                        // Telegram is not a physical gateway from the config, but the UI needs a card and a dot for it too.
-                        gateways.Add(new { id = "telegram", type = "telegram", ip = "" });
+                        if (full)
+                        {
+                            var cdr = s.calls?.cdrDb;
+                            components.Add(Component("cdr", L10n.Web.T("web.status.cdr"), "cdr", cdr == null ? null : $"{cdr.host}:{cdr.port}", true));
+                            if (s.calls?.transcribe?.enabled == true)
+                                components.Add(Component("transcribe", L10n.Web.T("web.status.transcribe"), "transcribe", s.calls.transcribe.url, true));
+                        }
+                        var sms = Store.GetStats();
+                        var calls = full ? Store.CallStatsByChannel() : new();
+                        var configured = (s?.channels ?? new List<Channel>()).Select(c => c.name).ToList();
+                        // Configured lines first, then lines that are only in the history (renamed or removed).
+                        var names = configured.Concat(sms.Select(x => x.Channel).Concat(calls.Select(x => x.channel))
+                                                         .Where(n => !string.IsNullOrEmpty(n) && !configured.Contains(n)).Distinct());
+                        var lines = names.Select(n =>
+                        {
+                            var ch = s?.channels?.FirstOrDefault(c => c.name == n);
+                            var st = sms.FirstOrDefault(x => x.Channel == n);
+                            var cs = calls.FirstOrDefault(x => x.channel == n);
+                            return new
+                            {
+                                name = n, configured = ch != null, gateway = ch?.gateway, number = ch?.number,
+                                smsIn = st?.In ?? 0, smsOut = st?.Out ?? 0,
+                                callsIn = cs?.inAnswered ?? 0, callsMissed = cs?.inMissed ?? 0,
+                                callsOut = (cs?.outAnswered ?? 0) + (cs?.outNoAnswer ?? 0), lastCall = cs?.last
+                            };
+                        }).ToList();
                         return Results.Ok(new
                         {
-                            gateways,
-                            health = HealthStatus.Snapshot(),
-                            stats = Store.GetStats(),
-                            tgQueuePending = Store.CountPendingTelegramMessages(),
-                            smsQueuePending = Store.CountPendingOutgoingSms(),
-                            calls = Program.settings?.FullMode == true ? CallsStatus() : null
+                            components,
+                            lines,
+                            queues = new
+                            {
+                                sms = Store.CountPendingOutgoingSms(),
+                                telegram = Store.CountPendingTelegramMessages(),
+                                calls = full ? CallsStatus() : null
+                            },
+                            version = VersionInfo.Version,
+                            startedAt = Program.StartedAt
                         });
                     });
 
@@ -283,6 +314,20 @@ namespace ghostline
                     Console.WriteLine("WebUi failed to start: " + ex.Message);
                 }
             });
+        }
+
+        // One card of the Status tab and one dot in the header.
+        private static object Component(string id, string title, string kind, string detail, bool connectionBased)
+        {
+            var h = HealthStatus.Find(id);
+            return new
+            {
+                id, title, kind, detail,
+                state = HealthStatus.State(id, connectionBased),
+                lastActivityAt = h?.LastActivityAt,
+                lastErrorAt = h?.LastErrorAt,
+                lastError = h?.LastError
+            };
         }
 
         private static object CallsStatus()

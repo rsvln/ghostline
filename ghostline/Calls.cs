@@ -37,6 +37,7 @@ namespace ghostline
                 catch (Exception ex)
                 {
                     string err = DescribeException(ex);
+                    HealthStatus.MarkDisconnected("cdr");
                     HealthStatus.MarkError("cdr", err);
                     Console.WriteLine("CDR poll failed: " + err);
                 }

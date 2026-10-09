@@ -100,14 +100,20 @@
   <div class="panel" id="panel-status">
     <div class="toolbar">
       <button class="btn" onclick="loadStatus()">{{web.refresh}}</button>
+      <span class="count" id="status-updated"></span>
     </div>
     <div class="scroll">
-      <div class="status-grid" id="status-cards"></div>
       <div class="section">
-        <table class="stat-table">
-          <thead><tr><th>{{web.status.channel}}</th><th>{{web.status.in}}</th><th>{{web.status.out}}</th></tr></thead>
-          <tbody id="status-stats-body"></tbody>
-        </table>
+        <h3>{{web.status.components}}</h3>
+        <div class="status-grid" id="status-cards"></div>
+      </div>
+      <div class="section">
+        <h3>{{web.status.queues}}</h3>
+        <div class="status-grid" id="status-queues"></div>
+      </div>
+      <div class="section">
+        <h3>{{web.status.lines}}</h3>
+        <table class="stat-table" id="status-lines"></table>
       </div>
     </div>
   </div>

@@ -67,12 +67,30 @@ namespace ghostline
                 await botClient.SendMessage(chatId: chatId.ToString(), text: L10n.Tg.T("tg.sms.go_away"), cancellationToken: cancellationToken);
                 return;
             }
+            HealthStatus.MarkActivity("telegram");
+
+            // Commands: /help (/start), /status. "/help@botname" in group chats.
+            if (messageText.StartsWith('/'))
+            {
+                string cmd = messageText.Split(' ', '\n')[0].Split('@')[0].ToLowerInvariant();
+                string reply = cmd switch
+                {
+                    "/help" or "/start" => HelpText(),
+                    "/status" => StatusText(),
+                    _ => L10n.Tg.T("tg.cmd.unknown", Html(cmd))
+                };
+                await botClient.SendMessage(chatId, reply, parseMode: Telegram.Bot.Types.Enums.ParseMode.Html,
+                                            linkPreviewOptions: true, cancellationToken: cancellationToken);
+                return;
+            }
+
             List<string> mlist = messageText.Replace("\r", "").Split('\n').ToList();
             Channel chanOut = getChannelType(mlist[0]);
 
             if ((mlist.Count < 3) || (chanOut is null))
             {
-                await botClient.SendMessage(chatId: chatId.ToString(), text: L10n.Tg.T("tg.sms.wrong_format", messageText, getAllChannelNames()), cancellationToken: cancellationToken);
+                await botClient.SendMessage(chatId, L10n.Tg.T("tg.sms.wrong_format", LinesHtml()),
+                                            parseMode: Telegram.Bot.Types.Enums.ParseMode.Html, cancellationToken: cancellationToken);
                 return;
             }
             else
@@ -95,6 +113,92 @@ namespace ghostline
                 }
             }
 
+        }
+
+        private static string Html(string s) => System.Net.WebUtility.HtmlEncode(s ?? "");
+
+        // Lines as "<code>home</code> +79001234567", one per line.
+        private static string LinesHtml() =>
+            string.Join("\n", (settings.channels ?? new()).Select(c =>
+                $"<code>{Html(c.name)}</code>" + (string.IsNullOrEmpty(c.number) ? "" : " " + Html(c.number))));
+
+        private static string HelpText()
+        {
+            var l = L10n.Tg;
+            return l.T("tg.help", LinesHtml(), Html(settings.channels?.FirstOrDefault()?.name ?? "home"))
+                 + (settings.FullMode ? "\n\n" + l.T("tg.help.calls") : "")
+                 + "\n\n" + l.T("tg.help.commands")
+                 + "\n\n" + l.T("tg.help.footer", VersionInfo.ProjectUrl, Html(VersionInfo.Version));
+        }
+
+        // /status: the same states as the Status tab of the web interface.
+        private static string StatusText()
+        {
+            var l = L10n.Tg;
+            string Dot(string state) => state switch { "ok" => "🟢", "err" => "🔴", _ => "⚪" };
+            string Row(string kind, string title, bool connectionBased)
+            {
+                string state = HealthStatus.State(kind, connectionBased);
+                var h = HealthStatus.Find(kind);
+                string err = state == "err" && h?.LastError != null ? " — " + Html(Trim(h.LastError, 120)) : "";
+                return $"{Dot(state)} {Html(title)}: {l.T("tg.status." + state)}{err}";
+            }
+
+            var rows = new List<string>();
+            foreach (var gw in settings.gateways ?? new())
+                rows.Add(Row(gw.id, gw.id, gw.type is "quectel" or "yeastar"));
+            rows.Add(Row("telegram", "Telegram", true));
+            if (settings.FullMode)
+            {
+                rows.Add(Row("cdr", l.T("tg.status.cdr"), true));
+                if (TranscribeEnabled) rows.Add(Row("transcribe", l.T("tg.status.transcribe"), true));
+            }
+
+            var up = DateTime.Now - StartedAt;
+            string uptime = up.TotalDays >= 1 ? $"{(int)up.TotalDays}d {up.Hours}h" : up.TotalHours >= 1 ? $"{(int)up.TotalHours}h {up.Minutes}m" : $"{up.Minutes}m";
+            string queues = l.T("tg.status.queues", Store.CountPendingOutgoingSms(), Store.CountPendingTelegramMessages());
+            if (settings.FullMode)
+                queues += "\n" + l.T("tg.status.calls_queue", Store.TranscriptionStats().pending, Store.CountPendingCallTg());
+            return $"<b>ghostline</b> {Html(VersionInfo.Version)} · {l.T("tg.status.uptime", uptime)}\n\n"
+                 + string.Join("\n", rows) + "\n\n" + queues;
+        }
+
+        // Menu of bot commands in the Telegram client, in the Telegram language.
+        private static async Task SetBotCommands()
+        {
+            try
+            {
+                await bot.SetMyCommands(new[]
+                {
+                    new BotCommand { Command = "status", Description = L10n.Tg.T("tg.cmd.status") },
+                    new BotCommand { Command = "help", Description = L10n.Tg.T("tg.cmd.help") },
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Telegram SetMyCommands failed: " + DescribeException(ex));
+            }
+        }
+
+        // Polling errors alone say little: a single EAI_AGAIN from DNS is followed by a successful
+        // poll that leaves no trace. So the connection is checked with getMe once a minute, like
+        // the AMI keepalive: Telegram is "connected" while that works.
+        private static async Task TelegramHealthLoop()
+        {
+            while (true)
+            {
+                try
+                {
+                    await bot.GetMe();
+                    HealthStatus.MarkConnected("telegram");
+                }
+                catch (Exception ex)
+                {
+                    HealthStatus.MarkDisconnected("telegram");
+                    HealthStatus.MarkError("telegram", DescribeException(ex));
+                }
+                await Task.Delay(TimeSpan.FromMinutes(1));
+            }
         }
 
         // After returning from the error handler the Telegram.Bot poller immediately makes

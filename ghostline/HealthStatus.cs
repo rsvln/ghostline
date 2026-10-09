@@ -56,5 +56,21 @@ namespace ghostline
 
         public static Dictionary<string, ChannelHealth> Snapshot() =>
             new Dictionary<string, ChannelHealth>(_health);
+
+        public static ChannelHealth Find(string kind) => _health.TryGetValue(kind, out var h) ? h : null;
+
+        // "ok", "err" or "unknown". Components with a permanent connection (AMI gateways, Telegram,
+        // the CDR database, the transcription service) go by that connection, so an old transient
+        // error does not paint a working component red. Stateless ones (goip over HTTP/SMTP) go by
+        // whichever is newer: the last activity or the last error.
+        public static string State(string kind, bool connectionBased)
+        {
+            var h = Find(kind);
+            if (h == null) return "unknown";
+            if (connectionBased)
+                return h.Connected ? "ok" : h.LastErrorAt != null ? "err" : "unknown";
+            if (h.LastErrorAt != null && (h.LastActivityAt == null || h.LastErrorAt > h.LastActivityAt)) return "err";
+            return h.LastActivityAt != null ? "ok" : "unknown";
+        }
     }
 }

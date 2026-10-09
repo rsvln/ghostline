@@ -437,15 +437,46 @@ async function loadLog() {
 }
 
 // ---- State: dots in the header and the Status tab ----
+// The server decides the state of every component (ok / err / unknown) by the same rule as /status
+// in Telegram: connection-based components go by their connection, so an old transient error does
+// not paint a working one red.
 
-function statusClass(h, gwType) {
-  if (!h) return 'warn';
-  // Only AMI gateways have connected (a permanent socket); goip and telegram go by activity and errors.
-  if ((gwType === 'yeastar' || gwType === 'quectel') && h.connected === false) return 'err';
-  const lastErr = h.lastErrorAt ? new Date(h.lastErrorAt).getTime() : 0;
-  const lastAct = h.lastActivityAt ? new Date(h.lastActivityAt).getTime() : 0;
-  if (lastErr > lastAct) return 'err';
-  return h.lastActivityAt ? 'ok' : 'warn';
+// "5 min ago"; the exact time goes into the title.
+function ago(iso) {
+  if (!iso) return t('web.never');
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return t('web.ago.now');
+  if (s < 3600) return t('web.ago.min', Math.floor(s / 60));
+  if (s < 86400) return t('web.ago.hour', Math.floor(s / 3600));
+  return t('web.ago.day', Math.floor(s / 86400));
+}
+
+function exact(iso) {
+  return iso ? new Date(iso).toLocaleString() : '';
+}
+
+function stateText(c) {
+  if (c.state === 'ok') return t('web.status.state.ok');
+  if (c.state === 'err') return t('web.status.state.err');
+  return t(c.kind === 'transcribe' ? 'web.status.state.idle' : 'web.status.state.unknown');
+}
+
+function componentCard(c) {
+  // An error is shown in red only while the component is down; an older one, after a success, in grey.
+  const err = c.lastError
+    ? `<div class="row ${c.state === 'err' ? 'err' : 'old'}" title="${esc(exact(c.lastErrorAt))}">${esc(t('web.status.error_at', ago(c.lastErrorAt)))} ${esc(c.lastError)}</div>`
+    : '';
+  return `<div class="status-card">
+    <h3><span class="hdot ${c.state}"></span>${esc(c.title)}<span class="state ${c.state}">${esc(stateText(c))}</span></h3>
+    ${c.detail ? `<div class="row">${esc(t('web.status.address'))} <b>${esc(c.detail)}</b></div>` : ''}
+    <div class="row" title="${esc(exact(c.lastActivityAt))}">${esc(t('web.status.last_activity'))} <b>${esc(ago(c.lastActivityAt))}</b></div>
+    ${err}
+  </div>`;
+}
+
+function queueCard(title, rows) {
+  return `<div class="status-card"><h3>${esc(title)}</h3>${rows.map(([k, v]) =>
+    `<div class="row">${esc(k)} <b>${esc(v)}</b></div>`).join('')}</div>`;
 }
 
 async function loadStatus() {
@@ -456,35 +487,39 @@ async function loadStatus() {
     data = await res.json();
   } catch { return; }
 
-  document.getElementById('header-status').innerHTML = data.gateways.map(gw => {
-    const h = data.health[gw.id];
-    const title = t('web.status.last_activity') + ' ' + (h?.lastActivityAt || t('web.never')) +
-                  (h?.lastError ? '\n' + t('web.status.last_error', h.lastErrorAt || '') + ' ' + h.lastError : '');
-    return `<div class="hstat" title="${esc(title)}"><span class="hdot ${statusClass(h, gw.type)}"></span>${esc(gw.id)}</div>`;
-  }).join('');
+  document.getElementById('header-status').innerHTML = data.components.map(c =>
+    `<div class="hstat" title="${esc(stateText(c) + (c.state === 'err' && c.lastError ? ': ' + c.lastError : ''))}"><span class="hdot ${c.state}"></span>${esc(c.title)}</div>`
+  ).join('');
 
   if (parseRoute().view !== 'status') return;
-  document.getElementById('status-cards').innerHTML = data.gateways.map(gw => {
-    const h = data.health[gw.id];
-    const extra = gw.type === 'telegram'
-      ? `<div class="row">${esc(t('web.status.queue_pending'))} <b>${data.tgQueuePending}</b></div>`
-      : (gw.ip ? `<div class="row">${esc(t('web.status.address'))} <b>${esc(gw.ip)}</b></div>` : '');
-    return `<div class="status-card">
-      <h3><span class="hdot ${statusClass(h, gw.type)}"></span>${esc(gw.id)}</h3>
-      ${extra}
-      <div class="row">${esc(t('web.status.last_activity'))} <b>${esc(h?.lastActivityAt || t('web.never'))}</b></div>
-      ${h?.lastError ? `<div class="row err">${esc(t('web.status.last_error', h.lastErrorAt || ''))} ${esc(h.lastError)}</div>` : ''}
-    </div>`;
-  }).join('')
-    + `<div class="status-card"><h3>${esc(t('web.status.sms_queue'))}</h3><div class="row">${esc(t('web.status.pending'))} <b>${data.smsQueuePending}</b></div></div>`
-    + (data.calls ? `<div class="status-card"><h3>${esc(t('web.status.calls'))}</h3>
-        <div class="row">${esc(t('web.status.calls_total'))} <b>${data.calls.total}</b></div>
-        <div class="row">${esc(t('web.status.calls_tr', data.calls.transcribeDone, data.calls.transcribePending, data.calls.transcribeError))}</div>
-        <div class="row">${esc(t('web.status.calls_tg'))} <b>${data.calls.tgPending}</b></div></div>` : '');
+  document.getElementById('status-updated').textContent =
+    t('web.status.updated', new Date().toLocaleTimeString(), ago(data.startedAt), data.version);
+  document.getElementById('status-cards').innerHTML = data.components.map(componentCard).join('');
 
-  document.getElementById('status-stats-body').innerHTML = data.stats.map(s =>
-    `<tr><td>${esc(s.channel)}</td><td>${s.in}</td><td>${s.out}</td></tr>`
-  ).join('') || `<tr><td colspan="3" style="color:var(--muted)">${esc(t('web.status.no_data'))}</td></tr>`;
+  const q = data.queues;
+  document.getElementById('status-queues').innerHTML =
+    queueCard(t('web.status.q.sending'), [[t('web.status.q.sms'), q.sms], [t('web.status.q.telegram'), q.telegram]])
+    + (q.calls ? queueCard(t('web.status.q.calls'), [
+        [t('web.status.q.total'), q.calls.total],
+        [t('web.status.q.tr_done'), q.calls.transcribeDone],
+        [t('web.status.q.tr_pending'), q.calls.transcribePending],
+        [t('web.status.q.tr_error'), q.calls.transcribeError],
+        [t('web.status.q.call_tg'), q.calls.tgPending]]) : '');
+
+  const full = MODE.mode === 'full';
+  const head = `<thead><tr><th>${esc(t('web.status.col.line'))}</th><th>${esc(t('web.status.col.number'))}</th>`
+    + `<th>${esc(t('web.status.col.sms_in'))}</th><th>${esc(t('web.status.col.sms_out'))}</th>`
+    + (full ? `<th>${esc(t('web.status.col.calls_in'))}</th><th>${esc(t('web.status.col.calls_missed'))}</th><th>${esc(t('web.status.col.calls_out'))}</th><th>${esc(t('web.status.col.last_call'))}</th>` : '')
+    + `</tr></thead>`;
+  const rows = data.lines.map(l => `<tr class="${l.configured ? '' : 'gone'}" title="${l.configured ? esc(l.gateway || '') : esc(t('web.status.not_in_config'))}">
+      <td>${esc(l.name)}${l.configured ? '' : ' *'}</td><td>${esc(l.number || '')}</td>
+      <td>${l.smsIn}</td><td>${l.smsOut}</td>
+      ${full ? `<td>${l.callsIn}</td><td>${l.callsMissed}</td><td>${l.callsOut}</td><td>${l.lastCall ? esc(fmtTs(l.lastCall)) : ''}</td>` : ''}
+    </tr>`).join('');
+  const note = data.lines.some(l => !l.configured)
+    ? `<caption>* ${esc(t('web.status.not_in_config'))}</caption>` : '';
+  document.getElementById('status-lines').innerHTML = note + head + `<tbody>${rows ||
+    `<tr><td colspan="8" style="color:var(--muted)">${esc(t('web.status.no_data'))}</td></tr>`}</tbody>`;
 }
 
 // ---- About ----

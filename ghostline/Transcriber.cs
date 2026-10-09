@@ -95,6 +95,7 @@ namespace ghostline
                 {
                     // Transcription service or PBX unavailable: wait, the call stays queued.
                     string err = DescribeException(ex);
+                    HealthStatus.MarkDisconnected("transcribe");
                     HealthStatus.MarkError("transcribe", err);
                     Console.WriteLine($"Transcribe unavailable (call {call?.Id}): {err}, retrying in 60s");
                     await Task.Delay(60000);
