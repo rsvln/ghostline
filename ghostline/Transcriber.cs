@@ -131,7 +131,7 @@ namespace ghostline
             // Pieces are found on the original leg: after balancing, line noise is loud as well.
             byte[] balanced = await Recordings.Balanced(wav) ?? wav;
             if (chunks == null)
-                return (await TranscribeChunk(http, balanced, who, call, true)).segs;
+                return await TranscribePiece(http, balanced, who, call);
 
             var result = new List<TranscriptSegment>();
             foreach (var (s, e) in chunks)
@@ -152,17 +152,24 @@ namespace ghostline
         // unsure with the prompt, the piece is transcribed again without it and the surer result wins.
         private const double PromptConfidence = 0.7;
 
+        // The prompt can also make Whisper loop: on 2026-10-16 17 s of my speech came back as the prompt
+        // terms repeated ten times, with a compression ratio of 3.9. A looping result with the prompt is
+        // always replaced by the one without it.
         private static async Task<List<TranscriptSegment>> TranscribePiece(HttpClient http, byte[] wav, string who, CallRecord call)
         {
             var withPrompt = await TranscribeChunk(http, wav, who, call, true);
-            if (!withPrompt.prompted || withPrompt.confidence >= PromptConfidence)
+            if (!withPrompt.prompted || (withPrompt.confidence >= PromptConfidence && !withPrompt.looped))
                 return withPrompt.segs;
             var plain = await TranscribeChunk(http, wav, who, call, false);
-            return plain.confidence > withPrompt.confidence ? plain.segs : withPrompt.segs;
+            return withPrompt.looped || plain.confidence > withPrompt.confidence ? plain.segs : withPrompt.segs;
         }
 
-        // confidence: mean word probability (1 when there are no words).
-        private static async Task<(List<TranscriptSegment> segs, double confidence, bool prompted)> TranscribeChunk(
+        // Whisper's own threshold: text that compresses better than this is a repetition loop.
+        private const double LoopCompressionRatio = 2.4;
+
+        // confidence: mean word probability (1 when there are no words); looped: some segment was a
+        // repetition loop (its words are dropped).
+        private static async Task<(List<TranscriptSegment> segs, double confidence, bool prompted, bool looped)> TranscribeChunk(
             HttpClient http, byte[] wav, string who, CallRecord call, bool usePrompt)
         {
             var t = settings.calls.transcribe;
@@ -195,18 +202,27 @@ namespace ghostline
 
             var json = JObject.Parse(body);
             bool prompted = prompt.Length > 0;
+            var segments = (json["segments"] as JArray ?? new JArray()).ToList();
+            static bool Loop(JToken seg) => ((double?)seg["compression_ratio"] ?? 0) > LoopCompressionRatio;
+            var loops = segments.Where(Loop).Select(seg => ((double)seg["start"], (double)seg["end"])).ToList();
+            bool looped = loops.Count > 0;
+
             if (json["words"] is JArray words && words.Count > 0)
-                return (FromWords(words, who), words.Average(w => (double?)w["probability"] ?? 1.0), prompted);
+            {
+                var kept = new JArray(words.Where(w => !loops.Any(l => (double)w["start"] >= l.Item1 && (double)w["start"] < l.Item2)));
+                double confidence = words.Average(w => (double?)w["probability"] ?? 1.0);
+                return (kept.Count > 0 ? FromWords(kept, who) : new List<TranscriptSegment>(), confidence, prompted, looped);
+            }
 
             var result = new List<TranscriptSegment>();
-            foreach (var seg in json["segments"] ?? new JArray())
+            foreach (var seg in segments.Where(seg => !Loop(seg)))
             {
                 string text = DropHallucination((seg["text"]?.ToString() ?? "").Trim());
                 if (text.Length == 0) continue;
                 result.Add(new TranscriptSegment(Math.Round((double)seg["start"], 1),
                                                  Math.Round((double)seg["end"], 1), who, text));
             }
-            return (result, 1.0, prompted);
+            return (result, 1.0, prompted, looped);
         }
 
         // Words to lines: a new line after a pause longer than WordGap. A line starts at its first
@@ -283,13 +299,15 @@ namespace ghostline
         //    line (2026-10-01: a goodbye followed by such a credit);
         // 2) ordinary phrases ("to be continued", "see you next time") can be said for real,
         //    so only a line that consists entirely of such a phrase is dropped.
+        // A credit split by a pause comes as two lines (2026-10-16: "editor" alone, then
+        // "subtitles <name> proofreader <name>"), so both halves are covered.
         private static readonly System.Text.RegularExpressions.Regex SubtitleCredits = new(
-            @"\s*\b(субтитры\s+(сделал[аи]?|создавал[аи]?|делал[аи]?|подогнал[аи]?|подготовил[аи]?)\s+[\w.\-«»""]+|редактор\s+субтитров.*?корректор\s+[\w.]+(\s*[\w.]+)?|редактор\s+субтитров\s+[\w.]+(\s*[\w.]+)?|dimatorzok)[\s,.;:!?—–-]*",
+            @"\s*\b(субтитры\s+(сделал[аи]?|создавал[аи]?|делал[аи]?|подогнал[аи]?|подготовил[аи]?)\s+[\w.\-«»""]+|редактор\s+субтитров.*?корректор\s+[\w.]+(\s*[\w.]+)?|редактор\s+субтитров\s+[\w.]+(\s*[\w.]+)?|субтитров\s+[\w.]+(\s*[\w.]+)?\s+корректор(\s+[\w.]+(\s*[\w.]+)?)?|dimatorzok)[\s,.;:!?—–-]*",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
         private static readonly string[] Hallucinations =
         {
-            "продолжение следует", "спасибо за просмотр", "подписывайтесь на канал", "до новых встреч"
+            "продолжение следует", "спасибо за просмотр", "подписывайтесь на канал", "до новых встреч", "редактор"
         };
 
         // Only letters and digits, single spaces, lower case.
