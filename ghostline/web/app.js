@@ -431,7 +431,8 @@ async function loadLog() {
     return `<div class="log-line">
       <span class="log-ts">${esc(date)}</span><span class="log-ts">${esc(time)}</span>
       <span class="log-gw">${esc(gw)}</span><span class="dir-${esc(dir)}">${esc(dir)}</span>
-      <span>${esc(from)}</span><span>${esc(dest)}</span><span></span><span>${esc(rest.join('\t'))}</span>
+      <span title="${esc(from)}">${esc(from)}</span><span class="log-peer" title="${esc(dest)}">${esc(dest)}</span>
+      <span class="log-msg">${esc(rest.join('\t'))}</span>
     </div>`;
   }).join('');
 }

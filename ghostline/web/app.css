@@ -204,11 +204,17 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 
 .log-line {
   display: grid;
-  grid-template-columns: 90px 100px 24px 30px 90px 150px 150px 1fr;
+  /* date, time with ms, gateway, dir, line, peer (number and contact name), text */
+  grid-template-columns: 90px 100px 24px 30px 70px 280px 1fr;
   gap: 0 12px;
   padding: 1px 0;
   min-width: max-content;
 }
+/* One row per entry: nothing wraps; a long peer is cut with an ellipsis (full text in the tooltip),
+   a long message widens the row and the log scrolls sideways. */
+.log-line > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-line > span.log-msg { overflow: visible; }
+.log-peer { color: var(--yellow); }
 .log-line:hover { filter: brightness(1.3); }
 .log-ts { color: var(--muted); }
 .log-gw { color: var(--accent); }
