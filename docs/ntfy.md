@@ -44,6 +44,7 @@ attachment-expiry-duration: "72h"
 
 auth-file: "/var/lib/ntfy/user.db"
 auth-default-access: "deny-all"        # nothing is readable or writable without a login
+web-root: disable                      # no web app: the phone app and ghostline use the API
 ```
 
 ```bash
