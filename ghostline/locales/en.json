@@ -236,11 +236,14 @@
   "tg.sms.wrong.many": "This doesn't look like an SMS to send. Write three lines: the line, the recipient's number and the text.\n\n<b>Lines:</b>\n{0}\n\n/help — more",
   "web.field.ntfy.topic": "Common topic (for lines without their own)",
   "web.config.group.clients": "Clients",
-  "web.config.hint.clients": "Where notifications go and where SMS can be sent from: Telegram and ntfy, both optional and usable together. Here are the common settings; a line can have its own chats and topic (Lines → line → Clients).",
-  "web.config.hint.line_clients": "Chats and topic of this line. Empty: the common ones from Clients.",
+  "web.config.hint.clients": "Where notifications go and where SMS can be sent from. Telegram and ntfy are optional: a client that is not here is off. A line can have its own chats and topic (Lines → line → Clients).",
+  "web.config.hint.line_clients": "Clients of this line: notifications go only to the ones listed here. Empty chats / topic inside a client: the common ones.",
   "web.config.hint.line_telegram": "Telegram chats of this line (SMS and calls). Empty: the common chats.",
   "web.config.hint.line_ntfy": "ntfy topic of this line. Empty: the common topic.",
   "web.config.hint.line_calls": "What to send for calls on this line (mode full only).",
   "web.field.channels.clients.telegram.chat_ids": "Chat ids (empty — common)",
-  "web.field.channels.clients.ntfy.topic": "Topic (empty — common)"
+  "web.field.channels.clients.ntfy.topic": "Topic (empty — common)",
+  "web.config.add_client": "+ Client",
+  "web.config.remove_client_confirm": "Remove {0}? Notifications will not be sent there.",
+  "web.config.hint.line_clients_unset": "Not set: the line goes to every client that is on, with the common chats and topic. Add a client to choose explicitly."
 }

@@ -10,20 +10,25 @@ namespace ghostline
     {
         private static IEnumerable<Channel> AllLines => settings.channels ?? new List<Channel>();
 
+        // A line uses the clients of its "clients" section; a line without that section (older configs)
+        // uses every client that is on. Inside a client section empty chats / topic mean the common ones.
+        private static bool LineUses(Channel ch, string client) =>
+            ch.clients == null || (client == "telegram" ? ch.clients.telegram != null : ch.clients.ntfy != null);
+
         internal static List<string> LineChats(Channel ch) =>
-            !TelegramEnabled ? new List<string>()
+            !TelegramEnabled || !LineUses(ch, "telegram") ? new List<string>()
             : ch.clients?.telegram?.chatIds is { Count: > 0 } ? ch.clients.telegram.chatIds
             : settings.clients.telegram.chatIds ?? new List<string>();
 
         // calls.chat_ids still overrides the chats for calls only.
         internal static List<string> LineCallChats(Channel ch) =>
-            !TelegramEnabled ? new List<string>()
+            !TelegramEnabled || !LineUses(ch, "telegram") ? new List<string>()
             : ch.calls?.chatIds is { Count: > 0 } ? ch.calls.chatIds
             : LineChats(ch);
 
-        // null: the line has no topic (ntfy off, or neither the line's ntfy.topic nor the common one set).
+        // null: the line does not go to ntfy (ntfy off, no ntfy in the line's clients, or no topic at all).
         internal static string LineTopic(Channel ch) =>
-            !NtfyEnabled ? null
+            !NtfyEnabled || !LineUses(ch, "ntfy") ? null
             : !string.IsNullOrWhiteSpace(ch.clients?.ntfy?.topic) ? ch.clients.ntfy.topic.Trim()
             : string.IsNullOrWhiteSpace(settings.clients.ntfy.topic) ? null : settings.clients.ntfy.topic.Trim();
 

@@ -592,9 +592,10 @@ function settingsTree(data) {
   const node = id => ({ id, title: byId[id].title, fields: byId[id].fields || [] });
   const list = id => ({
     id, title: byId[id].title, fields: [], list: id,
-    children: (data[id] || []).map(it => itemNode(id, it.key, it.fields))
+    children: (data[id] || []).map(it => itemNode(id, it.key, it.fields, false, it.clients))
   });
-  const tree = [node('general'), Object.assign(node('clients'), { children: [node('telegram'), node('ntfy')] }),
+  const clientFields = { telegram: byId.telegram.fields, ntfy: byId.ntfy.fields };
+  const tree = [node('general'), clientsNode('clients', '', data.clients || [], clientFields),
                 node('web'), node('logger'), list('gateways'), list('channels')];
   tree.push(Object.assign(node('calls'), { children: [node('cdr_db'), node('transcribe')] }));
   tree.push(node('goip'));
@@ -602,22 +603,47 @@ function settingsTree(data) {
 }
 
 // A gateway or a line; a line's fields under "clients.telegram.", "clients.ntfy." and "calls."
-// become subsections, as in the YAML.
-function itemNode(listId, key, fields, isNew) {
+// become subsections, as in the YAML. clients: the line's client sections, null: no "clients" section.
+function itemNode(listId, key, fields, isNew, clients) {
   const id = LISTS[listId].prefix + key;
   const item = { id, title: key, key, fields, isNew };
   if (listId !== 'channels') return item;
   const sub = (part) => fields.filter(f => f.path.includes(']' + '.' + part + '.'));
   const telegram = sub('clients.telegram'), ntfy = sub('clients.ntfy'), calls = sub('calls');
   item.fields = fields.filter(f => !telegram.includes(f) && !ntfy.includes(f) && !calls.includes(f));
+  const base = `channels[name=${key}].`;
   item.children = [
-    { id: id + '/clients', title: t('web.config.group.clients'), fields: [], hintKey: 'web.config.hint.line_clients',
-      children: [
-        { id: id + '/telegram', title: 'Telegram', fields: telegram, hintKey: 'web.config.hint.line_telegram' },
-        { id: id + '/ntfy', title: 'ntfy', fields: ntfy, hintKey: 'web.config.hint.line_ntfy' }] },
+    clientsNode(id + '/clients', base, clients || [], { telegram, ntfy }, clients == null),
     { id: id + '/calls', title: t('web.config.group.calls'), fields: calls, hintKey: 'web.config.hint.line_calls' }
   ];
   return item;
+}
+
+// "Clients": Telegram and ntfy as optional subsections, added and removed like list items.
+// base: '' at the top, 'channels[name=…].' in a line. unset: a line without a "clients" section,
+// which goes to every client that is on.
+const CLIENTS = ['telegram', 'ntfy'];
+const CLIENT_TITLES = { telegram: 'Telegram', ntfy: 'ntfy' };
+
+function clientsNode(id, base, present, fieldsOf, unset) {
+  const line = base !== '';
+  const node = {
+    id, title: t('web.config.group.clients'), fields: [], clientsBase: base, clientFields: fieldsOf,
+    hintKey: line ? (unset ? 'web.config.hint.line_clients_unset' : 'web.config.hint.line_clients') : 'web.config.hint.clients',
+    children: []
+  };
+  present.forEach(c => node.children.push(clientNode(node, c)));
+  return node;
+}
+
+function clientNode(parent, client) {
+  const line = parent.clientsBase !== '';
+  return {
+    id: parent.id + '/' + client, title: CLIENT_TITLES[client], client,
+    section: parent.clientsBase + 'clients.' + client,
+    fields: parent.clientFields[client] || [],
+    hintKey: line ? 'web.config.hint.line_' + client : 'web.config.hint.' + client
+  };
 }
 
 function walkTree(fn, nodes = formTree, parent = null) {
@@ -649,8 +675,11 @@ function fieldInput(f) {
 
 function renderTreeNav(nodes, selected, depth) {
   return nodes.map(n => {
+    const missing = n.clientsBase !== undefined ? CLIENTS.filter(c => !n.children.some(x => x.client === c)) : [];
     const add = n.list
       ? `<button type="button" class="tree-item tree-add" style="--d:${depth + 1}" data-add="${n.list}">${esc(t(LISTS[n.list].add))}</button>`
+      : missing.length
+      ? `<button type="button" class="tree-item tree-add" style="--d:${depth + 1}" data-add-client="${esc(n.id)}">${esc(t('web.config.add_client'))}</button>`
       : '';
     return `<button type="button" class="tree-item${selected === n.id ? ' on' : ''}" style="--d:${depth}" data-node="${esc(n.id)}">${esc(n.title)}</button>`
       + (n.children ? renderTreeNav(n.children, selected, depth + 1) : '') + add;
@@ -662,6 +691,8 @@ function renderTreePanes() {
   walkTree((n, parent) => {
     const del = parent?.list
       ? `<button type="button" class="btn tree-del" data-del="${esc(n.id)}">${esc(t('web.config.remove'))}</button>`
+      : n.section
+      ? `<button type="button" class="btn tree-del" data-del-client="${esc(n.id)}">${esc(t('web.config.remove'))}</button>`
       : '';
     const hintKey = n.hintKey || (n.list ? LISTS[n.list].hint : 'web.config.hint.' + n.id);
     const hint = I18N[hintKey] ? `<p class="tree-hint">${esc(t(hintKey))}</p>` : '';
@@ -688,6 +719,8 @@ function renderSettings(selected) {
   host.querySelectorAll('.tree-item[data-node]').forEach(btn => btn.onclick = () => showConfigNode(btn.dataset.node));
   host.querySelectorAll('[data-add]').forEach(btn => btn.onclick = startAdd);
   host.querySelectorAll('[data-del]').forEach(btn => btn.onclick = () => removeItem(btn.dataset.del));
+  host.querySelectorAll('[data-add-client]').forEach(btn => btn.onclick = startAddClient);
+  host.querySelectorAll('[data-del-client]').forEach(btn => btn.onclick = () => removeClient(btn.dataset.delClient));
   host.querySelectorAll('[data-path]').forEach(el => el.addEventListener('input', markChanged));
   host.querySelectorAll('[data-path]').forEach(el => el.addEventListener('change', markChanged));
   showConfigNode(selected, true);
@@ -764,6 +797,54 @@ function removeItem(nodeId) {
   showConfigNode(list.id);
 }
 
+// Client sections added and removed in the form, sent with the save as "add" / "remove".
+let addedSections = [];
+let removedSections = [];
+
+function startAddClient(ev) {
+  const btn = ev.currentTarget;
+  const node = findNode(btn.dataset.addClient);
+  if (!node || document.querySelector('.tree-add-input')) return;
+  const missing = CLIENTS.filter(c => !node.children.some(x => x.client === c));
+  const wrap = document.createElement('div');
+  wrap.className = 'tree-add-form';
+  wrap.style.setProperty('--d', getComputedStyle(btn).getPropertyValue('--d') || '1');
+  wrap.innerHTML = `<select class="tree-add-input"><option value=""></option>${missing.map(c =>
+    `<option value="${c}">${esc(CLIENT_TITLES[c])}</option>`).join('')}</select>`;
+  btn.replaceWith(wrap);
+  const sel = wrap.querySelector('select');
+  sel.focus();
+  let done = false;
+  const finish = client => {
+    if (done) return;
+    done = true;
+    captureFields();
+    if (client) {
+      const child = clientNode(node, client);
+      node.children.push(child);
+      if (removedSections.includes(child.section)) removedSections = removedSections.filter(x => x !== child.section);
+      else addedSections.push(child.section);
+      renderSettings(child.id);
+      showConfigNode(child.id);
+    } else renderSettings(parseRoute().q.s);
+  };
+  sel.onchange = () => finish(sel.value);
+  sel.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); finish(''); } };
+  sel.onblur = () => setTimeout(() => finish(''), 150);
+}
+
+function removeClient(nodeId) {
+  let child = null, parent = null;
+  walkTree((n, p) => { if (n.id === nodeId) { child = n; parent = p; } });
+  if (!child || !parent || !confirm(t('web.config.remove_client_confirm', child.title))) return;
+  captureFields();
+  parent.children = parent.children.filter(c => c !== child);
+  if (addedSections.includes(child.section)) addedSections = addedSections.filter(x => x !== child.section);
+  else removedSections.push(child.section);
+  renderSettings(parent.id);
+  showConfigNode(parent.id);
+}
+
 async function loadConfigForm() {
   const host = document.getElementById('config-form');
   const res = await fetch('/api/settings');
@@ -774,8 +855,12 @@ async function loadConfigForm() {
   }
   templates = { gateways: data.gatewayTemplate || [], channels: data.channelTemplate || [] };
   removedItems = [];
+  addedSections = [];
+  removedSections = [];
   formTree = settingsTree(data);
   walkTree(n => n.fields.forEach(f => { f.orig = f.value; }));
+  // Fields of clients not in the config yet (shown when such a client is added).
+  walkTree(n => Object.values(n.clientFields || {}).forEach(list => list.forEach(f => { if (f.orig === undefined) f.orig = f.value; })));
   renderSettings();
 }
 
@@ -805,7 +890,7 @@ async function saveConfig(restart) {
   setBusy(t('web.config.saving'));
   try {
     const ok = configMode === 'form'
-      ? await configRequest('/api/settings', { fields: collectFields(), remove: removedItems, restart })
+      ? await configRequest('/api/settings', { fields: collectFields(), remove: removedItems.concat(removedSections), add: addedSections, restart })
       : await configRequest('/api/config', { content: (await getConfigEditor()).getValue(), restart });
     if (!ok) return;
     if (restart) { await waitForRestart(); return; }

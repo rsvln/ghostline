@@ -297,10 +297,18 @@ namespace ghostline
                         var data = await ReadJson<SettingsPayload>(req);
                         if (data?.fields == null)
                             return Results.Ok(new { ok = false, error = "Empty request" });
-                        string yaml = File.Exists(configPath) ? File.ReadAllText(configPath) : "";
+                        string yaml = ConfigYaml.MoveLegacyTelegram(File.Exists(configPath) ? File.ReadAllText(configPath) : "");
                         foreach (var path in data.remove ?? Array.Empty<string>())
+                        {
                             if (RemovablePath.IsMatch(path ?? ""))
                                 yaml = ConfigYaml.Remove(yaml, path);
+                            else if (ClientSectionPath.IsMatch(path ?? ""))
+                                yaml = ConfigYaml.RemoveSection(yaml, path);
+                        }
+                        // Client sections added in the form: created with their first keys, then filled by the fields.
+                        foreach (var path in data.add ?? Array.Empty<string>())
+                            if (ClientSectionPath.IsMatch(path ?? "") && SettingsForm.NewSection(path) is { } first)
+                                yaml = ConfigYaml.AddSection(yaml, path, first);
                         yaml = ConfigYaml.Apply(yaml, data.fields);
                         return SaveYaml(configPath, yaml, data.restart);
                     });
@@ -383,6 +391,9 @@ namespace ghostline
         private static readonly System.Text.RegularExpressions.Regex RemovablePath =
             new(@"^(gateways\[id=|channels\[name=)[A-Za-z0-9][A-Za-z0-9_.-]*\]$");
 
+        private static readonly System.Text.RegularExpressions.Regex ClientSectionPath =
+            new(@"^(channels\[name=[A-Za-z0-9][A-Za-z0-9_.-]*\]\.)?clients\.(telegram|ntfy)$");
+
         private static async Task<T> ReadJson<T>(HttpRequest req)
         {
             using var reader = new StreamReader(req.Body);
@@ -409,7 +420,7 @@ namespace ghostline
         }
 
         record ConfigPayload(string content, bool restart = false);
-        record SettingsPayload(Dictionary<string, string> fields, string[] remove, bool restart = false);
+        record SettingsPayload(Dictionary<string, string> fields, string[] remove, bool restart = false, string[] add = null);
         record SendPayload(string channel, string number, string text);
     }
 }

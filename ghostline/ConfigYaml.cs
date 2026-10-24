@@ -91,6 +91,125 @@ namespace ghostline
             catch (YamlDotNet.Core.YamlException) { return yaml; }
         }
 
+        // Removes a section, for example "clients.ntfy" or "channels[name=home].clients.telegram".
+        // When it is the last key of its parent, the parent becomes {} (an empty section, not a
+        // missing one: "clients: {}" on a line means "send nowhere").
+        public static string RemoveSection(string yaml, string path)
+        {
+            if (string.IsNullOrEmpty(yaml)) return yaml;
+            var parts = ParsePath(path);
+            if (parts.Count < 2 || parts[^1].selector != null) return yaml;
+            try
+            {
+                var root = Root(yaml);
+                if (Navigate(root, parts.Take(parts.Count - 1).ToList(), out _) is not YamlMappingNode parent) return yaml;
+                var kv = parent.Children.FirstOrDefault(c => c.Key is YamlScalarNode k && k.Value == parts[^1].key);
+                if (kv.Key == null) return yaml;
+                int end = LineEnd(yaml, ContentEnd(yaml, kv.Value));
+                if (end < yaml.Length && yaml[end] == '\r') end++;
+                if (end < yaml.Length && yaml[end] == '\n') end++;
+                if (parent.Children.Count == 1)
+                {
+                    // "clients:\n  ntfy: ..." -> "clients: {}"
+                    int colon = yaml.LastIndexOf(':', LineStart(yaml, (int)kv.Key.Start.Index) - 1);
+                    if (colon < 0) return yaml;
+                    string nl = yaml.Contains("\r\n") ? "\r\n" : "\n";
+                    return yaml.Substring(0, colon + 1) + " {}" + nl + yaml.Substring(end);
+                }
+                return yaml.Substring(0, LineStart(yaml, (int)kv.Key.Start.Index)) + yaml.Substring(end);
+            }
+            catch (YamlDotNet.Core.YamlException) { return yaml; }
+        }
+
+        // Adds a section with its first keys (raw YAML values), for example "clients.telegram" with
+        // chat_ids: []. Missing parents are created; an empty parent ({} or nothing) is filled in.
+        // An existing section is left as it is.
+        public static string AddSection(string yaml, string path, IList<(string key, string raw)> children)
+        {
+            var parts = ParsePath(path);
+            if (parts.Count == 0 || parts[^1].selector != null) return yaml;
+            try
+            {
+                var root = Root(yaml);
+                if (root == null || Navigate(root, parts, out _) != null) return yaml;
+                string nl = yaml.Contains("\r\n") ? "\r\n" : "\n";
+
+                // The deepest part of the path that exists.
+                int depth = parts.Count - 1;
+                YamlNode node = null;
+                for (; depth >= 0; depth--)
+                {
+                    node = depth == 0 ? root : Navigate(root, parts.Take(depth).ToList(), out _);
+                    if (node != null) break;
+                }
+                if (node == null) return yaml;
+                var missing = parts.Skip(depth).ToList();
+                if (missing.Any(p => p.selector != null)) return yaml;
+
+                string Block(int indent)
+                {
+                    var sb = new StringBuilder();
+                    for (int i = 0; i < missing.Count; i++)
+                        sb.Append(nl).Append(' ', indent + 2 * i).Append(missing[i].key).Append(':');
+                    foreach (var (key, raw) in children)
+                        sb.Append(nl).Append(' ', indent + 2 * missing.Count).Append(key).Append(": ").Append(raw);
+                    return sb.ToString();
+                }
+
+                if (node is YamlMappingNode map && map.Children.Count > 0)
+                {
+                    var last = map.Children.Last();
+                    int insertAt = LineEnd(yaml, Math.Max((int)last.Key.End.Index, ContentEnd(yaml, last.Value)));
+                    return yaml.Substring(0, insertAt) + Block((int)last.Key.Start.Column - 1) + yaml.Substring(insertAt);
+                }
+
+                // An empty parent: "key: {}" or "key:" with nothing after it. The block goes after the
+                // key's colon, indented under the key.
+                int keyStart = LineStart(yaml, (int)node.Start.Index);
+                int indentOfKey = 0;
+                while (keyStart + indentOfKey < yaml.Length && yaml[keyStart + indentOfKey] is ' ' or '-') indentOfKey++;
+                int colonAt = yaml.LastIndexOf(':', Math.Max(0, (int)node.Start.Index - 1));
+                if (colonAt < keyStart) colonAt = yaml.IndexOf(':', keyStart);
+                if (colonAt < 0) return yaml;
+                int valueEnd = node is YamlMappingNode ? ContentEnd(yaml, node) : colonAt + 1;
+                return yaml.Substring(0, colonAt + 1) + Block(indentOfKey + 2) + yaml.Substring(Math.Max(valueEnd, colonAt + 1));
+            }
+            catch (YamlDotNet.Core.YamlException) { return yaml; }
+        }
+
+        // Older configs have "telegram" at the top level; the form edits clients.telegram, so before
+        // the form changes are applied that block moves under "clients" (comments included).
+        public static string MoveLegacyTelegram(string yaml)
+        {
+            string nl = yaml.Contains("\r\n") ? "\r\n" : "\n";
+            var lines = yaml.Replace("\r\n", "\n").Split('\n').ToList();
+            static bool TopKey(string l, string key) => Regex.IsMatch(l, "^" + key + @":\s*(#.*)?$");
+            int start = lines.FindIndex(l => TopKey(l, "telegram"));
+            if (start < 0) return yaml;
+            int end = start + 1;
+            while (end < lines.Count && (lines[end].Length == 0 || lines[end][0] is ' ' or '#')) end++;
+            while (end > start + 1 && lines[end - 1].Trim().Length == 0) end--;   // trailing blank lines stay
+            var block = lines.GetRange(start, end - start).Select(l => l.Length == 0 ? l : "  " + l).ToList();
+            lines.RemoveRange(start, end - start);
+
+            int clients = lines.FindIndex(l => TopKey(l, "clients") || Regex.IsMatch(l, @"^clients:\s*\{\s*\}"));
+            if (clients < 0)
+                lines.InsertRange(start, new[] { "clients:" }.Concat(block));
+            else
+            {
+                if (Regex.IsMatch(lines[clients], @"^clients:\s*\{\s*\}")) lines[clients] = "clients:";
+                lines.InsertRange(clients + 1, block);
+            }
+            return string.Join(nl, lines);
+        }
+
+        static int LineStart(string yaml, int pos)
+        {
+            pos = Math.Clamp(pos, 0, yaml.Length);
+            while (pos > 0 && yaml[pos - 1] is not ('\n' or '\r')) pos--;
+            return pos;
+        }
+
         public static string FormatScalar(string v)
         {
             v ??= "";
@@ -392,7 +511,8 @@ namespace ghostline
     {
         public record Field(string path, string type, string value, string label, string[] options = null);
         public record Group(string id, string title, List<Field> fields);
-        public record Item(string key, List<Field> fields);
+        // clients: the client sections of a line, null when the line has no "clients" section at all.
+        public record Item(string key, List<Field> fields, string[] clients = null);
 
         static readonly string[] Locales = { "", "en", "ru" };
 
@@ -446,8 +566,11 @@ namespace ghostline
             return new
             {
                 groups,
+                // Client sections present at the top; the form shows only these and offers to add the rest.
+                clients = Present(s.clients?.telegram != null, s.clients?.ntfy != null),
                 gateways = (s.gateways ?? new()).Where(g => !string.IsNullOrEmpty(g.id)).Select(g => new Item(g.id, GatewayFields(g.id, g))).ToList(),
-                channels = (s.channels ?? new()).Where(ch => !string.IsNullOrEmpty(ch.name)).Select(ch => new Item(ch.name, ChannelFields(ch.name, ch, gatewayIds))).ToList(),
+                channels = (s.channels ?? new()).Where(ch => !string.IsNullOrEmpty(ch.name)).Select(ch => new Item(ch.name, ChannelFields(ch.name, ch, gatewayIds),
+                    ch.clients == null ? null : Present(ch.clients.telegram != null, ch.clients.ntfy != null))).ToList(),
                 gatewayTemplate = GatewayFields("{key}"),
                 channelTemplate = ChannelFields("{key}", null, gatewayIds),
             };
@@ -490,6 +613,19 @@ namespace ghostline
                 F($"{p}.calls.chat_ids", "text", Csv(calls.chatIds)),
             };
         }
+
+        static string[] Present(bool telegram, bool ntfy) =>
+            new[] { telegram ? "telegram" : null, ntfy ? "ntfy" : null }.Where(x => x != null).ToArray();
+
+        // First keys of a client section added from the form (raw YAML).
+        public static IList<(string key, string raw)> NewSection(string path) => path switch
+        {
+            "clients.telegram" => new[] { ("token", "\"\""), ("chat_ids", "[]") },
+            "clients.ntfy" => new[] { ("url", "\"\""), ("token", "\"\""), ("topic", "\"\"") },
+            _ when path.EndsWith(".clients.telegram") => new[] { ("chat_ids", "[]") },
+            _ when path.EndsWith(".clients.ntfy") => new[] { ("topic", "\"\"") },
+            _ => null
+        };
 
         static string Csv(List<string> v) => v == null ? "" : string.Join(", ", v);
         static string n(int? v) => v is null or 0 ? "" : v.Value.ToString(CultureInfo.InvariantCulture);

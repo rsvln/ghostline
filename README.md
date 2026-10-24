@@ -248,7 +248,10 @@ goip:
 | `clients.ntfy.token` | ntfy access token with read and write access to the topics |
 | `clients.ntfy.topic` | Common topic, for lines without their own |
 
-A top-level `telegram` section of older configs is still read as `clients.telegram`.
+A client is on when its section is there (with a token / url); remove the
+section to turn it off. A top-level `telegram` section of older configs is
+still read as `clients.telegram` and is moved there when the config is saved
+from the web interface.
 | `web.port` | Web interface port, default `8889` |
 | `web.user` / `web.password` | HTTP Basic authentication; both empty — no authentication |
 | `logger.file` | Write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log` |
@@ -274,6 +277,7 @@ A top-level `telegram` section of older configs is still read as `clients.telegr
 | `pattern` | String incoming events are matched against |
 | `line` | Port number (`yeastar`, `goip`) or `chan_quectel` device name (`gsm1`, …) |
 | `number` | The line's own phone number, shown in transcript headers; optional |
+| `clients` | Clients of the line: notifications go only to the ones listed. No `clients` section — every client that is on; `clients: {}` — nowhere |
 | `clients.telegram.chat_ids` | Telegram chats of the line (SMS and calls); empty — the common ones |
 | `clients.ntfy.topic` | ntfy topic of the line; empty — the common one |
 | `calls.voice` / `calls.transcript` / `calls.missed` | What to send for calls on this line |

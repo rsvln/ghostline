@@ -236,11 +236,14 @@
   "tg.sms.wrong.many": "Это не похоже на SMS для отправки. Напишите три строки: линия, номер получателя, текст.\n\n<b>Линии:</b>\n{0}\n\n/help — подробнее",
   "web.field.ntfy.topic": "Общий топик (для линий без своего)",
   "web.config.group.clients": "Клиенты",
-  "web.config.hint.clients": "Куда идут уведомления и откуда можно отправлять SMS: Telegram и ntfy, оба необязательны, можно вместе. Здесь общие настройки; у линии могут быть свои чаты и топик (Линии → линия → Клиенты).",
-  "web.config.hint.line_clients": "Чаты и топик этой линии. Пусто — общие из раздела «Клиенты».",
+  "web.config.hint.clients": "Куда идут уведомления и откуда можно отправлять SMS. Telegram и ntfy необязательны: клиента нет в списке — он выключен. У линии могут быть свои чаты и топик (Линии → линия → Клиенты).",
+  "web.config.hint.line_clients": "Клиенты этой линии: уведомления идут только в перечисленные здесь. Пустые чаты / топик внутри клиента — общие.",
   "web.config.hint.line_telegram": "Чаты Telegram этой линии (SMS и звонки). Пусто — общие чаты.",
   "web.config.hint.line_ntfy": "Топик ntfy этой линии. Пусто — общий топик.",
   "web.config.hint.line_calls": "Что слать по звонкам этой линии (только режим full).",
   "web.field.channels.clients.telegram.chat_ids": "Chat id (пусто — общие)",
-  "web.field.channels.clients.ntfy.topic": "Топик (пусто — общий)"
+  "web.field.channels.clients.ntfy.topic": "Топик (пусто — общий)",
+  "web.config.add_client": "+ Клиент",
+  "web.config.remove_client_confirm": "Удалить {0}? Туда перестанут приходить уведомления.",
+  "web.config.hint.line_clients_unset": "Не задано: линия идёт во все включённые клиенты, в общие чаты и топик. Добавьте клиента, чтобы выбрать явно."
 }

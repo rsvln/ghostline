@@ -106,22 +106,28 @@ namespace ghostline
         public CallsSettings calls { get; set; }
         public GoipSettings goip { get; set; } = new();
 
-        // Before 2026-10-25 "telegram" was a top-level section; such configs are still read.
+        // Before 2026-10-25 "telegram" was a top-level section; such configs are still read. It is
+        // moved into clients after parsing (SettingsFile.Parse): a "clients" section further down
+        // the file would replace it if it were moved here.
         [YamlMember(Alias = "telegram")]
         public TelegramSettings legacyTelegram
         {
             get => null;
-            set { if (value != null) clients.telegram = value; }
+            set => LegacyTelegramValue = value;
         }
+
+        [YamlIgnore]
+        internal TelegramSettings LegacyTelegramValue { get; private set; }
 
         [YamlIgnore]
         public bool FullMode => string.Equals(mode, "full", StringComparison.OrdinalIgnoreCase);
     }
 
+    // A client is on when its section is there (and has a token / url); no section: off.
     public class ClientsSettings
     {
-        public TelegramSettings telegram { get; set; } = new();
-        public NtfySettings ntfy { get; set; } = new();
+        public TelegramSettings telegram { get; set; }
+        public NtfySettings ntfy { get; set; }
     }
 
     // Languages: files locales/<language>.json next to the app (en, ru). As in frte2tg.
@@ -216,8 +222,14 @@ namespace ghostline
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .Build();
 
-        public static Settings Parse(string yaml) =>
-            Deserializer.Deserialize<Settings>(yaml) ?? throw new InvalidDataException("empty config");
+        public static Settings Parse(string yaml)
+        {
+            var s = Deserializer.Deserialize<Settings>(yaml) ?? throw new InvalidDataException("empty config");
+            s.clients ??= new ClientsSettings();
+            if (s.LegacyTelegramValue != null)
+                s.clients.telegram ??= s.LegacyTelegramValue;
+            return s;
+        }
 
         public static string Serialize(Settings s) => new SerializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
