@@ -585,18 +585,39 @@ let formTree = [];
 let templates = {};
 let removedItems = [];
 
-// Sections with subsections: calls -> cdr_db, transcribe.
+// The tree follows the YAML: clients -> telegram, ntfy; calls -> cdr_db, transcribe;
+// a line -> clients (telegram, ntfy) and calls.
 function settingsTree(data) {
   const byId = Object.fromEntries((data.groups || []).map(g => [g.id, g]));
   const node = id => ({ id, title: byId[id].title, fields: byId[id].fields || [] });
   const list = id => ({
     id, title: byId[id].title, fields: [], list: id,
-    children: (data[id] || []).map(it => ({ id: LISTS[id].prefix + it.key, title: it.key, key: it.key, fields: it.fields }))
+    children: (data[id] || []).map(it => itemNode(id, it.key, it.fields))
   });
-  const tree = [node('general'), node('telegram'), node('ntfy'), node('web'), node('logger'), list('gateways'), list('channels')];
+  const tree = [node('general'), Object.assign(node('clients'), { children: [node('telegram'), node('ntfy')] }),
+                node('web'), node('logger'), list('gateways'), list('channels')];
   tree.push(Object.assign(node('calls'), { children: [node('cdr_db'), node('transcribe')] }));
   tree.push(node('goip'));
   return tree;
+}
+
+// A gateway or a line; a line's fields under "clients.telegram.", "clients.ntfy." and "calls."
+// become subsections, as in the YAML.
+function itemNode(listId, key, fields, isNew) {
+  const id = LISTS[listId].prefix + key;
+  const item = { id, title: key, key, fields, isNew };
+  if (listId !== 'channels') return item;
+  const sub = (part) => fields.filter(f => f.path.includes(']' + '.' + part + '.'));
+  const telegram = sub('clients.telegram'), ntfy = sub('clients.ntfy'), calls = sub('calls');
+  item.fields = fields.filter(f => !telegram.includes(f) && !ntfy.includes(f) && !calls.includes(f));
+  item.children = [
+    { id: id + '/clients', title: t('web.config.group.clients'), fields: [], hintKey: 'web.config.hint.line_clients',
+      children: [
+        { id: id + '/telegram', title: 'Telegram', fields: telegram, hintKey: 'web.config.hint.line_telegram' },
+        { id: id + '/ntfy', title: 'ntfy', fields: ntfy, hintKey: 'web.config.hint.line_ntfy' }] },
+    { id: id + '/calls', title: t('web.config.group.calls'), fields: calls, hintKey: 'web.config.hint.line_calls' }
+  ];
+  return item;
 }
 
 function walkTree(fn, nodes = formTree, parent = null) {
@@ -642,7 +663,7 @@ function renderTreePanes() {
     const del = parent?.list
       ? `<button type="button" class="btn tree-del" data-del="${esc(n.id)}">${esc(t('web.config.remove'))}</button>`
       : '';
-    const hintKey = n.list ? LISTS[n.list].hint : 'web.config.hint.' + n.id;
+    const hintKey = n.hintKey || (n.list ? LISTS[n.list].hint : 'web.config.hint.' + n.id);
     const hint = I18N[hintKey] ? `<p class="tree-hint">${esc(t(hintKey))}</p>` : '';
     html += `<div class="tree-pane" data-pane="${esc(n.id)}"><div class="tree-pane-head"><h3>${esc(n.title)}</h3>${del}</div>${hint}`
       + (n.fields.length ? `<div class="settings-grid">${n.fields.map(fieldInput).join('')}</div>` : '')
@@ -727,7 +748,7 @@ function commitAdd(listId, name) {
     value: f.path.endsWith('.' + LISTS[listId].sel) ? name : f.value,
     orig: undefined
   }));
-  list.children.push({ id, title: name, key: name, fields, isNew: true });
+  list.children.push(itemNode(listId, name, fields, true));
   renderSettings(id);
   showConfigNode(id);
 }

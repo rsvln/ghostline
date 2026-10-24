@@ -93,7 +93,7 @@ namespace ghostline
                         if (Program.TelegramEnabled)
                             components.Add(Component("telegram", "Telegram", "telegram", null, true));
                         if (Program.NtfyEnabled)
-                            components.Add(Component("ntfy", "ntfy", "ntfy", s.ntfy.url, true));
+                            components.Add(Component("ntfy", "ntfy", "ntfy", s.clients.ntfy.url, true));
                         if (full)
                         {
                             var cdr = s.calls?.cdrDb;

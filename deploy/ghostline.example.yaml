@@ -11,15 +11,15 @@ locale:
   transcript:
 
 # Notification channels, both optional (at least one to get notifications).
-telegram:                     # empty token: Telegram is off
-  token: 123456789:AAExampleTelegramBotToken
-  chat_ids:                   # common chats, for lines without their own
-    - "100000001"
-
-ntfy:                         # empty url: ntfy is off
-  url:
-  token:
-  topic:                      # common topic, for lines without their own
+clients:
+  telegram:                   # empty token: Telegram is off
+    token: 123456789:AAExampleTelegramBotToken
+    chat_ids:                 # common chats, for lines without their own
+      - "100000001"
+  ntfy:                       # empty url: ntfy is off
+    url:
+    token:
+    topic:                    # common topic, for lines without their own
 
 web:                          # empty user and password disable authentication
   port: 8889

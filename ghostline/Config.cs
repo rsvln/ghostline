@@ -28,13 +28,27 @@ namespace ghostline
         // Own number of this SIM (+7...), shown in the "From / To" header of transcripts for
         // external readers; when empty, the line name is used.
         public string number { get; set; }
-        // Telegram chats of this line (SMS and calls); empty: the common telegram.chat_ids.
-        public List<string> chatIds { get; set; }
-        // ntfy topic of this line; empty: the common ntfy.topic.
-        public string ntfyTopic { get; set; }
+        // Where this line goes; no section: the common clients.telegram.chat_ids / clients.ntfy.topic.
+        public LineClients clients { get; set; }
         // What to send for calls on this line (mode "full" only).
         // No section: everything on, the line's chats.
         public ChannelCalls calls { get; set; }
+    }
+
+    public class LineClients
+    {
+        public LineTelegram telegram { get; set; }
+        public LineNtfy ntfy { get; set; }
+    }
+
+    public class LineTelegram
+    {
+        public List<string> chatIds { get; set; }     // chats of the line (SMS and calls); empty: telegram.chat_ids
+    }
+
+    public class LineNtfy
+    {
+        public string topic { get; set; }             // topic of the line; empty: ntfy.topic
     }
 
     public class ChannelCalls
@@ -42,7 +56,7 @@ namespace ghostline
         public bool voice { get; set; } = true;       // voice message with the call recording
         public bool transcript { get; set; } = true;  // transcript, added to the caption later
         public bool missed { get; set; } = true;      // notification about a missed incoming call
-        public List<string> chatIds { get; set; }     // empty: the common telegram.chat_ids
+        public List<string> chatIds { get; set; }     // Telegram chats for calls only; empty: the line's chats
     }
 
     public class CallsSettings
@@ -76,24 +90,38 @@ namespace ghostline
         public string prompt { get; set; }
     }
 
-    // Settings sections, as in frte2tg: telegram, web, logger, ...
+    // Settings sections, as in frte2tg: clients, web, logger, ...
     public class Settings
     {
         // "sms": SMS only, as before; "full": also calls (journal, recordings,
-        // transcription, Telegram).
+        // transcription, notifications).
         public string mode { get; set; } = "sms";
         public LocaleSettings locale { get; set; } = new();
-        public TelegramSettings telegram { get; set; } = new();
+        // Notification channels, both optional: Telegram and ntfy.
+        public ClientsSettings clients { get; set; } = new();
         public WebSettings web { get; set; } = new();
         public LoggerSettings logger { get; set; } = new();
         public List<Gateway> gateways { get; set; }
         public List<Channel> channels { get; set; }
         public CallsSettings calls { get; set; }
         public GoipSettings goip { get; set; } = new();
-        public NtfySettings ntfy { get; set; } = new();
+
+        // Before 2026-10-25 "telegram" was a top-level section; such configs are still read.
+        [YamlMember(Alias = "telegram")]
+        public TelegramSettings legacyTelegram
+        {
+            get => null;
+            set { if (value != null) clients.telegram = value; }
+        }
 
         [YamlIgnore]
         public bool FullMode => string.Equals(mode, "full", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public class ClientsSettings
+    {
+        public TelegramSettings telegram { get; set; } = new();
+        public NtfySettings ntfy { get; set; } = new();
     }
 
     // Languages: files locales/<language>.json next to the app (en, ru). As in frte2tg.
@@ -127,7 +155,7 @@ namespace ghostline
         public bool file { get; set; }
     }
 
-    // ntfy (self-hosted push, https://ntfy.sh): SMS and calls to the topic of the line (channels[].ntfy_topic,
+    // ntfy (self-hosted push, https://ntfy.sh): SMS and calls to the topic of the line (channels[].ntfy.topic,
     // or this common topic), and back: a message written in the topic in the ntfy app is sent as an SMS.
     // Empty url: off.
     public class NtfySettings
@@ -168,7 +196,7 @@ namespace ghostline
         public Settings ToSettings() => new()
         {
             mode = mode,
-            telegram = new TelegramSettings { token = tgToken, chatIds = tgChatIds ?? new() },
+            clients = new ClientsSettings { telegram = new TelegramSettings { token = tgToken, chatIds = tgChatIds ?? new() } },
             web = new WebSettings { port = webUiPort, user = webUiUser, password = webUiPassword },
             logger = new LoggerSettings { file = LogToFile },
             gateways = gateways,

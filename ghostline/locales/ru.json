@@ -119,7 +119,7 @@
   "web.config.remove_gateway_confirm": "Удалить шлюз {0}? Линии на нём перестанут работать.",
   "web.config.remove_channel_confirm": "Удалить линию {0}?",
   "web.config.gateways_hint": "Шлюзы, к которым подключается ghostline. quectel — Asterisk/FreePBX с chan_quectel через AMI; yeastar — AMI; goip — SMTP и HTTP.",
-  "web.config.channels_hint": "SIM-линии. Имя — в командах бота и в интерфейсе; линия — устройство chan_quectel (gsm1) или порт шлюза. Свои чаты Telegram и топик ntfy необязательны: без них линия использует общие.",
+  "web.config.channels_hint": "SIM-линии. Имя — в командах бота и в интерфейсе; линия — устройство chan_quectel (gsm1) или порт шлюза. Свои чаты и топик («Клиенты») необязательны: без них линия использует общие.",
   "web.config.group.general": "Основное",
   "web.config.group.telegram": "Telegram",
   "web.config.group.web": "Веб-интерфейс",
@@ -235,6 +235,12 @@
   "tg.sms.wrong.one": "Это не похоже на SMS для отправки. Чтобы отправить с линии <code>{0}</code>, напишите две строки: номер получателя и текст.\n\n/help — подробнее",
   "tg.sms.wrong.many": "Это не похоже на SMS для отправки. Напишите три строки: линия, номер получателя, текст.\n\n<b>Линии:</b>\n{0}\n\n/help — подробнее",
   "web.field.ntfy.topic": "Общий топик (для линий без своего)",
-  "web.field.channels.chat_ids": "Чаты Telegram линии (пусто — общие)",
-  "web.field.channels.ntfy_topic": "Топик ntfy линии (пусто — общий)"
+  "web.config.group.clients": "Клиенты",
+  "web.config.hint.clients": "Куда идут уведомления и откуда можно отправлять SMS: Telegram и ntfy, оба необязательны, можно вместе. Здесь общие настройки; у линии могут быть свои чаты и топик (Линии → линия → Клиенты).",
+  "web.config.hint.line_clients": "Чаты и топик этой линии. Пусто — общие из раздела «Клиенты».",
+  "web.config.hint.line_telegram": "Чаты Telegram этой линии (SMS и звонки). Пусто — общие чаты.",
+  "web.config.hint.line_ntfy": "Топик ntfy этой линии. Пусто — общий топик.",
+  "web.config.hint.line_calls": "Что слать по звонкам этой линии (только режим full).",
+  "web.field.channels.clients.telegram.chat_ids": "Chat id (пусто — общие)",
+  "web.field.channels.clients.ntfy.topic": "Топик (пусто — общий)"
 }

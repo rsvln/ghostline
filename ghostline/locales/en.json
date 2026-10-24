@@ -119,7 +119,7 @@
   "web.config.remove_gateway_confirm": "Remove gateway {0}? Lines on it stop working.",
   "web.config.remove_channel_confirm": "Remove line {0}?",
   "web.config.gateways_hint": "Gateways ghostline connects to. quectel — Asterisk/FreePBX with chan_quectel over AMI; yeastar — AMI; goip — SMTP and HTTP.",
-  "web.config.channels_hint": "SIM lines. The name is used in the bot and the interface; line is the chan_quectel device (gsm1) or the gateway port. Own Telegram chats and ntfy topic are optional: without them the line uses the common ones.",
+  "web.config.channels_hint": "SIM lines. The name is used in the bot and the interface; line is the chan_quectel device (gsm1) or the gateway port. Own chats and topic (Clients) are optional: without them the line uses the common ones.",
   "web.config.group.general": "General",
   "web.config.group.telegram": "Telegram",
   "web.config.group.web": "Web interface",
@@ -235,6 +235,12 @@
   "tg.sms.wrong.one": "This doesn't look like an SMS to send. To send from the line <code>{0}</code> write two lines: the recipient's number and the text.\n\n/help — more",
   "tg.sms.wrong.many": "This doesn't look like an SMS to send. Write three lines: the line, the recipient's number and the text.\n\n<b>Lines:</b>\n{0}\n\n/help — more",
   "web.field.ntfy.topic": "Common topic (for lines without their own)",
-  "web.field.channels.chat_ids": "Telegram chats of the line (empty — common)",
-  "web.field.channels.ntfy_topic": "ntfy topic of the line (empty — common)"
+  "web.config.group.clients": "Clients",
+  "web.config.hint.clients": "Where notifications go and where SMS can be sent from: Telegram and ntfy, both optional and usable together. Here are the common settings; a line can have its own chats and topic (Lines → line → Clients).",
+  "web.config.hint.line_clients": "Chats and topic of this line. Empty: the common ones from Clients.",
+  "web.config.hint.line_telegram": "Telegram chats of this line (SMS and calls). Empty: the common chats.",
+  "web.config.hint.line_ntfy": "ntfy topic of this line. Empty: the common topic.",
+  "web.config.hint.line_calls": "What to send for calls on this line (mode full only).",
+  "web.field.channels.clients.telegram.chat_ids": "Chat ids (empty — common)",
+  "web.field.channels.clients.ntfy.topic": "Topic (empty — common)"
 }

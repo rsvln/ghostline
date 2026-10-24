@@ -2,8 +2,8 @@ namespace ghostline
 {
     // Which Telegram chats and ntfy topics a line goes to, and the other way round: which lines a chat
     // or a topic serves. The same rules for both channels:
-    //  - a line has its own chats (channels[].chat_ids) and topic (channels[].ntfy_topic), or the
-    //    common ones (telegram.chat_ids, ntfy.topic);
+    //  - a line has its own chats (channels[].clients.telegram.chat_ids) and topic (channels[].clients.ntfy.topic), or the
+    //    common ones (clients.telegram.chat_ids, clients.ntfy.topic);
     //  - an SMS is sent from a chat/topic as "number / text" when it serves one line, and as
     //    "line / number / text" when it serves several (the line name first is accepted anyway).
     internal partial class Program
@@ -12,8 +12,8 @@ namespace ghostline
 
         internal static List<string> LineChats(Channel ch) =>
             !TelegramEnabled ? new List<string>()
-            : ch.chatIds is { Count: > 0 } ? ch.chatIds
-            : settings.telegram.chatIds ?? new List<string>();
+            : ch.clients?.telegram?.chatIds is { Count: > 0 } ? ch.clients.telegram.chatIds
+            : settings.clients.telegram.chatIds ?? new List<string>();
 
         // calls.chat_ids still overrides the chats for calls only.
         internal static List<string> LineCallChats(Channel ch) =>
@@ -21,11 +21,11 @@ namespace ghostline
             : ch.calls?.chatIds is { Count: > 0 } ? ch.calls.chatIds
             : LineChats(ch);
 
-        // null: the line has no topic (ntfy off, or neither ntfy_topic nor ntfy.topic set).
+        // null: the line has no topic (ntfy off, or neither the line's ntfy.topic nor the common one set).
         internal static string LineTopic(Channel ch) =>
             !NtfyEnabled ? null
-            : !string.IsNullOrWhiteSpace(ch.ntfyTopic) ? ch.ntfyTopic.Trim()
-            : string.IsNullOrWhiteSpace(settings.ntfy.topic) ? null : settings.ntfy.topic.Trim();
+            : !string.IsNullOrWhiteSpace(ch.clients?.ntfy?.topic) ? ch.clients.ntfy.topic.Trim()
+            : string.IsNullOrWhiteSpace(settings.clients.ntfy.topic) ? null : settings.clients.ntfy.topic.Trim();
 
         internal static List<Channel> LinesOfChat(string chatId) =>
             AllLines.Where(c => LineChats(c).Contains(chatId) || (c.calls?.chatIds?.Contains(chatId) ?? false)).ToList();

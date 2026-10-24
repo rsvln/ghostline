@@ -170,15 +170,15 @@ locale:                       # en | ru; empty values fall back to default
   telegram:
   transcript:                 # language of downloaded transcripts
 
-telegram:                     # empty token — Telegram is off
-  token: 123456789:AAExampleTelegramBotToken
-  chat_ids:                   # common chats, for lines without their own
-    - "100000001"
-
-ntfy:                         # empty url — ntfy is off
-  url: https://ntfy.example.org
-  token: tk_exampleaccesstoken
-  topic:                      # common topic, for lines without their own
+clients:                      # notification channels, both optional
+  telegram:                   # empty token — Telegram is off
+    token: 123456789:AAExampleTelegramBotToken
+    chat_ids:                 # common chats, for lines without their own
+      - "100000001"
+  ntfy:                       # empty url — ntfy is off
+    url: https://ntfy.example.org
+    token: tk_exampleaccesstoken
+    topic:                    # common topic, for lines without their own
 
 web:                          # empty user and password disable authentication
   port: 8889
@@ -202,8 +202,11 @@ channels:
     pattern: gsm1
     line: gsm1
     number: "+79001234567"    # shown in transcript headers
-    chat_ids: []              # Telegram chats of this line; empty — telegram.chat_ids
-    ntfy_topic: gl-personal   # ntfy topic of this line; empty — ntfy.topic
+    clients:                  # optional; without it the common chats and topic
+      telegram:
+        chat_ids: []          # empty — clients.telegram.chat_ids
+      ntfy:
+        topic: gl-personal    # empty — clients.ntfy.topic
     calls:
       voice: true
       transcript: true
@@ -239,11 +242,13 @@ goip:
 | `mode` | `sms` (default) or `full` |
 | `locale.default` | `en` (default) or `ru` |
 | `locale.web` / `locale.telegram` / `locale.transcript` | Language of the web interface, Telegram messages and downloaded transcripts; empty — `locale.default` |
-| `telegram.token` | Bot token; empty — Telegram is off |
-| `telegram.chat_ids` | Common chats, for lines without their own `chat_ids` |
-| `ntfy.url` | ntfy server; empty — ntfy is off |
-| `ntfy.token` | ntfy access token with read and write access to the topics |
-| `ntfy.topic` | Common topic, for lines without their own `ntfy_topic` |
+| `clients.telegram.token` | Bot token; empty — Telegram is off |
+| `clients.telegram.chat_ids` | Common chats, for lines without their own |
+| `clients.ntfy.url` | ntfy server; empty — ntfy is off |
+| `clients.ntfy.token` | ntfy access token with read and write access to the topics |
+| `clients.ntfy.topic` | Common topic, for lines without their own |
+
+A top-level `telegram` section of older configs is still read as `clients.telegram`.
 | `web.port` | Web interface port, default `8889` |
 | `web.user` / `web.password` | HTTP Basic authentication; both empty — no authentication |
 | `logger.file` | Write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log` |
@@ -269,8 +274,8 @@ goip:
 | `pattern` | String incoming events are matched against |
 | `line` | Port number (`yeastar`, `goip`) or `chan_quectel` device name (`gsm1`, …) |
 | `number` | The line's own phone number, shown in transcript headers; optional |
-| `chat_ids` | Telegram chats of the line (SMS and calls); empty — `telegram.chat_ids` |
-| `ntfy_topic` | ntfy topic of the line; empty — `ntfy.topic` |
+| `clients.telegram.chat_ids` | Telegram chats of the line (SMS and calls); empty — the common ones |
+| `clients.ntfy.topic` | ntfy topic of the line; empty — the common one |
 | `calls.voice` / `calls.transcript` / `calls.missed` | What to send for calls on this line |
 | `calls.chat_ids` | Telegram chats for this line's calls only; empty — the line's chats |
 

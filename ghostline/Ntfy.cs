@@ -23,8 +23,8 @@ namespace ghostline
 
         private static readonly HttpClient ntfyHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
 
-        internal static bool NtfyEnabled => !string.IsNullOrWhiteSpace(settings?.ntfy?.url);
-        internal static bool TelegramEnabled => !string.IsNullOrWhiteSpace(settings?.telegram?.token);
+        internal static bool NtfyEnabled => !string.IsNullOrWhiteSpace(settings?.clients?.ntfy?.url);
+        internal static bool TelegramEnabled => !string.IsNullOrWhiteSpace(settings?.clients?.telegram?.token);
 
         private static string NtfyTarget(string topic) => NtfyPrefix + topic;
         private static bool IsNtfyTarget(string target) => target != null && target.StartsWith(NtfyPrefix);
@@ -82,13 +82,13 @@ namespace ghostline
         }
 
         private static string NtfyUrl(string topic, string sequenceId) =>
-            settings.ntfy.url.TrimEnd('/') + "/" + Uri.EscapeDataString(topic) +
+            settings.clients.ntfy.url.TrimEnd('/') + "/" + Uri.EscapeDataString(topic) +
             (sequenceId == null ? "" : "/" + Uri.EscapeDataString(sequenceId));
 
         private static void NtfyHeaders(HttpRequestMessage req, string title)
         {
-            if (!string.IsNullOrEmpty(settings.ntfy.token))
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ntfy.token);
+            if (!string.IsNullOrEmpty(settings.clients.ntfy.token))
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.clients.ntfy.token);
             if (!string.IsNullOrEmpty(title))
                 req.Headers.Add("Title", Rfc2047(title));
             req.Headers.Add("Tags", NtfyOwnTag);
@@ -137,7 +137,7 @@ namespace ghostline
             var topicList = AllLines.Select(LineTopic).Where(t => t != null).Distinct().ToList();
             if (topicList.Count == 0)
             {
-                Console.WriteLine("ntfy: no topics (set ntfy.topic or channels[].ntfy_topic)");
+                Console.WriteLine("ntfy: no topics (set clients.ntfy.topic or channels[].clients.ntfy.topic)");
                 return;
             }
             string topics = string.Join(",", topicList.Select(Uri.EscapeDataString));
@@ -148,9 +148,9 @@ namespace ghostline
                     // since: the last message seen, so messages written while ghostline was down are
                     // not lost (ntfy keeps them for a day); on the very first start only new ones.
                     string since = Store.GetKv(KvNtfySince) ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-                    using var req = new HttpRequestMessage(HttpMethod.Get, $"{settings.ntfy.url.TrimEnd('/')}/{topics}/json?since={Uri.EscapeDataString(since)}");
-                    if (!string.IsNullOrEmpty(settings.ntfy.token))
-                        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ntfy.token);
+                    using var req = new HttpRequestMessage(HttpMethod.Get, $"{settings.clients.ntfy.url.TrimEnd('/')}/{topics}/json?since={Uri.EscapeDataString(since)}");
+                    if (!string.IsNullOrEmpty(settings.clients.ntfy.token))
+                        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.clients.ntfy.token);
                     using var resp = await ntfyHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
                     if (!resp.IsSuccessStatusCode)
                         throw new HttpRequestException($"ntfy HTTP {(int)resp.StatusCode}");

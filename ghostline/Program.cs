@@ -115,7 +115,7 @@ namespace ghostline
             if (TelegramEnabled)
             {
                 HealthStatus.MarkConfigured("telegram");
-                bot = new TelegramBotClient(settings.telegram.token);
+                bot = new TelegramBotClient(settings.clients.telegram.token);
                 CancellationTokenSource cts = new();
                 ReceiverOptions tgreceiverOptions = new()
                 {
