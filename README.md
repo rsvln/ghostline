@@ -333,33 +333,11 @@ Commands: `/help` (the format above for this chat or topic, the lines),
 `/status` (state of gateways, channels and queues). Telegram shows them in the
 bot menu. Only chats and topics of the configured lines are served.
 
-### ntfy server
+### ntfy
 
-[ntfy](https://docs.ntfy.sh/install/) is a single binary. A minimal
-`server.yml` for ghostline:
-
-```yaml
-base-url: "https://ntfy.example.org"
-listen-http: ":80"
-behind-proxy: true                   # behind a reverse proxy with HTTPS
-cache-file: "/var/cache/ntfy/cache.db"
-cache-duration: "24h"                # lets ghostline catch up after a restart
-attachment-cache-dir: "/var/cache/ntfy/attachments"
-attachment-file-size-limit: "15M"    # call recordings
-attachment-expiry-duration: "72h"
-auth-file: "/var/lib/ntfy/user.db"
-auth-default-access: "deny-all"
-```
-
-Users and access: one for ghostline (with an access token, `ntfy token add`)
-and one for the phone, both with read and write access to the topics, for
-example `ntfy access phone 'gl-*' rw`. Behind a reverse proxy turn response
-buffering off and allow long reads (`proxy_buffering off;`,
-`proxy_read_timeout 3m;`), otherwise notifications are delayed.
-
-In the ntfy app (Android: Google Play or F-Droid) add the user for your server
-and subscribe to the topics. A message typed in a topic is sent to ghostline;
-ghostline's own messages carry the tag `ghost` (shown as 👻).
+Setting up the ntfy server (users and access, HTTPS behind a reverse proxy,
+the phone app) and how ghostline uses it is described in
+[docs/ntfy.md](docs/ntfy.md).
 
 ## Web interface
 
