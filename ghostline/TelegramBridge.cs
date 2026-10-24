@@ -6,22 +6,21 @@ namespace ghostline
 {
     internal partial class Program
     {
-        // Puts the text into the persistent queue for sending to every chat in telegram.chat_ids.
+        // Puts the text into the persistent queue for sending to every Telegram chat of the line.
         // The queue is stored in SQLite (the same DB as the SMS history) and survives a process
         // restart, so a temporary Telegram API outage does not silently drop notifications.
-        private static void EnqueueTelegramBroadcast(string text)
+        private static void EnqueueTelegramForLine(Channel line, string text)
         {
-            foreach (string schatid in settings.telegram.chatIds)
-            {
-                Store.EnqueueTelegramMessage(schatid, text);
-            }
+            foreach (string chat in LineChats(line))
+                Store.EnqueueTelegramMessage(chat, text);
         }
 
         // Background worker of the persistent queue: every 5 s takes the pending messages
         // and tries to send them. Success removes them from the queue; failure records the
         // attempt and keeps them for the next cycle. Attempts are unlimited: a message
         // stays queued until it goes out (and survives a restart, since the queue lives in
-        // the DB, not in memory).
+        // the DB, not in memory). Targets "ntfy:<topic>" go to ntfy, the rest are Telegram chats;
+        // rows of a channel that is switched off in the config are dropped.
         private static async Task TelegramOutboxWorker()
         {
             while (true)
@@ -29,17 +28,27 @@ namespace ghostline
                 var pending = Store.GetPendingTelegramMessages(50);
                 foreach (var item in pending)
                 {
+                    bool ntfy = IsNtfyTarget(item.ChatId);
+                    string kind = ntfy ? "ntfy" : "telegram";
                     try
                     {
-                        await bot.SendMessage(item.ChatId, item.Text);
+                        if (ntfy ? !NtfyEnabled : !TelegramEnabled)
+                        {
+                            Store.DeleteTelegramMessage(item.Id);
+                            continue;
+                        }
+                        if (ntfy)
+                            await NtfySendQueued(item.ChatId, item.Text);
+                        else
+                            await bot.SendMessage(item.ChatId, item.Text);
                         Store.DeleteTelegramMessage(item.Id);
-                        HealthStatus.MarkActivity("telegram");
+                        HealthStatus.MarkActivity(kind);
                     }
                     catch (Exception ex)
                     {
                         Store.MarkTelegramMessageFailed(item.Id, ex.Message);
-                        HealthStatus.MarkError("telegram", ex.Message);
-                        Console.WriteLine($"Telegram send to {item.ChatId} failed (attempt {item.Attempts + 1}): {ex.Message}");
+                        HealthStatus.MarkError(kind, ex.Message);
+                        Console.WriteLine($"{kind} send to {item.ChatId} failed (attempt {item.Attempts + 1}): {ex.Message}");
                     }
                 }
                 await Task.Delay(5000);
@@ -62,73 +71,42 @@ namespace ghostline
                 return;
             var chatId = message.Chat.Id;
 
-            if (!settings.telegram.chatIds.Contains(chatId.ToString()))
+            // Only chats of some line (its own chat_ids or the common telegram.chat_ids) are served.
+            var lines = LinesOfChat(chatId.ToString());
+            if (lines.Count == 0)
             {
                 await botClient.SendMessage(chatId: chatId.ToString(), text: L10n.Tg.T("tg.sms.go_away"), cancellationToken: cancellationToken);
                 return;
             }
             HealthStatus.MarkActivity("telegram");
 
+            async Task Reply(string html) =>
+                await botClient.SendMessage(chatId, html, parseMode: Telegram.Bot.Types.Enums.ParseMode.Html,
+                                            linkPreviewOptions: true, cancellationToken: cancellationToken);
+
             // Commands: /help (/start), /status. "/help@botname" in group chats.
             if (messageText.StartsWith('/'))
             {
                 string cmd = messageText.Split(' ', '\n')[0].Split('@')[0].ToLowerInvariant();
-                string reply = cmd switch
+                await Reply(cmd switch
                 {
-                    "/help" or "/start" => HelpText(),
+                    "/help" or "/start" => HelpText(lines),
                     "/status" => StatusText(),
                     _ => L10n.Tg.T("tg.cmd.unknown", Html(cmd))
-                };
-                await botClient.SendMessage(chatId, reply, parseMode: Telegram.Bot.Types.Enums.ParseMode.Html,
-                                            linkPreviewOptions: true, cancellationToken: cancellationToken);
+                });
                 return;
             }
 
-            List<string> mlist = messageText.Replace("\r", "").Split('\n').ToList();
-            Channel chanOut = getChannelType(mlist[0]);
-
-            if ((mlist.Count < 3) || (chanOut is null))
+            var (line, number, text) = ParseSmsCommand(lines, messageText);
+            if (line == null)
             {
-                await botClient.SendMessage(chatId, L10n.Tg.T("tg.sms.wrong_format", LinesHtml()),
-                                            parseMode: Telegram.Bot.Types.Enums.ParseMode.Html, cancellationToken: cancellationToken);
+                await Reply(WrongFormatText(lines));
                 return;
             }
-            else
-            {
-                string mcontent = "";
-                for(var i = 2; i < mlist.Count; i++)
-                {
-                    if (i == mlist.Count - 1)
-                        mcontent = mcontent + mlist[i];
-                    else
-                        mcontent = mcontent + mlist[i] + " ";
-                }
-                mcontent = mcontent.Replace("\r", "");
-                string sourceLabel = "@" + (message.Chat.Username ?? message.Chat.Id.ToString());
-                var (ok, error) = QueueSmsSend(chanOut, mlist[1], mcontent, sourceLabel);
-
-                if (!ok)
-                {
-                    await botClient.SendMessage(chatId: chatId.ToString(), text: L10n.Tg.T("tg.sms.send_failed", error), cancellationToken: cancellationToken);
-                }
-            }
-
-        }
-
-        private static string Html(string s) => System.Net.WebUtility.HtmlEncode(s ?? "");
-
-        // Lines as "<code>home</code> +79001234567", one per line.
-        private static string LinesHtml() =>
-            string.Join("\n", (settings.channels ?? new()).Select(c =>
-                $"<code>{Html(c.name)}</code>" + (string.IsNullOrEmpty(c.number) ? "" : " " + Html(c.number))));
-
-        private static string HelpText()
-        {
-            var l = L10n.Tg;
-            return l.T("tg.help", LinesHtml(), Html(settings.channels?.FirstOrDefault()?.name ?? "home"))
-                 + (settings.FullMode ? "\n\n" + l.T("tg.help.calls") : "")
-                 + "\n\n" + l.T("tg.help.commands")
-                 + "\n\n" + l.T("tg.help.footer", VersionInfo.ProjectUrl, Html(VersionInfo.Version));
+            string sourceLabel = "@" + (message.Chat.Username ?? message.Chat.Id.ToString());
+            var (ok, error) = QueueSmsSend(line, number, text, sourceLabel);
+            if (!ok)
+                await botClient.SendMessage(chatId: chatId.ToString(), text: L10n.Tg.T("tg.sms.send_failed", error), cancellationToken: cancellationToken);
         }
 
         // /status: the same states as the Status tab of the web interface.
@@ -147,7 +125,8 @@ namespace ghostline
             var rows = new List<string>();
             foreach (var gw in settings.gateways ?? new())
                 rows.Add(Row(gw.id, gw.id, gw.type is "quectel" or "yeastar"));
-            rows.Add(Row("telegram", "Telegram", true));
+            if (TelegramEnabled) rows.Add(Row("telegram", "Telegram", true));
+            if (NtfyEnabled) rows.Add(Row("ntfy", "ntfy", true));
             if (settings.FullMode)
             {
                 rows.Add(Row("cdr", l.T("tg.status.cdr"), true));

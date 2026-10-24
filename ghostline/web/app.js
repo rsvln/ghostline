@@ -593,7 +593,7 @@ function settingsTree(data) {
     id, title: byId[id].title, fields: [], list: id,
     children: (data[id] || []).map(it => ({ id: LISTS[id].prefix + it.key, title: it.key, key: it.key, fields: it.fields }))
   });
-  const tree = [node('general'), node('telegram'), node('web'), node('logger'), list('gateways'), list('channels')];
+  const tree = [node('general'), node('telegram'), node('ntfy'), node('web'), node('logger'), list('gateways'), list('channels')];
   tree.push(Object.assign(node('calls'), { children: [node('cdr_db'), node('transcribe')] }));
   tree.push(node('goip'));
   return tree;

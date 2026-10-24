@@ -18,7 +18,8 @@ namespace ghostline
             string ppl = string.IsNullOrEmpty(contactName) ? "" : "\n" + contactName;
 
             string body = sender + " " + chan.name + " " + recvTime + ppl + "\n------------------\n\n" + telegramText;
-            EnqueueTelegramBroadcast(body);
+            EnqueueTelegramForLine(chan, body);
+            EnqueueNtfy(chan, SmsTitle(sender, contactName), telegramText);
 
             if (settings.logger.file)
                 Log(gwt, "in", recvTime, chan.name, sender, logText);
@@ -35,6 +36,10 @@ namespace ghostline
                 Content = logText
             });
         }
+
+        // "💬 John Smith +79001234567" (the line is the topic itself).
+        private static string SmsTitle(string sender, string contactName) =>
+            "💬 " + (string.IsNullOrEmpty(contactName) ? sender : contactName + " " + sender);
 
         public static void SMTPReadData(string xxx)
         {
@@ -63,7 +68,8 @@ namespace ghostline
                 // into a real line break for readability.
                 string content = xxxl[2].Replace("+", "\n").Replace("\\n", "\n");
 
-                EnqueueTelegramBroadcast(sender + " " + chan.name + " " + recvTime + ppl + "\n------------------\n\n" + content);
+                EnqueueTelegramForLine(chan, sender + " " + chan.name + " " + recvTime + ppl + "\n------------------\n\n" + content);
+                EnqueueNtfy(chan, SmsTitle(sender, contactName), content);
                 if (settings.logger.file)
                     Log("g", "in", recvTime, chan.name, sender, content);
                 Console.WriteLine(recvTime + "\t" + "g\tin" + "\t" + chan.name + "\t" + sender + "\t" + content);

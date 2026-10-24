@@ -36,6 +36,7 @@ namespace ghostline
         public bool WantTranscript { get; set; }
         public long MessageId { get; set; }
         public int Attempts { get; set; }
+        public string Ext { get; set; }          // ntfy: URL of the uploaded recording
     }
 
     // Calls (from the PBX CDR), the transcription queue and the queue of call notifications to Telegram.
@@ -124,6 +125,18 @@ namespace ghostline
                 cmd.CommandText = @"
                     ALTER TABLE calls ADD COLUMN tr_requested_at TEXT;
                     PRAGMA user_version = 3;";
+                cmd.ExecuteNonQuery();
+                version = 3;
+            }
+
+            if (version < 4)
+            {
+                // ntfy: the URL of the recording uploaded with the first message, reused when the
+                // notification is replaced with the transcript.
+                using var cmd = db.CreateCommand();
+                cmd.CommandText = @"
+                    ALTER TABLE call_tg ADD COLUMN ext TEXT;
+                    PRAGMA user_version = 4;";
                 cmd.ExecuteNonQuery();
             }
         }
@@ -424,12 +437,13 @@ namespace ghostline
                     Kind = r.GetString(3),
                     WantTranscript = r.GetInt64(4) != 0,
                     MessageId = r.GetInt64(5),
-                    Attempts = r.GetInt32(6)
+                    Attempts = r.GetInt32(6),
+                    Ext = r.IsDBNull(7) ? null : r.GetString(7)
                 });
             return list;
         }
 
-        private const string TgColumns = "t.id, t.call_id, t.chat_id, t.kind, t.want_transcript, t.message_id, t.attempts";
+        private const string TgColumns = "t.id, t.call_id, t.chat_id, t.kind, t.want_transcript, t.message_id, t.attempts, t.ext";
 
         // Notifications not sent yet.
         public static List<CallTgItem> PendingCallTg(int limit)
@@ -453,13 +467,14 @@ namespace ghostline
             return ReadTg(cmd);
         }
 
-        public static void MarkCallTgSent(long id, long messageId, bool final)
+        public static void MarkCallTgSent(long id, long messageId, bool final, string ext = null)
         {
             using var db = Open();
             using var cmd = db.CreateCommand();
-            cmd.CommandText = "UPDATE call_tg SET state = $s, message_id = $m, last_error = NULL WHERE id = $id;";
+            cmd.CommandText = "UPDATE call_tg SET state = $s, message_id = $m, ext = $x, last_error = NULL WHERE id = $id;";
             cmd.Parameters.AddWithValue("$s", final ? "final" : "sent");
             cmd.Parameters.AddWithValue("$m", messageId);
+            cmd.Parameters.AddWithValue("$x", (object)ext ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$id", id);
             cmd.ExecuteNonQuery();
         }

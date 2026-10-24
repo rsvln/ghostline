@@ -111,17 +111,26 @@ namespace ghostline
                 }
             }
 
-            //tg start
-            HealthStatus.MarkConfigured("telegram");
-            bot = new TelegramBotClient(settings.telegram.token);
-            CancellationTokenSource cts = new();
-            ReceiverOptions tgreceiverOptions = new()
+            // Notification channels, both optional: Telegram (telegram.token) and ntfy (ntfy.url).
+            if (TelegramEnabled)
             {
-                AllowedUpdates = Array.Empty<UpdateType>()
-            };
-            bot.StartReceiving(updateHandler: TgHandleUpdateAsync, errorHandler: TgHandlePollingErrorAsync, receiverOptions: tgreceiverOptions, cancellationToken: cts.Token);
-            Task.Run(() => TelegramHealthLoop());
-            Task.Run(() => SetBotCommands());
+                HealthStatus.MarkConfigured("telegram");
+                bot = new TelegramBotClient(settings.telegram.token);
+                CancellationTokenSource cts = new();
+                ReceiverOptions tgreceiverOptions = new()
+                {
+                    AllowedUpdates = Array.Empty<UpdateType>()
+                };
+                bot.StartReceiving(updateHandler: TgHandleUpdateAsync, errorHandler: TgHandlePollingErrorAsync, receiverOptions: tgreceiverOptions, cancellationToken: cts.Token);
+                Task.Run(() => TelegramHealthLoop());
+                Task.Run(() => SetBotCommands());
+            }
+            if (NtfyEnabled)
+            {
+                HealthStatus.MarkConfigured("ntfy");
+                Task.Run(() => NtfyListenLoop());
+            }
+            Console.WriteLine($"channels: telegram={(TelegramEnabled ? "on" : "off")}, ntfy={(NtfyEnabled ? "on" : "off")}");
             Task.Run(() => TelegramOutboxWorker());
             Task.Run(() => SmsOutboxWorker());
 

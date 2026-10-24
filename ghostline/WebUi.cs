@@ -88,8 +88,12 @@ namespace ghostline
                         bool full = s?.FullMode == true;
                         var components = (s?.gateways ?? new List<Gateway>())
                             .Select(g => Component(g.id, g.id, g.type, g.ip, g.type is "quectel" or "yeastar"))
-                            .Append(Component("telegram", "Telegram", "telegram", null, true))
                             .ToList();
+                        // Notification channels: only the ones switched on in the config.
+                        if (Program.TelegramEnabled)
+                            components.Add(Component("telegram", "Telegram", "telegram", null, true));
+                        if (Program.NtfyEnabled)
+                            components.Add(Component("ntfy", "ntfy", "ntfy", s.ntfy.url, true));
                         if (full)
                         {
                             var cdr = s.calls?.cdrDb;

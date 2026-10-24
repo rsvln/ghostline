@@ -28,8 +28,12 @@ namespace ghostline
         // Own number of this SIM (+7...), shown in the "From / To" header of transcripts for
         // external readers; when empty, the line name is used.
         public string number { get; set; }
-        // What to send to Telegram for calls on this line (mode "full" only).
-        // No section: everything on, common chats.
+        // Telegram chats of this line (SMS and calls); empty: the common telegram.chat_ids.
+        public List<string> chatIds { get; set; }
+        // ntfy topic of this line; empty: the common ntfy.topic.
+        public string ntfyTopic { get; set; }
+        // What to send for calls on this line (mode "full" only).
+        // No section: everything on, the line's chats.
         public ChannelCalls calls { get; set; }
     }
 
@@ -86,6 +90,7 @@ namespace ghostline
         public List<Channel> channels { get; set; }
         public CallsSettings calls { get; set; }
         public GoipSettings goip { get; set; } = new();
+        public NtfySettings ntfy { get; set; } = new();
 
         [YamlIgnore]
         public bool FullMode => string.Equals(mode, "full", StringComparison.OrdinalIgnoreCase);
@@ -120,6 +125,16 @@ namespace ghostline
     {
         // Also write SMS to /var/log/ghostline/ghostline_DATE.log.
         public bool file { get; set; }
+    }
+
+    // ntfy (self-hosted push, https://ntfy.sh): SMS and calls to the topic of the line (channels[].ntfy_topic,
+    // or this common topic), and back: a message written in the topic in the ntfy app is sent as an SMS.
+    // Empty url: off.
+    public class NtfySettings
+    {
+        public string url { get; set; }
+        public string token { get; set; }
+        public string topic { get; set; }
     }
 
     public class GoipSettings

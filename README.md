@@ -13,7 +13,7 @@ is what runs in the default `sms` mode.
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Configuration](#configuration)
-- [Telegram bot](#telegram-bot)
+- [Telegram and ntfy](#telegram-and-ntfy)
 - [Web interface](#web-interface)
 - [Storage and reliability](#storage-and-reliability)
 - [Hardware](#hardware)
@@ -26,10 +26,14 @@ is what runs in the default `sms` mode.
 - Gateways: Yeastar (AMI), GoIP (SMTP + HTTP), Quectel modules through
   `chan_quectel` in Asterisk/FreePBX (AMI). Several gateways of the same type
   are supported.
-- Incoming SMS are forwarded to one or more Telegram chats, with the sender's
-  name resolved from a Google Contacts export.
-- Outgoing SMS from a Telegram command or from the web interface, through a
-  persistent queue.
+- Two notification channels, both optional and usable together: Telegram and
+  [ntfy](https://ntfy.sh) (a self-hosted push server, works without Google
+  services and without access to Telegram). Each line goes to its own
+  chats/topic or to common ones.
+- Incoming SMS are forwarded with the sender's name resolved from a Google
+  Contacts export.
+- Outgoing SMS from a Telegram chat, an ntfy topic or the web interface,
+  through a persistent queue.
 - SMS history in SQLite, with search and export.
 
 **Calls** (`mode: full`, Asterisk/FreePBX only)
@@ -45,9 +49,9 @@ is what runs in the default `sms` mode.
   [speaches](https://github.com/speaches-ai/speaches) (faster-whisper).
   If the PBX records each side of the call separately, the transcript is a
   dialog with speakers and timestamps.
-- Telegram: a voice message right after the call; the transcript is added to
-  the same message when it is ready. Optional notifications about missed
-  calls. Each line can have its own chats.
+- Telegram and ntfy: the recording right after the call; the transcript is
+  added to the same message when it is ready. Optional notifications about
+  missed calls.
 - Transcript download as PDF (same look as in the web interface) or plain
   text; full-text search across transcripts.
 
@@ -56,7 +60,7 @@ Interface and messages are available in English and Russian.
 ## How it works
 
 ```
-GSM gateway / Asterisk+chan_quectel ──AMI──▶ ghostline ──▶ Telegram
+GSM gateway / Asterisk+chan_quectel ──AMI──▶ ghostline ◀─▶ Telegram, ntfy
                                                  │
 Asterisk CDR (MySQL, read-only) ─────────────────┤
 Recordings (HTTP, read-only) ────────────────────┤──▶ web interface
@@ -70,7 +74,8 @@ SQLite file next to the configuration file.
 
 - A supported gateway: Yeastar, GoIP, or Asterisk/FreePBX with
   `chan_quectel` and a Quectel or SIMCom module.
-- A Telegram bot token.
+- A Telegram bot token and/or an ntfy server (at least one, to get the
+  notifications).
 - Linux x64 (systemd service) or Docker.
 - For `mode: full`: FreePBX/Asterisk with call recording enabled, `ffmpeg` on
   the ghostline host, and optionally a transcription service.
@@ -165,10 +170,15 @@ locale:                       # en | ru; empty values fall back to default
   telegram:
   transcript:                 # language of downloaded transcripts
 
-telegram:
+telegram:                     # empty token — Telegram is off
   token: 123456789:AAExampleTelegramBotToken
-  chat_ids:
+  chat_ids:                   # common chats, for lines without their own
     - "100000001"
+
+ntfy:                         # empty url — ntfy is off
+  url: https://ntfy.example.org
+  token: tk_exampleaccesstoken
+  topic:                      # common topic, for lines without their own
 
 web:                          # empty user and password disable authentication
   port: 8889
@@ -192,11 +202,13 @@ channels:
     pattern: gsm1
     line: gsm1
     number: "+79001234567"    # shown in transcript headers
+    chat_ids: []              # Telegram chats of this line; empty — telegram.chat_ids
+    ntfy_topic: gl-personal   # ntfy topic of this line; empty — ntfy.topic
     calls:
       voice: true
       transcript: true
       missed: true
-      chat_ids: []            # empty — telegram.chat_ids
+      chat_ids: []            # chats for calls only; empty — the line's chats
 
 calls:                        # mode: full only
   cdr_db:
@@ -227,8 +239,11 @@ goip:
 | `mode` | `sms` (default) or `full` |
 | `locale.default` | `en` (default) or `ru` |
 | `locale.web` / `locale.telegram` / `locale.transcript` | Language of the web interface, Telegram messages and downloaded transcripts; empty — `locale.default` |
-| `telegram.token` | Bot token |
-| `telegram.chat_ids` | Chats that receive SMS and, unless a line has its own, calls. Only these chats can send SMS through the bot |
+| `telegram.token` | Bot token; empty — Telegram is off |
+| `telegram.chat_ids` | Common chats, for lines without their own `chat_ids` |
+| `ntfy.url` | ntfy server; empty — ntfy is off |
+| `ntfy.token` | ntfy access token with read and write access to the topics |
+| `ntfy.topic` | Common topic, for lines without their own `ntfy_topic` |
 | `web.port` | Web interface port, default `8889` |
 | `web.user` / `web.password` | HTTP Basic authentication; both empty — no authentication |
 | `logger.file` | Write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log` |
@@ -254,8 +269,10 @@ goip:
 | `pattern` | String incoming events are matched against |
 | `line` | Port number (`yeastar`, `goip`) or `chan_quectel` device name (`gsm1`, …) |
 | `number` | The line's own phone number, shown in transcript headers; optional |
-| `calls.voice` / `calls.transcript` / `calls.missed` | What to send to Telegram for calls on this line |
-| `calls.chat_ids` | Chats for this line's calls; empty — `telegram.chat_ids` |
+| `chat_ids` | Telegram chats of the line (SMS and calls); empty — `telegram.chat_ids` |
+| `ntfy_topic` | ntfy topic of the line; empty — `ntfy.topic` |
+| `calls.voice` / `calls.transcript` / `calls.missed` | What to send for calls on this line |
+| `calls.chat_ids` | Telegram chats for this line's calls only; empty — the line's chats |
 
 `calls` (mode `full`):
 
@@ -278,19 +295,66 @@ Put a Google Contacts export (Google CSV) at `/etc/ghostline/contacts.csv`.
 Numbers are matched regardless of formatting (`+7`, `8`, spaces, dashes).
 All numbers are shown in E.164 form.
 
-## Telegram bot
+## Telegram and ntfy
 
-Only chats from `telegram.chat_ids` are accepted. To send an SMS, write three
-lines:
+Both channels work the same way. Each line goes to its own Telegram chats and
+ntfy topic, or to the common ones; a chat or a topic can serve one line or
+several.
 
+Incoming SMS, sent SMS and calls come to the chats and topics of their line.
+For a call with a recording, the recording comes first and the transcript is
+added to the same message when it is ready (in ntfy the notification is
+replaced).
+
+To send an SMS, write a message in a chat or topic:
+
+- when it serves **one line**, two lines: the recipient and the text;
+
+  ```
+  +79001234567
+  Message text
+  ```
+
+- when it serves **several lines**, three lines: the line `name`, the
+  recipient and the text.
+
+  ```
+  personal
+  +79001234567
+  Message text
+  ```
+
+Commands: `/help` (the format above for this chat or topic, the lines),
+`/status` (state of gateways, channels and queues). Telegram shows them in the
+bot menu. Only chats and topics of the configured lines are served.
+
+### ntfy server
+
+[ntfy](https://docs.ntfy.sh/install/) is a single binary. A minimal
+`server.yml` for ghostline:
+
+```yaml
+base-url: "https://ntfy.example.org"
+listen-http: ":80"
+behind-proxy: true                   # behind a reverse proxy with HTTPS
+cache-file: "/var/cache/ntfy/cache.db"
+cache-duration: "24h"                # lets ghostline catch up after a restart
+attachment-cache-dir: "/var/cache/ntfy/attachments"
+attachment-file-size-limit: "15M"    # call recordings
+attachment-expiry-duration: "72h"
+auth-file: "/var/lib/ntfy/user.db"
+auth-default-access: "deny-all"
 ```
-personal
-+79001234567
-Message text
-```
 
-The first line is the line `name`, the second the recipient, the rest is the
-text.
+Users and access: one for ghostline (with an access token, `ntfy token add`)
+and one for the phone, both with read and write access to the topics, for
+example `ntfy access phone 'gl-*' rw`. Behind a reverse proxy turn response
+buffering off and allow long reads (`proxy_buffering off;`,
+`proxy_read_timeout 3m;`), otherwise notifications are delayed.
+
+In the ntfy app (Android: Google Play or F-Droid) add the user for your server
+and subscribe to the topics. A message typed in a topic is sent to ghostline;
+ghostline's own messages carry the tag `ghost` (shown as 👻).
 
 ## Web interface
 

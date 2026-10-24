@@ -165,7 +165,8 @@ namespace ghostline
             // and for sending from the web UI (before, only the bot path did this, so SMS sent
             // from the web were not visible in Telegram).
             string body = "sent to " + peer + " from " + sourceLabel + " via " + chan.name + " at " + ts + "\n----------------\n\n" + mcontent;
-            EnqueueTelegramBroadcast(body);
+            EnqueueTelegramForLine(chan, body);
+            EnqueueNtfy(chan, "📤 " + peer, mcontent + "\n\n_" + sourceLabel + " · " + ts + "_");
         }
     }
 }

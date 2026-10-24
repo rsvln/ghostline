@@ -16,7 +16,9 @@ namespace ghostline
         private static void EnqueueCallNotifications(CallRecord c, Channel ch)
         {
             var cc = ch.calls ?? new ChannelCalls();
-            var chats = cc.chatIds is { Count: > 0 } ? cc.chatIds : settings.telegram.chatIds ?? new List<string>();
+            // Telegram chats of the line and its ntfy topic (Routing.cs).
+            var chats = new List<string>(LineCallChats(ch));
+            if (LineTopic(ch) is { } topic) chats.Add(NtfyTarget(topic));
             if (chats.Count == 0) return;
 
             if (c.Missed)
@@ -52,7 +54,8 @@ namespace ghostline
             try
             {
                 var call = Store.GetCall(item.CallId);
-                if (call == null) { Store.MarkCallTgFinal(item.Id); return; }
+                if (call == null || !ChannelOn(item)) { Store.MarkCallTgFinal(item.Id); return; }
+                if (IsNtfyTarget(item.ChatId)) { await SendCallNtfy(item, call); return; }
 
                 bool trFinished = call.TrState is "done" or "error";
                 string head = CallHeader(call);
@@ -128,7 +131,8 @@ namespace ghostline
             try
             {
                 var call = Store.GetCall(item.CallId);
-                if (call == null) { Store.MarkCallTgFinal(item.Id); return; }
+                if (call == null || !ChannelOn(item)) { Store.MarkCallTgFinal(item.Id); return; }
+                if (IsNtfyTarget(item.ChatId)) { await EditCallNtfy(item, call); return; }
 
                 string full = CallHeader(call) + TranscriptPart(call);
                 bool cut;
@@ -155,11 +159,56 @@ namespace ghostline
         {
             string err = DescribeException(ex);
             Store.MarkCallTgFailed(item.Id, err);
-            HealthStatus.MarkError("telegram", err);
-            Console.WriteLine($"Call {item.CallId} Telegram {what} to {item.ChatId} failed (attempt {item.Attempts + 1}): {err}");
+            string kind = IsNtfyTarget(item.ChatId) ? "ntfy" : "telegram";
+            HealthStatus.MarkError(kind, err);
+            Console.WriteLine($"Call {item.CallId} {kind} {what} to {item.ChatId} failed (attempt {item.Attempts + 1}): {err}");
             // For example the message was deleted: nothing left to edit.
             if (item.Attempts + 1 >= MaxCallTgAttempts)
                 Store.MarkCallTgFinal(item.Id);
+        }
+
+        // A queued row of a channel switched off in the config is not sent.
+        private static bool ChannelOn(CallTgItem item) => IsNtfyTarget(item.ChatId) ? NtfyEnabled : TelegramEnabled;
+
+        // ntfy: the title is the first line of the header, the text the rest of it plus the transcript.
+        // A call with a recording goes out with the MP3; when the transcript is ready the notification
+        // is replaced (same sequence id) with the transcript and the same, already uploaded, MP3.
+        private static (string title, string text) CallNtfyParts(CallRecord call, bool withTranscript)
+        {
+            string head = CallHeader(call);
+            int nl = head.IndexOf('\n');
+            string title = nl < 0 ? head : head.Substring(0, nl);
+            string rest = nl < 0 ? "" : head.Substring(nl + 1);
+            return (title, withTranscript ? rest + TranscriptPart(call) : rest);
+        }
+
+        private static string CallSequenceId(CallRecord call) => "call-" + call.Id;
+
+        private static async Task SendCallNtfy(CallTgItem item, CallRecord call)
+        {
+            string topic = item.ChatId.Substring(NtfyPrefix.Length);
+            bool trFinished = call.TrState is "done" or "error";
+            var (title, text) = CallNtfyParts(call, item.WantTranscript);
+            string attachUrl = null;
+            if (item.Kind == "voice")
+            {
+                byte[] wav = await Recordings.BalancedForCall(call);
+                byte[] mp3 = wav != null && wav.Length > Store.MinRecordingBytes ? await Recordings.ToMp3(wav) : null;
+                if (mp3 != null)
+                    attachUrl = await NtfyPublishFile(topic, title, text, mp3, CallFileBase(call) + ".mp3", CallSequenceId(call));
+            }
+            if (attachUrl == null)
+                await NtfyPublish(topic, title, text, CallSequenceId(call));
+            Store.MarkCallTgSent(item.Id, 0, final: !item.WantTranscript || trFinished, ext: attachUrl);
+            HealthStatus.MarkActivity("ntfy");
+        }
+
+        private static async Task EditCallNtfy(CallTgItem item, CallRecord call)
+        {
+            string topic = item.ChatId.Substring(NtfyPrefix.Length);
+            var (title, text) = CallNtfyParts(call, true);
+            await NtfyPublish(topic, title, text, CallSequenceId(call), item.Ext, item.Ext == null ? null : CallFileBase(call) + ".mp3");
+            Store.MarkCallTgFinal(item.Id);
         }
 
         // The full text as a reply to the message if it did not fit into the caption. In chunks of 4096.
