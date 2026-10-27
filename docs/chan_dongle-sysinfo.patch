@@ -1,0 +1,134 @@
+diff --git a/at_command.c b/at_command.c
+index 5f0137e..e0c3f34 100644
+--- a/at_command.c
++++ b/at_command.c
+@@ -233,6 +233,19 @@ EXPORT_DEF int at_enqueue_cops(struct cpvt *cpvt)
+ }
+ 
+ 
++/* Network mode query; the answer sets linkmode/linksubmode like ^MODE does */
++EXPORT_DEF int at_enqueue_sysinfo(struct cpvt *cpvt)
++{
++	static const char cmd[] = "AT^SYSINFO\r";
++	static at_queue_cmd_t at_cmd = ATQ_CMD_DECLARE_ST(CMD_AT_SYSINFO, cmd);
++
++	if (at_queue_insert_const(cpvt, &at_cmd, 1, 0) != 0) {
++		chan_dongle_err = E_QUEUE;
++		return -1;
++	}
++	return 0;
++}
++
+ /* SMS sending */
+ static int at_enqueue_pdu(struct cpvt *cpvt, const char *pdu, size_t length, size_t tpdulen, int uid)
+ {
+diff --git a/at_command.h b/at_command.h
+index 0aeb441..d1883b9 100644
+--- a/at_command.h
++++ b/at_command.h
+@@ -78,6 +78,7 @@
+ 	_( AT_CHLD_2,       "AT+CHLD=2") \
+ 	_( AT_CHLD_3,       "AT+CHLD=3") \
+ 	_( AT_CLCC,         "AT+CLCC") \
++	_( AT_SYSINFO,      "AT^SYSINFO") \
+ /* AT_COMMANDS_TABLE */
+ 
+ typedef enum {
+@@ -109,6 +110,7 @@ EXPORT_DECL const char *at_cmd2str(at_cmd_t cmd);
+ EXPORT_DECL int at_enqueue_initialization(struct cpvt *cpvt, at_cmd_t from_command);
+ EXPORT_DECL int at_enqueue_ping(struct cpvt *cpvt);
+ EXPORT_DECL int at_enqueue_cops(struct cpvt *cpvt);
++EXPORT_DECL int at_enqueue_sysinfo(struct cpvt *cpvt);
+ EXPORT_DECL int at_enqueue_sms(struct cpvt *cpvt, const char *number, const char *msg, unsigned validity_min, int report_req, const char *payload, size_t payload_len);
+ EXPORT_DECL int at_enqueue_ussd(struct cpvt *cpvt, const char *code);
+ EXPORT_DECL int at_enqueue_dtmf(struct cpvt *cpvt, char digit);
+diff --git a/at_response.c b/at_response.c
+index 1832dae..b3d2e2e 100644
+--- a/at_response.c
++++ b/at_response.c
+@@ -228,6 +228,9 @@ static int at_response_ok (struct pvt* pvt, at_res_t res)
+ 				ast_debug (1, "[%s] Provider query successfully\n", PVT_ID(pvt));
+ 				break;
+ 
++			case CMD_AT_SYSINFO:
++				break;
++
+ 			case CMD_AT_CMGR:
+ 				ast_debug (1, "[%s] SMS message see later\n", PVT_ID(pvt));
+ 				at_retrieve_next_sms(&pvt->sys_chan, at_cmd_suppress_error_mode(ecmd->flags));
+@@ -494,6 +497,10 @@ static int at_response_error (struct pvt* pvt, at_res_t res)
+ 				ast_debug (1, "[%s] Could not get provider name\n", PVT_ID(pvt));
+ 				break;
+ 
++			case CMD_AT_SYSINFO:
++				ast_debug (1, "[%s] Could not get network mode\n", PVT_ID(pvt));
++				break;
++
+ 			case CMD_AT_CLVL:
+ 				ast_debug (1, "[%s] Audio level synchronization failed at step %d/%d\n", PVT_ID(pvt), pvt->volume_sync_step, VOLUME_SYNC_DONE-1);
+ 				pvt->volume_sync_step = VOLUME_SYNC_BEGIN;
+@@ -584,6 +591,40 @@ static int at_response_mode (struct pvt* pvt, char* str, size_t len)
+ 	return rv;
+ }
+ 
++/*!
++ * \brief Handle the ^SYSINFO answer
++ * ^SYSINFO:<srv_status>,<srv_domain>,<roam>,<sys_mode>,<sim_state>[,<lock>,<sys_submode>]
++ * The mode and submode use the same codes as ^MODE.
++ */
++static int at_response_sysinfo (struct pvt* pvt, const char* str)
++{
++	const char* p = strstr (str, "^SYSINFO:");
++	int field = 0, mode = -1, submode = -1;
++
++	if (!p)
++		return 0;
++	for (p += 9; *p; p++)
++	{
++		if (*p == ',')
++		{
++			field++;
++			continue;
++		}
++		if (field == 3 && mode < 0)
++			mode = atoi (p);
++		else if (field == 6 && submode < 0)
++			submode = atoi (p);
++	}
++	if (mode >= 0)
++	{
++		pvt->linkmode = mode;
++		/* No submode field (older firmware): keep the one ^MODE gave, unless there is no service */
++		if (submode >= 0 || mode == 0)
++			pvt->linksubmode = submode >= 0 ? submode : 0;
++	}
++	return 0;
++}
++
+ static void request_clcc(struct pvt* pvt)
+ {
+ 	if (at_enqueue_clcc(&pvt->sys_chan))
+@@ -1971,6 +2012,9 @@ int at_response (struct pvt* pvt, const struct iovec iov[2], int iovcnt, at_res_
+ 						case CMD_AT_CIMI:
+ 							ast_debug (1, "[%s] Got AT+CIMI data (IMSI number)\n", PVT_ID(pvt));
+ 							return at_response_cimi (pvt, str);
++
++						case CMD_AT_SYSINFO:
++							return at_response_sysinfo (pvt, str);
+ 						default:
+ 							break;
+ 					}
+diff --git a/manager.c b/manager.c
+index 789dcb2..be0699f 100644
+--- a/manager.c
++++ b/manager.c
+@@ -43,6 +43,9 @@ static int manager_show_devices (struct mansession* s, const struct message* m)
+ 		ast_mutex_lock (&pvt->lock);
+ 		if(ast_strlen_zero(device) || strcmp(device, PVT_ID(pvt)) == 0)
+ 		{
++			/* Refresh the network mode for the next query: ^MODE comes only on a change */
++			if (pvt->connected && pvt->initialized)
++				at_enqueue_sysinfo (&pvt->sys_chan);
+ 			astman_append (s, "Event: DongleDeviceEntry\r\n");
+ 			if(!ast_strlen_zero (id))
+ 				astman_append (s, "ActionID: %s\r\n", id);

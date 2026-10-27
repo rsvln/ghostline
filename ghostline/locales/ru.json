@@ -218,6 +218,8 @@
   "web.status.col.network": "Сеть",
   "web.status.col.net": "Тип",
   "web.status.col.signal": "Сигнал",
+  "web.status.col.modem": "Модем",
+  "web.status.radio.usb": "USB {0}",
   "web.status.radio.no_data": "нет данных",
   "web.status.radio.down": "нет сети",
   "web.status.radio.down_for": "нет сети {0} мин",

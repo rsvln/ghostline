@@ -28,8 +28,9 @@ namespace ghostline
         // For yeastar/goip: the line/port number as a string.
         // For quectel / dongle: the device name from quectel.conf / dongle.conf ("gsm1", "hw1", ...).
         public string line { get; set; }
-        // Own number of this SIM (+7...), shown in the "From / To" header of transcripts for
-        // external readers; when empty, the line name is used.
+        // Own number of this SIM (+7...), shown on the Status tab and in the "From / To" header of
+        // transcripts. A number the SIM itself reports (quectel / dongle, AT+CNUM) wins; many SIMs
+        // report none, then this one is used; neither: the line name.
         public string number { get; set; }
         // Where this line goes; no section: the common clients.telegram.chat_ids / clients.ntfy.topic.
         public LineClients clients { get; set; }

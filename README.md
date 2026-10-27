@@ -204,7 +204,7 @@ channels:
     gateway: pbx
     pattern: gsm1
     line: gsm1
-    number: "+79001234567"    # shown in transcript headers
+    number: "+79001234567"    # optional; used when the SIM does not report its own number
     clients:                  # optional; without it the common chats and topic
       telegram:
         chat_ids: []          # empty — clients.telegram.chat_ids
@@ -281,7 +281,7 @@ from the web interface.
 | `gateway` | `gateways[].id` this line belongs to |
 | `pattern` | String incoming events are matched against |
 | `line` | Port number (`yeastar`, `goip`) or `chan_quectel` / `chan_dongle` device name (`gsm1`, `hw1`, …) |
-| `number` | The line's own phone number, shown in transcript headers; optional |
+| `number` | The line's own phone number, for the Status tab and transcript headers; optional. A number the SIM reports itself (`quectel`, `dongle`) takes precedence |
 | `clients` | Clients of the line: notifications go only to the ones listed. No `clients` section — every client that is on; `clients: {}` — nowhere |
 | `clients.telegram.chat_ids` | Telegram chats of the line (SMS and calls); empty — the common ones |
 | `clients.ntfy.topic` | ntfy topic of the line; empty — the common one |

@@ -85,7 +85,10 @@ and sends nothing to the modems. Per line it shows:
 - registration and operator;
 - network type (2G/3G/4G/5G);
 - signal: bars and a level in dBm (details in the tooltip);
-- LAC and cell id (in the tooltip).
+- LAC and cell id (in the tooltip);
+- the modem model and its USB port (taken from `data=`; the full path in the
+  tooltip);
+- the SIM's own number when the SIM reports it, else `channels[].number`.
 
 This is shown on the Status tab and in `/status`. When a line has had no
 network for `monitor.alert_minutes` (default 2), a message goes to the line's

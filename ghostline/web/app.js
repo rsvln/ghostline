@@ -482,19 +482,22 @@ function queueCard(title, rows) {
 
 // Line monitoring: network (registration and operator), type, signal; the details in tooltips.
 function radioCells(r) {
-  if (!r) return '<td></td><td></td><td></td>';
-  if (!r.data) return `<td class="muted">${esc(t('web.status.radio.no_data'))}</td><td></td><td></td>`;
+  if (!r) return '<td></td><td></td><td></td><td></td>';
+  if (!r.data) return `<td class="muted">${esc(t('web.status.radio.no_data'))}</td><td></td><td></td><td></td>`;
+  const modem = [r.model, r.usbPort ? t('web.status.radio.usb', r.usbPort) : ''].filter(Boolean).join(' · ');
+  const modemCell = `<td title="${esc(r.dataPort || '')}">${esc(modem)}</td>`;
   const where = [r.lac || r.cell ? t('web.status.radio.cell', r.lac || '?', r.cell || '?') : '',
     t('web.status.radio.updated', ago(r.updatedAt))].filter(Boolean).join(' · ');
   if (!r.up) {
     const mins = r.downSince ? Math.floor((Date.now() - new Date(r.downSince)) / 60000) : 0;
     return `<td title="${esc([r.state, r.registration, where].filter(Boolean).join(' · '))}"><span class="hdot err"></span>`
-      + `${esc(mins ? t('web.status.radio.down_for', mins) : t('web.status.radio.down'))}</td><td></td><td></td>`;
+      + `${esc(mins ? t('web.status.radio.down_for', mins) : t('web.status.radio.down'))}</td><td></td><td></td>` + modemCell;
   }
   const bars = [1, 2, 3, 4].map(i => `<i class="${i <= r.bars ? 'on' : ''}"></i>`).join('');
   return `<td title="${esc([r.registration, where].filter(Boolean).join(' · '))}"><span class="hdot ok"></span>${esc(r.provider || '')}</td>`
     + `<td>${esc(r.net || '')}</td>`
-    + `<td title="${esc(signalTitle(r))}"><span class="sig">${bars}</span>${r.dbm != null ? ` <span class="muted">${esc(r.dbm)}</span>` : ''}</td>`;
+    + `<td title="${esc(signalTitle(r))}"><span class="sig">${bars}</span>${r.dbm != null ? ` <span class="muted">${esc(r.dbm)}</span>` : ''}</td>`
+    + modemCell;
 }
 
 // LTE quality when the driver reports it (RSRP, RSRQ, SINR), else RSSI only.
@@ -534,7 +537,7 @@ async function loadStatus() {
   const full = MODE.mode === 'full';
   const radio = data.lines.some(l => l.radio);
   const head = `<thead><tr><th>${esc(t('web.status.col.line'))}</th><th>${esc(t('web.status.col.number'))}</th>`
-    + (radio ? `<th>${esc(t('web.status.col.network'))}</th><th>${esc(t('web.status.col.net'))}</th><th>${esc(t('web.status.col.signal'))}</th>` : '')
+    + (radio ? `<th>${esc(t('web.status.col.network'))}</th><th>${esc(t('web.status.col.net'))}</th><th>${esc(t('web.status.col.signal'))}</th><th>${esc(t('web.status.col.modem'))}</th>` : '')
     + `<th>${esc(t('web.status.col.sms_in'))}</th><th>${esc(t('web.status.col.sms_out'))}</th>`
     + (full ? `<th>${esc(t('web.status.col.calls_in'))}</th><th>${esc(t('web.status.col.calls_missed'))}</th><th>${esc(t('web.status.col.calls_out'))}</th><th>${esc(t('web.status.col.last_call'))}</th>` : '')
     + `</tr></thead>`;
@@ -547,7 +550,7 @@ async function loadStatus() {
   const note = data.lines.some(l => !l.configured)
     ? `<caption>* ${esc(t('web.status.not_in_config'))}</caption>` : '';
   document.getElementById('status-lines').innerHTML = note + head + `<tbody>${rows ||
-    `<tr><td colspan="11" style="color:var(--muted)">${esc(t('web.status.no_data'))}</td></tr>`}</tbody>`;
+    `<tr><td colspan="12" style="color:var(--muted)">${esc(t('web.status.no_data'))}</td></tr>`}</tbody>`;
 }
 
 // ---- About ----

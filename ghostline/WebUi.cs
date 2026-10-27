@@ -114,7 +114,7 @@ namespace ghostline
                             var cs = calls.FirstOrDefault(x => x.channel == n);
                             return new
                             {
-                                name = n, configured = ch != null, gateway = ch?.gateway, number = ch?.number,
+                                name = n, configured = ch != null, gateway = ch?.gateway, number = Program.LineNumber(ch),
                                 smsIn = st?.In ?? 0, smsOut = st?.Out ?? 0,
                                 callsIn = cs?.inAnswered ?? 0, callsMissed = cs?.inMissed ?? 0,
                                 callsOut = (cs?.outAnswered ?? 0) + (cs?.outNoAnswer ?? 0), lastCall = cs?.last,
@@ -353,7 +353,7 @@ namespace ghostline
             {
                 data = true, up = r.Up, state = r.State, registration = r.Registration, provider = r.Provider,
                 net = r.Net, dbm = r.Dbm, bars = r.Bars, rssi = r.RssiDbm, rsrp = r.Rsrp, rsrq = r.Rsrq, sinr = r.Sinr,
-                lac = r.Lac, cell = r.Cell,
+                lac = r.Lac, cell = r.Cell, model = r.Model, usbPort = r.UsbPort, dataPort = r.DataPort,
                 updatedAt = r.UpdatedAt, downSince = r.DownSince
             };
         }

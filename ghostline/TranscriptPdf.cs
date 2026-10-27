@@ -42,7 +42,8 @@ namespace ghostline
             string dur = $"{call.Billsec / 60}:{call.Billsec % 60:D2}";
 
             var ch = Program.settings.channels?.FirstOrDefault(c => c.name == call.Channel);
-            string mine = string.IsNullOrWhiteSpace(ch?.number) ? call.Channel : FormatPhone(ch.number);
+            string number = Program.LineNumber(ch);
+            string mine = number == null ? call.Channel : FormatPhone(number);
             string peer = FormatPhone(call.Peer) + (string.IsNullOrEmpty(call.PeerName) ? "" : $" ({call.PeerName})");
             bool incoming = call.Direction == "in";
 

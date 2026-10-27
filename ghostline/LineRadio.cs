@@ -17,7 +17,16 @@ namespace ghostline
         public string Lac { get; set; }
         public string Cell { get; set; }
         public string Number { get; set; }
+        public string Model { get; set; }           // "EC200A", "E1550"
+        public string DataPort { get; set; }        // data= of the device in quectel.conf / dongle.conf
         public DateTime UpdatedAt { get; set; }
+
+        // The USB port of the modem: "7" from ".../pci-0000:00:14.0-usb-0:7:1.3-port0"; the device name
+        // ("ttyUSB2") when the port is not given by path.
+        public string UsbPort => DataPort == null ? null
+            : System.Text.RegularExpressions.Regex.Match(DataPort, @"-usb(?:v2)?-\d+:([\d.]+):") is { Success: true } m
+                ? m.Groups[1].Value
+                : Path.GetFileName(DataPort);
         public DateTime? DownSince { get; set; }    // no network since then
         public bool Alerted { get; set; }           // "no network" already sent for this outage
 
@@ -81,6 +90,10 @@ namespace ghostline
                    && DateTime.Now - r.UpdatedAt < TimeSpan.FromSeconds(RadioPollSeconds * 3) ? r : null;
         }
 
+        // Own number of the line: what the SIM reports (AT+CNUM), else channels[].number from the config.
+        internal static string LineNumber(Channel ch) =>
+            ch == null ? null : LineRadio(ch)?.Number ?? (string.IsNullOrWhiteSpace(ch.number) ? null : ch.number);
+
         private static async Task RadioPollLoop(Gateway gw)
         {
             string action = Modems.For(gw.type).ShowDevicesAction;
@@ -128,7 +141,9 @@ namespace ghostline
             r.Sinr = ParseIntOr(evt, "SINR", int.MinValue) is var sinr && sinr != int.MinValue ? sinr : null;
             r.Lac = evt.GetValueOrDefault("LocationAreaCode");
             r.Cell = evt.GetValueOrDefault("CellID");
-            r.Number = evt.GetValueOrDefault("SubscriberNumber") is { } n && n != "Unknown" ? n : null;
+            r.Number = evt.GetValueOrDefault("SubscriberNumber") is { } n && n != "Unknown" && n != "" ? n : null;
+            r.Model = evt.GetValueOrDefault("Model") is { } m && m != "" && m != "Unknown" ? m : null;
+            r.DataPort = evt.GetValueOrDefault("DataSetting") is { } dp && dp != "" ? dp : null;
             r.UpdatedAt = DateTime.Now;
             CheckRadioAlert(ch, r);
             return true;

@@ -26,10 +26,11 @@ and chan_dongle `7db8e75`, which builds on Asterisk 22 without changes.
 3. Check the stick, with any terminal on the control port:
    - `AT^CARDLOCK?`: the first number is `2` when the stick is not locked to
      an operator, `1` when it is locked; a locked stick refuses other SIMs.
-   - `AT^CVOICE?`: `^CVOICE:0` means voice is on. Many operator firmwares
-     ship with voice off (`^CVOICE:1`, and `AT^CVOICE=0` does not change
-     it). Voice then needs another firmware; SMS and monitoring work either
-     way.
+   - Voice: `ATI` lists `+FCLASS` in `+GCAP` on a firmware with voice, and
+     chan_dongle shows `Voice: Yes` in `dongle show device state`. Do not go
+     by `AT^CVOICE?`: an E1550 with working voice answers `^CVOICE:1` too.
+     Many operator firmwares ship with voice off; it then needs another
+     firmware. SMS and monitoring work either way.
    - `AT+CPIN?`: `READY`; "SIM failure" means no SIM or a bad contact.
 
 ## 2. Build
@@ -95,7 +96,18 @@ channels:
 The same as for `quectel`: registration, operator, signal, alerts.
 
 - Signal: the bars come from RSSI; the sticks have no LTE.
-- Network type: it comes from the stick's own `^MODE` report, kept by
-  chan_dongle as `Mode`/`Submode` (GSM → 2G; WCDMA, HSDPA, HSUPA → 3G). The
-  stick sends it only when the mode changes, so right after chan_dongle
-  starts the type can stay empty for a while.
+- Network type: chan_dongle keeps it as `Mode`/`Submode` (GSM → 2G; WCDMA,
+  HSDPA, HSUPA → 3G), but only from the stick's `^MODE` report, which comes
+  only when the mode changes. So after a start the type stays empty, often
+  for hours.
+  [chan_dongle-sysinfo.patch](chan_dongle-sysinfo.patch) fixes this: each
+  `DongleShowDevices` also queues `AT^SYSINFO`, and its answer fills
+  `Mode`/`Submode`. The next poll a minute later shows the type.
+
+  ```
+  cd asterisk-chan-dongle
+  git apply /path/to/ghostline/docs/chan_dongle-sysinfo.patch
+  make && make install
+  asterisk -rx "module unload chan_dongle.so"
+  asterisk -rx "module load chan_dongle.so"
+  ```

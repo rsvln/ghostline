@@ -218,6 +218,8 @@
   "web.status.col.network": "Network",
   "web.status.col.net": "Type",
   "web.status.col.signal": "Signal",
+  "web.status.col.modem": "Modem",
+  "web.status.radio.usb": "USB {0}",
   "web.status.radio.no_data": "no data",
   "web.status.radio.down": "no network",
   "web.status.radio.down_for": "no network for {0} min",
