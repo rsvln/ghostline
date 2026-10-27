@@ -84,7 +84,7 @@ and sends nothing to the modems. Per line it shows:
 
 - registration and operator;
 - network type (2G/3G/4G/5G);
-- signal (bars and dBm; RSSI 0–31 → `-113 + 2·RSSI` dBm);
+- signal: bars and a level in dBm (details in the tooltip);
 - LAC and cell id (in the tooltip).
 
 This is shown on the Status tab and in `/status`. When a line has had no
@@ -98,6 +98,33 @@ keeps the access technology from the `+COPS?` answer, which the driver
 already queries on every registration change. It adds `AccessTechnology` to
 `QuectelShowDevices` and "Access technology" to `quectel show device state`.
 Without the patch everything else works; the type column is just empty.
+
+The stock driver knows only RSSI. RSSI includes noise and neighbour cells, so
+in LTE it shows full bars even on a poor link.
+[chan_quectel-signal-quality.patch](chan_quectel-signal-quality.patch) (on top
+of the access technology patch) adds the LTE quality of the serving cell:
+RSRP, RSRQ and SINR, as `RSRP`/`RSRQ`/`SINR` in `QuectelShowDevices` and in
+`quectel show device state`. The driver asks the module on every
+`QuectelShowDevices`, so the values are one poll old:
+
+- Quectel modules: `AT+QENG="servingcell"`;
+- SIMCom modules: `AT+CPSI?`.
+
+A module that answers `ERROR` is not asked again until it reconnects. In 2G/3G
+the values are not reported.
+
+With these values ghostline draws the bars from RSRP and RSRQ, whichever is
+worse, and shows RSRP next to them:
+
+| Bars | RSRP | RSRQ |
+|---|---|---|
+| 4 | ≥ −85 dBm | ≥ −10 dB |
+| 3 | ≥ −95 dBm | ≥ −13 dB |
+| 2 | ≥ −105 dBm | ≥ −16 dB |
+| 1 | ≥ −115 dBm | ≥ −19 dB |
+
+Without them the bars and the level come from RSSI (`-113 + 2·RSSI` dBm), as
+before.
 
 ## 5. Behaviour
 

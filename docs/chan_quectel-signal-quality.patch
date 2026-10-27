@@ -1,0 +1,233 @@
+diff --git a/at_command.c b/at_command.c
+index faa2daa..c5ccca6 100644
+--- a/at_command.c
++++ b/at_command.c
+@@ -674,6 +674,28 @@ EXPORT_DEF int at_enqueue_flip_hold(struct cpvt *cpvt)
+  * \param pvt -- pvt structure
+  * \return 0 on success
+  */
++/*!
++ * \brief Enqueue the serving cell query (CELLINFO): AT+CPSI? on SIMCom, AT+QENG="servingcell" on Quectel
++ * \param cpvt -- cpvt structure
++ * \return 0 on success
++ */
++EXPORT_DEF int at_enqueue_cellinfo(struct cpvt *cpvt)
++{
++	static const char cmd_cpsi[] = "AT+CPSI?\r";
++	static const char cmd_qeng[] = "AT+QENG=\"servingcell\"\r";
++	static const at_queue_cmd_t simcom[] = { ATQ_CMD_DECLARE_ST(CMD_AT_CELLINFO, cmd_cpsi) };
++	static const at_queue_cmd_t quectel[] = { ATQ_CMD_DECLARE_ST(CMD_AT_CELLINFO, cmd_qeng) };
++	struct pvt *pvt = cpvt->pvt;
++
++	if (pvt->no_cellinfo || !pvt->connected || !pvt->initialized)
++		return 0;
++	if (at_queue_insert_const(cpvt, pvt->is_simcom ? simcom : quectel, 1, 0) != 0) {
++		chan_quectel_err = E_QUEUE;
++		return -1;
++	}
++	return 0;
++}
++
+ EXPORT_DEF int at_enqueue_ping(struct cpvt *cpvt)
+ {
+ 	static const at_queue_cmd_t cmds[] = {
+diff --git a/at_command.h b/at_command.h
+index 46989ef..2278733 100644
+--- a/at_command.h
++++ b/at_command.h
+@@ -54,6 +54,7 @@
+ 	_( AT_CREG_INIT,    "AT+CREG=") \
+ 	_( AT_CSCS,         "AT+CSCS") \
+ 	_( AT_CSQ,          "AT+CSQ") \
++	_( AT_CELLINFO,     "AT+QENG/CPSI") \
+ \
+ 	_( AT_CSSN,         "AT+CSSN") \
+ 	_( AT_CUSD,         "AT+CUSD") \
+@@ -105,6 +106,7 @@ struct cpvt;
+ EXPORT_DECL const char *at_cmd2str(at_cmd_t cmd);
+ EXPORT_DECL int at_enqueue_initialization(struct cpvt *cpvt, at_cmd_t from_command);
+ EXPORT_DECL int at_enqueue_ping(struct cpvt *cpvt);
++EXPORT_DECL int at_enqueue_cellinfo(struct cpvt *cpvt); /* CELLINFO */
+ EXPORT_DECL int at_enqueue_cops(struct cpvt *cpvt);
+ EXPORT_DECL int at_enqueue_sms(struct cpvt *cpvt, const char *number, const char *msg, unsigned validity_min, int report_req, const char *payload, size_t payload_len);
+ EXPORT_DECL int at_enqueue_ussd(struct cpvt *cpvt, const char *code);
+diff --git a/at_response.c b/at_response.c
+index ec1c832..1b5606b 100644
+--- a/at_response.c
++++ b/at_response.c
+@@ -364,6 +364,9 @@ static int at_response_ok (struct pvt* pvt, at_res_t res)
+ 				ast_debug (1, "[%s] Got signal strength result\n", PVT_ID(pvt));
+ 				break;
+ 
++			case CMD_AT_CELLINFO:
++				break;
++
+ 			case CMD_AT_CLVL:
+ 				pvt->volume_sync_step++;
+ 				if(pvt->volume_sync_step == VOLUME_SYNC_DONE)
+@@ -657,6 +660,12 @@ static int at_response_error (struct pvt* pvt, at_res_t res)
+ 				ast_debug (1, "[%s] Could not get provider name\n", PVT_ID(pvt));
+ 				break;
+ 
++			case CMD_AT_CELLINFO:
++				ast_debug (1, "[%s] Serving cell query not supported, RSSI only\n", PVT_ID(pvt));
++				pvt->no_cellinfo = 1;
++				pvt->rsrp = pvt->rsrq = pvt->sinr = SIGNAL_UNKNOWN;
++				break;
++
+ 			case CMD_AT_CLVL:
+ 				ast_debug (1, "[%s] Audio level synchronization failed at step %d/%d\n", PVT_ID(pvt), pvt->volume_sync_step, VOLUME_SYNC_DONE-1);
+ 				pvt->volume_sync_step = VOLUME_SYNC_BEGIN;
+@@ -1851,6 +1860,52 @@ static int at_response_cnum (struct pvt* pvt, char* str)
+  * \retval -1 error
+  */
+ 
++/* CELLINFO: LTE signal quality of the serving cell. Other access technologies leave it unknown.
++ * Quectel: +QENG: "servingcell",<state>,"LTE",<duplex>,<mcc>,<mnc>,<cellid>,<pci>,<earfcn>,<band>,<ul_bw>,<dl_bw>,<tac>,<rsrp>,<rsrq>,<rssi>,<sinr>,...
++ * SIMCom:  +CPSI: LTE,<state>,<mcc-mnc>,<tac>,<cellid>,<pci>,<band>,<earfcn>,<dl_bw>,<ul_bw>,<rsrq*10>,<rsrp*10>,<rssi*10>,<rssnr>
++ */
++static int at_response_cellinfo (struct pvt* pvt, const char* str)
++{
++	char buf[256];
++	char* f[24];
++	int n = 0;
++	char* p;
++
++	ast_copy_string (buf, str, sizeof (buf));
++	p = strchr (buf, ':');
++	if (!p)
++		return 0;
++	for (p++; n < (int) ITEMS_OF(f); )
++	{
++		while (*p == ' ' || *p == '"') p++;
++		f[n++] = p;
++		p = strchr (p, ',');
++		if (!p)
++			break;
++		*p++ = '\0';
++	}
++	for (int i = 0; i < n; i++)
++	{
++		char* q = strchr (f[i], '"');
++		if (q) *q = '\0';
++	}
++
++	pvt->rsrp = pvt->rsrq = pvt->sinr = SIGNAL_UNKNOWN;
++	if (!strncmp (str, "+QENG:", 6) && n >= 17 && !strcmp (f[2], "LTE"))
++	{
++		pvt->rsrp = atoi (f[13]);
++		pvt->rsrq = atoi (f[14]);
++		pvt->sinr = atoi (f[16]);
++	}
++	else if (!strncmp (str, "+CPSI:", 6) && n >= 14 && !strcmp (f[0], "LTE"))
++	{
++		pvt->rsrq = atoi (f[10]) / 10;
++		pvt->rsrp = atoi (f[11]) / 10;
++		pvt->sinr = atoi (f[13]);
++	}
++	return 0;
++}
++
+ static int at_response_cops (struct pvt* pvt, char* str)
+ {
+ 	/* the 4th field is the access technology: +COPS: 0,0,"NAME",7 (0 GSM, 2 UTRAN, 7 E-UTRAN) */
+@@ -2229,6 +2284,8 @@ int at_response (struct pvt* pvt, const struct iovec iov[2], int iovcnt, at_res_
+ 						case CMD_AT_CIMI:
+ 							ast_debug (1, "[%s] Got AT+CIMI data (IMSI number)\n", PVT_ID(pvt));
+ 							return at_response_cimi (pvt, str);
++						case CMD_AT_CELLINFO:
++							return at_response_cellinfo (pvt, str);
+ 						default:
+ 							break;
+ 					}
+diff --git a/chan_quectel.c b/chan_quectel.c
+index c61d6a3..2184f15 100644
+--- a/chan_quectel.c
++++ b/chan_quectel.c
+@@ -450,6 +450,8 @@ static void disconnect_quectel (struct pvt* pvt)
+ 		pvt->linksubmode = 0;
+ 		ast_copy_string (pvt->provider_name, "NONE", sizeof (pvt->provider_name));
+ 		pvt->act = -1;
++		pvt->rsrp = pvt->rsrq = pvt->sinr = SIGNAL_UNKNOWN; /* CELLINFO */
++		pvt->no_cellinfo = 0;
+ 		pvt->manufacturer[0] = '\0';
+ 		pvt->model[0] = '\0';
+ 		pvt->firmware[0] = '\0';
+@@ -1658,6 +1660,8 @@ static struct pvt * pvt_create(const pvt_config_t * settings)
+ 		pvt->timeout			= DATA_READ_TIMEOUT;
+ 		pvt->gsm_reg_status		= -1;
+ 		pvt->incoming_sms_index		= -1U;
++		pvt->rsrp = pvt->rsrq = pvt->sinr = SIGNAL_UNKNOWN; /* CELLINFO */
++		pvt->no_cellinfo = 0;
+ 		pvt->act			= -1;
+ 
+ 		ast_copy_string (pvt->provider_name, "NONE", sizeof (pvt->provider_name));
+diff --git a/chan_quectel.h b/chan_quectel.h
+index 28aa93b..a059f83 100644
+--- a/chan_quectel.h
++++ b/chan_quectel.h
+@@ -179,6 +179,10 @@ typedef struct pvt
+ 	int			linksubmode;
+ 	char			provider_name[32];
+ 	int			act;				/*!< access technology from +COPS (27.007 AcT), -1 unknown */
++	int			rsrp;				/*!< LTE serving cell RSRP, dBm; SIGNAL_UNKNOWN if not known (CELLINFO) */
++	int			rsrq;				/*!< LTE serving cell RSRQ, dB */
++	int			sinr;				/*!< LTE serving cell SINR, dB */
++#define SIGNAL_UNKNOWN		-9999
+ 	char			manufacturer[32];
+ 	char			model[32];
+ 	char			firmware[32];
+@@ -206,6 +210,7 @@ typedef struct pvt
+ 	unsigned int		has_sms:1;			/*!< device has SMS support */
+ 	unsigned int		has_voice:1;			/*!< device has voice call support */
+ 	unsigned int		is_simcom:1;			/*!< device is a simcom module */
++	unsigned int		no_cellinfo:1;			/*!< the module answered ERROR to the cell info query */
+         long                    t0;
+ 	unsigned int		call_estb:1;
+ 	unsigned int		has_call_waiting:1;		/*!< call waiting enabled on device */
+diff --git a/cli.c b/cli.c
+index c62a407..b45902f 100644
+--- a/cli.c
++++ b/cli.c
+@@ -214,6 +214,8 @@ static char* cli_show_device_state (struct ast_cli_entry* e, int cmd, struct ast
+ 		ast_cli (a->fd, "  Submode                 : %s\n", sys_submode2str(pvt->linksubmode));
+ 		ast_cli (a->fd, "  Provider Name           : %s\n", pvt->provider_name);
+ 		ast_cli (a->fd, "  Access technology       : %d\n", pvt->act);
++		if (pvt->rsrp != SIGNAL_UNKNOWN) /* CELLINFO */
++			ast_cli (a->fd, "  RSRP / RSRQ / SINR      : %d dBm / %d dB / %d dB\n", pvt->rsrp, pvt->rsrq, pvt->sinr);
+ 		ast_cli (a->fd, "  Location area code      : %s\n", pvt->location_area_code);
+ 		ast_cli (a->fd, "  Cell ID                 : %s\n", pvt->cell_id);
+ 		ast_cli (a->fd, "  Subscriber Number       : %s\n", pvt->subscriber_number);
+diff --git a/manager.c b/manager.c
+index 83867ee..3ae8339 100644
+--- a/manager.c
++++ b/manager.c
+@@ -22,6 +22,7 @@
+ 
+ #include "manager.h"
+ #include "chan_quectel.h"			/* devices */
++#include "at_command.h"			/* at_enqueue_cellinfo() CELLINFO */
+ #include "helpers.h"				/* ITEMS_OF() send_ccwa_set() send_reset() send_sms() send_ussd() */
+ #include "error.h"
+ 
+@@ -43,6 +44,7 @@ static int manager_show_devices (struct mansession* s, const struct message* m)
+ 		ast_mutex_lock (&pvt->lock);
+ 		if(ast_strlen_zero(device) || strcmp(device, PVT_ID(pvt)) == 0)
+ 		{
++			at_enqueue_cellinfo (&pvt->sys_chan);
+ 			astman_append (s, "Event: QuectelDeviceEntry\r\n");
+ 			if(!ast_strlen_zero (id))
+ 				astman_append (s, "ActionID: %s\r\n", id);
+@@ -87,6 +89,12 @@ static int manager_show_devices (struct mansession* s, const struct message* m)
+ 			astman_append (s, "Submode: %s\r\n", sys_submode2str(pvt->linksubmode));
+ 			astman_append (s, "ProviderName: %s\r\n", pvt->provider_name);
+ 			astman_append (s, "AccessTechnology: %d\r\n", pvt->act);
++			if (pvt->rsrp != SIGNAL_UNKNOWN) /* CELLINFO */
++			{
++				astman_append (s, "RSRP: %d\r\n", pvt->rsrp);
++				astman_append (s, "RSRQ: %d\r\n", pvt->rsrq);
++				astman_append (s, "SINR: %d\r\n", pvt->sinr);
++			}
+ 			astman_append (s, "LocationAreaCode: %s\r\n", pvt->location_area_code);
+ 			astman_append (s, "CellID: %s\r\n", pvt->cell_id);
+ 			astman_append (s, "SubscriberNumber: %s\r\n", pvt->subscriber_number);

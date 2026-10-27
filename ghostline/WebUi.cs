@@ -352,7 +352,8 @@ namespace ghostline
             return new
             {
                 data = true, up = r.Up, state = r.State, registration = r.Registration, provider = r.Provider,
-                net = r.Net, dbm = r.Dbm, bars = r.Bars, lac = r.Lac, cell = r.Cell,
+                net = r.Net, dbm = r.Dbm, bars = r.Bars, rssi = r.RssiDbm, rsrp = r.Rsrp, rsrq = r.Rsrq, sinr = r.Sinr,
+                lac = r.Lac, cell = r.Cell,
                 updatedAt = r.UpdatedAt, downSince = r.DownSince
             };
         }

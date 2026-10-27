@@ -32,9 +32,22 @@ namespace ghostline
             _ => null
         };
 
-        public int? Dbm => Rssi is >= 0 and <= 31 ? -113 + 2 * Rssi : null;
+        // LTE serving cell quality (patched chan_quectel, Quectel and SIMCom modules); null: only RSSI is known.
+        public int? Rsrp { get; set; }              // dBm
+        public int? Rsrq { get; set; }              // dB
+        public int? Sinr { get; set; }              // dB
 
-        public int Bars => Rssi switch { >= 20 and <= 31 => 4, >= 15 and < 20 => 3, >= 10 and < 15 => 2, >= 2 and < 10 => 1, _ => 0 };
+        public int? RssiDbm => Rssi is >= 0 and <= 31 ? -113 + 2 * Rssi : null;
+
+        // The level shown next to the bars: RSRP when known, RSSI otherwise.
+        public int? Dbm => Rsrp ?? RssiDbm;
+
+        // RSSI counts noise and neighbour cells too, so in LTE it shows full bars on a poor link. With RSRP
+        // and RSRQ the bars are the worse of the two: a strong but noisy cell does not look good.
+        public int Bars => Rsrp is { } rsrp
+            ? Math.Min(rsrp switch { >= -85 => 4, >= -95 => 3, >= -105 => 2, >= -115 => 1, _ => 0 },
+                       Rsrq switch { null => 4, >= -10 => 4, >= -13 => 3, >= -16 => 2, >= -19 => 1, _ => 0 })
+            : Rssi switch { >= 20 and <= 31 => 4, >= 15 and < 20 => 3, >= 10 and < 15 => 2, >= 2 and < 10 => 1, _ => 0 };
     }
 
     internal partial class Program
@@ -97,6 +110,9 @@ namespace ghostline
             r.Act = ParseIntOr(evt, "AccessTechnology", -1);
             // "RSSI: 29, -55 dBm"
             r.Rssi = int.TryParse(evt.GetValueOrDefault("RSSI", "").Split(',')[0].Trim(), out var rssi) ? rssi : 99;
+            r.Rsrp = ParseIntOr(evt, "RSRP", int.MinValue) is var rsrp && rsrp != int.MinValue ? rsrp : null;
+            r.Rsrq = ParseIntOr(evt, "RSRQ", int.MinValue) is var rsrq && rsrq != int.MinValue ? rsrq : null;
+            r.Sinr = ParseIntOr(evt, "SINR", int.MinValue) is var sinr && sinr != int.MinValue ? sinr : null;
             r.Lac = evt.GetValueOrDefault("LocationAreaCode");
             r.Cell = evt.GetValueOrDefault("CellID");
             r.Number = evt.GetValueOrDefault("SubscriberNumber") is { } n && n != "Unknown" ? n : null;
@@ -144,7 +160,8 @@ namespace ghostline
             var parts = new List<string>();
             if (r.Provider != null) parts.Add(r.Provider);
             if (r.Net != null) parts.Add(r.Net);
-            if (r.Dbm != null) parts.Add(SignalBars(r.Bars) + " " + r.Dbm + " dBm");
+            if (r.Rsrp != null) parts.Add($"{SignalBars(r.Bars)} RSRP {r.Rsrp} dBm, RSRQ {r.Rsrq} dB, SINR {r.Sinr} dB");
+            else if (r.Dbm != null) parts.Add(SignalBars(r.Bars) + " " + r.Dbm + " dBm");
             return string.Join(" · ", parts);
         }
 

@@ -494,7 +494,14 @@ function radioCells(r) {
   const bars = [1, 2, 3, 4].map(i => `<i class="${i <= r.bars ? 'on' : ''}"></i>`).join('');
   return `<td title="${esc([r.registration, where].filter(Boolean).join(' · '))}"><span class="hdot ok"></span>${esc(r.provider || '')}</td>`
     + `<td>${esc(r.net || '')}</td>`
-    + `<td title="${r.dbm != null ? esc(r.dbm + ' dBm') : ''}"><span class="sig">${bars}</span>${r.dbm != null ? ` <span class="muted">${esc(r.dbm)}</span>` : ''}</td>`;
+    + `<td title="${esc(signalTitle(r))}"><span class="sig">${bars}</span>${r.dbm != null ? ` <span class="muted">${esc(r.dbm)}</span>` : ''}</td>`;
+}
+
+// LTE quality when the driver reports it (RSRP, RSRQ, SINR), else RSSI only.
+function signalTitle(r) {
+  if (r.rsrp != null) return `RSRP ${r.rsrp} dBm · RSRQ ${r.rsrq} dB · SINR ${r.sinr} dB`
+    + (r.rssi != null ? ` · RSSI ${r.rssi} dBm` : '');
+  return r.rssi != null ? `RSSI ${r.rssi} dBm` : '';
 }
 
 async function loadStatus() {
