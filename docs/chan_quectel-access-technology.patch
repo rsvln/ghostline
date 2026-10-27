@@ -1,0 +1,80 @@
+diff --git a/at_response.c b/at_response.c
+index 95570bb..ec1c832 100644
+--- a/at_response.c
++++ b/at_response.c
+@@ -1853,6 +1853,11 @@ static int at_response_cnum (struct pvt* pvt, char* str)
+ 
+ static int at_response_cops (struct pvt* pvt, char* str)
+ {
++	/* the 4th field is the access technology: +COPS: 0,0,"NAME",7 (0 GSM, 2 UTRAN, 7 E-UTRAN) */
++	const char* last = strrchr (str, ',');
++	int commas = 0;
++	for (const char* c = str; *c; c++) if (*c == ',') commas++;
++	pvt->act = (commas >= 3 && last) ? atoi (last + 1) : -1;
+ 	char* provider_name = at_parse_cops (str);
+ 
+ 	if (provider_name)
+@@ -1905,6 +1910,7 @@ static int at_response_creg (struct pvt* pvt, char* str, size_t len)
+ 	else
+ 	{
+ 		pvt->gsm_registered = 0;
++		pvt->act = -1;
+ 		manager_event_device_status(PVT_ID(pvt), "Unregister");
+ 	}
+ 
+diff --git a/chan_quectel.c b/chan_quectel.c
+index 99cf139..c61d6a3 100644
+--- a/chan_quectel.c
++++ b/chan_quectel.c
+@@ -449,6 +449,7 @@ static void disconnect_quectel (struct pvt* pvt)
+ 		pvt->linkmode = 0;
+ 		pvt->linksubmode = 0;
+ 		ast_copy_string (pvt->provider_name, "NONE", sizeof (pvt->provider_name));
++		pvt->act = -1;
+ 		pvt->manufacturer[0] = '\0';
+ 		pvt->model[0] = '\0';
+ 		pvt->firmware[0] = '\0';
+@@ -1657,6 +1658,7 @@ static struct pvt * pvt_create(const pvt_config_t * settings)
+ 		pvt->timeout			= DATA_READ_TIMEOUT;
+ 		pvt->gsm_reg_status		= -1;
+ 		pvt->incoming_sms_index		= -1U;
++		pvt->act			= -1;
+ 
+ 		ast_copy_string (pvt->provider_name, "NONE", sizeof (pvt->provider_name));
+ 		ast_copy_string (pvt->subscriber_number, "Unknown", sizeof (pvt->subscriber_number));
+diff --git a/chan_quectel.h b/chan_quectel.h
+index 777c09f..28aa93b 100644
+--- a/chan_quectel.h
++++ b/chan_quectel.h
+@@ -178,6 +178,7 @@ typedef struct pvt
+ 	int			linkmode;
+ 	int			linksubmode;
+ 	char			provider_name[32];
++	int			act;				/*!< access technology from +COPS (27.007 AcT), -1 unknown */
+ 	char			manufacturer[32];
+ 	char			model[32];
+ 	char			firmware[32];
+diff --git a/cli.c b/cli.c
+index d9c2475..c62a407 100644
+--- a/cli.c
++++ b/cli.c
+@@ -213,6 +213,7 @@ static char* cli_show_device_state (struct ast_cli_entry* e, int cmd, struct ast
+ 		ast_cli (a->fd, "  Mode                    : %s\n", sys_mode2str(pvt->linkmode));
+ 		ast_cli (a->fd, "  Submode                 : %s\n", sys_submode2str(pvt->linksubmode));
+ 		ast_cli (a->fd, "  Provider Name           : %s\n", pvt->provider_name);
++		ast_cli (a->fd, "  Access technology       : %d\n", pvt->act);
+ 		ast_cli (a->fd, "  Location area code      : %s\n", pvt->location_area_code);
+ 		ast_cli (a->fd, "  Cell ID                 : %s\n", pvt->cell_id);
+ 		ast_cli (a->fd, "  Subscriber Number       : %s\n", pvt->subscriber_number);
+diff --git a/manager.c b/manager.c
+index 91dbec6..83867ee 100644
+--- a/manager.c
++++ b/manager.c
+@@ -86,6 +86,7 @@ static int manager_show_devices (struct mansession* s, const struct message* m)
+ 			astman_append (s, "Mode: %s\r\n", sys_mode2str(pvt->linkmode));
+ 			astman_append (s, "Submode: %s\r\n", sys_submode2str(pvt->linksubmode));
+ 			astman_append (s, "ProviderName: %s\r\n", pvt->provider_name);
++			astman_append (s, "AccessTechnology: %d\r\n", pvt->act);
+ 			astman_append (s, "LocationAreaCode: %s\r\n", pvt->location_area_code);
+ 			astman_append (s, "CellID: %s\r\n", pvt->cell_id);
+ 			astman_append (s, "SubscriberNumber: %s\r\n", pvt->subscriber_number);

@@ -14,6 +14,9 @@ namespace ghostline
         public int httpPort { get; set; }  // yeastar, goip
         public string user { get; set; }
         public string password { get; set; }
+        // quectel: poll the lines' registration, operator, network type and signal (Status tab,
+        // /status, alerts). The AMI user needs "reporting" in "write".
+        public bool monitor { get; set; } = true;
     }
 
     public class Channel
@@ -105,6 +108,7 @@ namespace ghostline
         public List<Channel> channels { get; set; }
         public CallsSettings calls { get; set; }
         public GoipSettings goip { get; set; } = new();
+        public MonitorSettings monitor { get; set; } = new();
 
         // Before 2026-10-25 "telegram" was a top-level section; such configs are still read. It is
         // moved into clients after parsing (SettingsFile.Parse): a "clients" section further down
@@ -169,6 +173,13 @@ namespace ghostline
         public string url { get; set; }
         public string token { get; set; }
         public string topic { get; set; }
+    }
+
+    // Line monitoring (gateways[].monitor): a message to the line's chats and topic when the line has
+    // had no network for alert_minutes, and when it is back. 0: no messages, only the Status tab.
+    public class MonitorSettings
+    {
+        public int alertMinutes { get; set; } = 2;
     }
 
     public class GoipSettings

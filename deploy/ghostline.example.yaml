@@ -36,6 +36,11 @@ gateways:
     ami_port: 5038
     user: ghostline
     password: ami-secret
+    monitor: true             # quectel: registration, operator, network, signal
+
+# A line without network for this many minutes: a message to its chats/topic; 0: none.
+monitor:
+  alert_minutes: 2
 
 channels:
   - name: personal

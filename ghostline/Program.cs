@@ -104,6 +104,8 @@ namespace ghostline
                     _amiClients[gw.id] = client;
                     Task.Run(() => ConnectAmiWithRetry(gw, client));
                     Task.Run(() => AmiKeepaliveLoop(gw.id));
+                    if (RadioMonitored(gw))
+                        Task.Run(() => RadioPollLoop(gw.id));
                 }
                 else
                 {

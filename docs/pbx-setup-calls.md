@@ -56,7 +56,7 @@ secret = <password>
 deny=0.0.0.0/0.0.0.0
 permit=10.0.0.11/255.255.255.255
 read = system,call,user,message,reporting
-write = command,originate,message
+write = command,originate,message,reporting
 writetimeout = 5000
 ```
 

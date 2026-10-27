@@ -49,12 +49,14 @@ secret = <password>
 deny=0.0.0.0/0.0.0.0
 permit=10.0.0.11/255.255.255.255
 read = system,call,user,message,reporting
-write = command,originate,message
+write = command,originate,message,reporting
 writetimeout = 5000
 ```
 
 `write = command` is required: SMS are sent with `Action: Command`
-(`quectel sms <device> <number> <text>`).
+(`quectel sms <device> <number> <text>`). `reporting` is needed for line
+monitoring (`QuectelShowDevices`, see below); without it ghostline logs a
+warning once and the Status tab shows no network data.
 
 ## 3. ghostline configuration
 
@@ -74,7 +76,30 @@ channels:
     line: gsm1          # device name from quectel.conf
 ```
 
-## 4. Behaviour
+## 4. Line monitoring
+
+With `monitor: true` (the default for `quectel` gateways) ghostline polls
+`QuectelShowDevices` once a minute. The action only reads the driver's state
+and sends nothing to the modems. Per line it shows:
+
+- registration and operator;
+- network type (2G/3G/4G/5G);
+- signal (bars and dBm; RSSI 0–31 → `-113 + 2·RSSI` dBm);
+- LAC and cell id (in the tooltip).
+
+This is shown on the Status tab and in `/status`. When a line has had no
+network for `monitor.alert_minutes` (default 2), a message goes to the line's
+Telegram chats and ntfy topic, and another one when the network is back.
+
+The stock driver does not know the network type: its `Mode` field is filled
+only from Huawei `^MODE` messages, so Quectel and SIMCom modules always show
+"No Service". [chan_quectel-access-technology.patch](chan_quectel-access-technology.patch)
+keeps the access technology from the `+COPS?` answer, which the driver
+already queries on every registration change. It adds `AccessTechnology` to
+`QuectelShowDevices` and "Access technology" to `quectel show device state`.
+Without the patch everything else works; the type column is just empty.
+
+## 5. Behaviour
 
 - SMS delivery is not tracked: a message counts as sent when AMI answers
   `[gsm1] SMS queued for send`, which means it was queued in the modem.

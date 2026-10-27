@@ -117,7 +117,8 @@ namespace ghostline
                                 name = n, configured = ch != null, gateway = ch?.gateway, number = ch?.number,
                                 smsIn = st?.In ?? 0, smsOut = st?.Out ?? 0,
                                 callsIn = cs?.inAnswered ?? 0, callsMissed = cs?.inMissed ?? 0,
-                                callsOut = (cs?.outAnswered ?? 0) + (cs?.outNoAnswer ?? 0), lastCall = cs?.last
+                                callsOut = (cs?.outAnswered ?? 0) + (cs?.outNoAnswer ?? 0), lastCall = cs?.last,
+                                radio = ch == null ? null : Radio(ch)
                             };
                         }).ToList();
                         return Results.Ok(new
@@ -339,6 +340,20 @@ namespace ghostline
                 lastActivityAt = h?.LastActivityAt,
                 lastErrorAt = h?.LastErrorAt,
                 lastError = h?.LastError
+            };
+        }
+
+        // Line monitoring: null when the gateway is not monitored, {data: false} while there is no fresh poll.
+        private static object Radio(Channel ch)
+        {
+            if (!Program.RadioMonitored(Program.getGatewayById(ch.gateway))) return null;
+            var r = Program.LineRadio(ch);
+            if (r == null) return new { data = false };
+            return new
+            {
+                data = true, up = r.Up, state = r.State, registration = r.Registration, provider = r.Provider,
+                net = r.Net, dbm = r.Dbm, bars = r.Bars, lac = r.Lac, cell = r.Cell,
+                updatedAt = r.UpdatedAt, downSince = r.DownSince
             };
         }
 

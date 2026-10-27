@@ -35,6 +35,9 @@ is what runs in the default `sms` mode.
 - Outgoing SMS from a Telegram chat, an ntfy topic or the web interface,
   through a persistent queue.
 - SMS history in SQLite, with search and export.
+- Line monitoring (`quectel`): registration, operator, network type, signal on
+  the Status tab and in `/status`; a message when a line loses the network
+  and when it is back.
 
 **Calls** (`mode: full`, Asterisk/FreePBX only)
 
@@ -247,15 +250,16 @@ goip:
 | `clients.ntfy.url` | ntfy server; empty — ntfy is off |
 | `clients.ntfy.token` | ntfy access token with read and write access to the topics |
 | `clients.ntfy.topic` | Common topic, for lines without their own |
+| `web.port` | Web interface port, default `8889` |
+| `web.user` / `web.password` | HTTP Basic authentication; both empty — no authentication |
+| `logger.file` | Write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log` |
+| `goip.smtp.enabled` / `goip.smtp.port` | Built-in SMTP server for GoIP gateways that deliver SMS by e-mail |
+| `monitor.alert_minutes` | A monitored line without network this long gets a message in its chats/topic, and another when it is back; `0` — no messages. Default `2` |
 
 A client is on when its section is there (with a token / url); remove the
 section to turn it off. A top-level `telegram` section of older configs is
 still read as `clients.telegram` and is moved there when the config is saved
 from the web interface.
-| `web.port` | Web interface port, default `8889` |
-| `web.user` / `web.password` | HTTP Basic authentication; both empty — no authentication |
-| `logger.file` | Write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log` |
-| `goip.smtp.enabled` / `goip.smtp.port` | Built-in SMTP server for GoIP gateways that deliver SMS by e-mail |
 
 `gateways[]`:
 
@@ -267,6 +271,7 @@ from the web interface.
 | `ami_port` | AMI port (`yeastar`, `quectel`) |
 | `http_port` | HTTP port used for sending SMS (`yeastar`, `goip`) |
 | `user` / `password` | AMI credentials (`yeastar`, `quectel`) or HTTP credentials (`goip`) |
+| `monitor` | `quectel`: poll the lines' registration, operator, network type and signal; default `true`. The AMI user needs `reporting` in `write`, see [docs/quectel-setup.md](docs/quectel-setup.md#4-line-monitoring) |
 
 `channels[]` (SIM lines):
 

@@ -140,6 +140,8 @@ namespace ghostline
         {
             var evt = ParseAmiEvent(eventBlock);
 
+            if (HandleRadioEvent(evt, gw))
+                return;
             if (evt.TryGetValue("Event", out var eventName) && eventName == "QuectelNewSMS")
             {
                 HandleQuectelSms(evt, gw);

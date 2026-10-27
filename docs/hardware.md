@@ -138,6 +138,24 @@ git apply --ignore-whitespace /path/to/chan_quectel-noqpcmv.patch
 Build against your Asterisk version as described in the driver's README. One
 `chan_quectel.so` serves all devices.
 
+A second, independent patch,
+[chan_quectel-access-technology.patch](chan_quectel-access-technology.patch),
+makes the driver report the network type (2G/3G/4G) for ghostline's line
+monitoring; see [quectel-setup.md](quectel-setup.md#4-line-monitoring). Both
+apply to upstream commit `3d45c7f` in either order:
+
+```
+git apply --ignore-whitespace /path/to/chan_quectel-noqpcmv.patch
+git apply --ignore-whitespace /path/to/chan_quectel-access-technology.patch
+./bootstrap
+./configure --with-asterisk=/usr/include --with-astversion=<version> DESTDIR=/usr/lib/x86_64-linux-gnu/asterisk/modules
+make && make install
+asterisk -rx "module unload chan_quectel.so" && asterisk -rx "module load chan_quectel.so"
+```
+
+Reloading the module drops every modem for a few seconds; do it with no calls
+in progress.
+
 ## `quectel.conf`
 
 ```ini

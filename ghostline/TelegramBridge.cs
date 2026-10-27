@@ -133,6 +133,16 @@ namespace ghostline
                 if (TranscribeEnabled) rows.Add(Row("transcribe", l.T("tg.status.transcribe"), true));
             }
 
+            // Monitored lines: operator, network type, signal; or how long the line has had no network.
+            var radio = (settings.channels ?? new())
+                .Where(ch => RadioMonitored(getGatewayById(ch.gateway)))
+                .Select(ch => LineRadio(ch) is { } r
+                    ? $"{(r.Up ? "📶" : "⚠️")} {Html(ch.name)}: {Html(RadioSummary(r))}"
+                    : $"⚪ {Html(ch.name)}: {l.T("tg.radio.no_data")}")
+                .ToList();
+            if (radio.Count > 0)
+                rows.Add("\n" + l.T("tg.status.lines") + "\n" + string.Join("\n", radio));
+
             var up = DateTime.Now - StartedAt;
             string uptime = up.TotalDays >= 1 ? $"{(int)up.TotalDays}d {up.Hours}h" : up.TotalHours >= 1 ? $"{(int)up.TotalHours}h {up.Minutes}m" : $"{up.Minutes}m";
             string queues = l.T("tg.status.queues", Store.CountPendingOutgoingSms(), Store.CountPendingTelegramMessages());

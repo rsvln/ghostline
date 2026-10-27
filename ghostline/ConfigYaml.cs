@@ -542,6 +542,7 @@ namespace ghostline
                     F("web.user", "text", s.web?.user),
                     F("web.password", "text", s.web?.password)),
                 G("logger", F("logger.file", "checkbox", b(s.logger?.file ?? false))),
+                G("monitor", F("monitor.alert_minutes", "number", (s.monitor?.alertMinutes ?? 2).ToString(CultureInfo.InvariantCulture))),
                 G("gateways"),
                 G("channels"),
                 G("calls",
@@ -589,6 +590,7 @@ namespace ghostline
                 F($"{p}.http_port", "number", n(g.httpPort)),
                 F($"{p}.user", "text", g.user),
                 F($"{p}.password", "text", g.password),
+                F($"{p}.monitor", "checkbox", b(g.monitor)),
             };
         }
 

@@ -387,3 +387,11 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   .config-hint { display: none; }
   .app-footer { padding: 6px 12px; flex-wrap: wrap; gap: 4px 12px; }
 }
+/* Line monitoring in the lines table: registration dot, signal bars */
+.stat-table td .hdot { margin-right: 6px; vertical-align: middle; }
+.stat-table td.muted, .stat-table .muted { color: var(--muted); }
+.sig { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; vertical-align: middle; }
+.sig i { display: block; width: 3px; background: var(--bg3); border-radius: 1px; }
+.sig i:nth-child(1) { height: 25%; } .sig i:nth-child(2) { height: 50%; }
+.sig i:nth-child(3) { height: 75%; } .sig i:nth-child(4) { height: 100%; }
+.sig i.on { background: var(--green); }
