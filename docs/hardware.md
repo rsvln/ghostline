@@ -138,20 +138,17 @@ git apply --ignore-whitespace /path/to/chan_quectel-noqpcmv.patch
 Build against your Asterisk version as described in the driver's README. One
 `chan_quectel.so` serves all devices.
 
-Two more patches serve ghostline's line monitoring; see
-[quectel-setup.md](quectel-setup.md#4-line-monitoring):
-
-- [chan_quectel-access-technology.patch](chan_quectel-access-technology.patch)
-  makes the driver report the network type (2G/3G/4G);
-- [chan_quectel-signal-quality.patch](chan_quectel-signal-quality.patch) (needs
-  the previous one) adds the LTE RSRP, RSRQ and SINR.
-
-They apply to upstream commit `3d45c7f` in this order:
+A second patch,
+[chan_quectel-line-monitoring.patch](chan_quectel-line-monitoring.patch),
+serves ghostline's line monitoring: the driver reports the network type
+(2G/3G/4G) and the LTE RSRP, RSRQ and SINR; see
+[quectel-setup.md](quectel-setup.md#4-line-monitoring). It does not depend on
+the EC200A patch, so a SIMCom-only setup can take it alone. Both apply to
+upstream commit `3d45c7f`:
 
 ```
 git apply --ignore-whitespace /path/to/chan_quectel-noqpcmv.patch
-git apply --ignore-whitespace /path/to/chan_quectel-access-technology.patch
-git apply --ignore-whitespace /path/to/chan_quectel-signal-quality.patch
+git apply --ignore-whitespace /path/to/chan_quectel-line-monitoring.patch
 ./bootstrap
 ./configure --with-asterisk=/usr/include --with-astversion=<version> DESTDIR=/usr/lib/x86_64-linux-gnu/asterisk/modules
 make && make install

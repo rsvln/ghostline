@@ -91,20 +91,21 @@ This is shown on the Status tab and in `/status`. When a line has had no
 network for `monitor.alert_minutes` (default 2), a message goes to the line's
 Telegram chats and ntfy topic, and another one when the network is back.
 
-The stock driver does not know the network type: its `Mode` field is filled
-only from Huawei `^MODE` messages, so Quectel and SIMCom modules always show
-"No Service". [chan_quectel-access-technology.patch](chan_quectel-access-technology.patch)
+The stock driver knows neither the network type nor the LTE signal quality.
+[chan_quectel-line-monitoring.patch](chan_quectel-line-monitoring.patch) adds
+both. Without the patch everything else works: the type column is empty, and
+the bars come from RSSI.
+
+Network type: the stock `Mode` field is filled only from Huawei `^MODE`
+messages, so Quectel and SIMCom modules always show "No Service". The patch
 keeps the access technology from the `+COPS?` answer, which the driver
 already queries on every registration change. It adds `AccessTechnology` to
 `QuectelShowDevices` and "Access technology" to `quectel show device state`.
-Without the patch everything else works; the type column is just empty.
 
-The stock driver knows only RSSI. RSSI includes noise and neighbour cells, so
-in LTE it shows full bars even on a poor link.
-[chan_quectel-signal-quality.patch](chan_quectel-signal-quality.patch) (on top
-of the access technology patch) adds the LTE quality of the serving cell:
-RSRP, RSRQ and SINR, as `RSRP`/`RSRQ`/`SINR` in `QuectelShowDevices` and in
-`quectel show device state`. The driver asks the module on every
+Signal: the stock driver knows only RSSI, which includes noise and neighbour
+cells, so in LTE it shows full bars even on a poor link. The patch adds the
+LTE quality of the serving cell: RSRP, RSRQ and SINR, as `RSRP`/`RSRQ`/`SINR`
+in `QuectelShowDevices` and in `quectel show device state`. The driver asks the module on every
 `QuectelShowDevices`, so the values are one poll old:
 
 - Quectel modules: `AT+QENG="servingcell"`;
