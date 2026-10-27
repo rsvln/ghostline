@@ -93,7 +93,7 @@ namespace ghostline
             var r = _radio.GetOrAdd(gw.id + "|" + device, _ => new RadioState());
             r.State = evt.GetValueOrDefault("State");
             r.Registration = evt.GetValueOrDefault("GSMRegistrationStatus");
-            r.Provider = evt.GetValueOrDefault("ProviderName") is { } p && p != "NONE" ? p : null;
+            r.Provider = evt.GetValueOrDefault("ProviderName") is { } p && p != "NONE" ? ProviderName(p) : null;
             r.Act = ParseIntOr(evt, "AccessTechnology", -1);
             // "RSSI: 29, -55 dBm"
             r.Rssi = int.TryParse(evt.GetValueOrDefault("RSSI", "").Split(',')[0].Trim(), out var rssi) ? rssi : 99;
@@ -146,6 +146,18 @@ namespace ghostline
             if (r.Net != null) parts.Add(r.Net);
             if (r.Dbm != null) parts.Add(SignalBars(r.Bars) + " " + r.Dbm + " dBm");
             return string.Join(" · ", parts);
+        }
+
+        // Some SIMs give the name twice, short and long ("beeline Beeline"): keep one of a repeated word.
+        private static string ProviderName(string name)
+        {
+            var words = new List<string>();
+            foreach (var w in name.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                if (words.Count > 0 && string.Equals(words[^1], w, StringComparison.OrdinalIgnoreCase))
+                    words[^1] = w;
+                else
+                    words.Add(w);
+            return string.Join(" ", words);
         }
 
         private static string SignalBars(int bars) =>
