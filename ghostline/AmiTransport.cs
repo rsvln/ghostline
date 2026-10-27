@@ -142,9 +142,9 @@ namespace ghostline
 
             if (HandleRadioEvent(evt, gw))
                 return;
-            if (evt.TryGetValue("Event", out var eventName) && eventName == "QuectelNewSMS")
+            if (Modems.For(gw.type) is { } modem && evt.GetValueOrDefault("Event") == modem.NewSmsEvent)
             {
-                HandleQuectelSms(evt, gw);
+                HandleModemSms(evt, gw, modem);
             }
             else if (evt.ContainsKey("Content"))
             {
@@ -205,7 +205,8 @@ namespace ghostline
             }
         }
 
-        private static void HandleQuectelSms(Dictionary<string, string> evt, Gateway gw)
+        // QuectelNewSMS / DongleNewSMS: the same fields in both drivers.
+        private static void HandleModemSms(Dictionary<string, string> evt, Gateway gw, ModemFlavor modem)
         {
             string device = evt.GetValueOrDefault("Device", "");
             Channel chan = getChannelByLine(gw.id, device);
@@ -226,7 +227,7 @@ namespace ghostline
             string full = string.Join("\n", lines).Replace("﻿", "");
             string recvTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
-            DeliverSms("q", gw.id, chan, sender, recvTime,
+            DeliverSms(modem.Letter, gw.id, chan, sender, recvTime,
                 telegramText: full.Replace("\r", "\\r"),
                 logText: full.Replace("\n", " ").Replace("\r", "\\r"));
         }

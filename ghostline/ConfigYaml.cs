@@ -584,7 +584,7 @@ namespace ghostline
             return new()
             {
                 F($"{p}.id", "text", g.id),
-                F($"{p}.type", "select", g.type ?? "quectel", "quectel", "yeastar", "goip"),
+                F($"{p}.type", "select", g.type ?? "quectel", "quectel", "dongle", "yeastar", "goip"),
                 F($"{p}.ip", "text", g.ip),
                 F($"{p}.ami_port", "number", n(g.amiPort)),
                 F($"{p}.http_port", "number", n(g.httpPort)),

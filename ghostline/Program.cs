@@ -96,7 +96,7 @@ namespace ghostline
                     client.DefaultRequestHeaders.TryAddWithoutValidation("Keep-Alive", "timeout=600");
                     _goipClients[gw.id] = client;
                 }
-                else if (gw.type == "yeastar" || gw.type == "quectel")
+                else if (Modems.IsAmi(gw.type))
                 {
                     // Via Task.Run: an unavailable or invalid address of one gateway at startup
                     // must not block or crash the other gateways, the bot or the web UI.
@@ -105,7 +105,7 @@ namespace ghostline
                     Task.Run(() => ConnectAmiWithRetry(gw, client));
                     Task.Run(() => AmiKeepaliveLoop(gw.id));
                     if (RadioMonitored(gw))
-                        Task.Run(() => RadioPollLoop(gw.id));
+                        Task.Run(() => RadioPollLoop(gw));
                 }
                 else
                 {

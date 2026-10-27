@@ -8,13 +8,13 @@ namespace ghostline
     public class Gateway
     {
         public string id { get; set; }
-        public string type { get; set; }   // "yeastar" / "goip" / "quectel"
+        public string type { get; set; }   // "quectel" / "dongle" / "yeastar" / "goip"
         public string ip { get; set; }
-        public int amiPort { get; set; }   // yeastar, quectel
+        public int amiPort { get; set; }   // quectel, dongle, yeastar
         public int httpPort { get; set; }  // yeastar, goip
         public string user { get; set; }
         public string password { get; set; }
-        // quectel: poll the lines' registration, operator, network type and signal (Status tab,
+        // quectel / dongle: poll the lines' registration, operator, network type and signal (Status tab,
         // /status, alerts). The AMI user needs "reporting" in "write".
         public bool monitor { get; set; } = true;
     }
@@ -26,7 +26,7 @@ namespace ghostline
         public string name { get; set; }
         public string pattern { get; set; }
         // For yeastar/goip: the line/port number as a string.
-        // For quectel: the device name from quectel.conf ("gsm1", "gsm2", ...).
+        // For quectel / dongle: the device name from quectel.conf / dongle.conf ("gsm1", "hw1", ...).
         public string line { get; set; }
         // Own number of this SIM (+7...), shown in the "From / To" header of transcripts for
         // external readers; when empty, the line name is used.

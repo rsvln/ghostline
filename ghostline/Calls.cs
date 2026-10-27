@@ -140,15 +140,6 @@ namespace ghostline
             public int Duration, Billsec;
         }
 
-        // Quectel/gsm1-0100000002 → gsm1
-        private static string QuectelDevice(string channel)
-        {
-            if (!channel.StartsWith("Quectel/", StringComparison.OrdinalIgnoreCase)) return null;
-            string rest = channel.Substring("Quectel/".Length);
-            int dash = rest.IndexOf('-');
-            return dash > 0 ? rest.Substring(0, dash) : rest;
-        }
-
         // Incoming: the GSM channel is the source (channel), or the line is in did (the call came
         // through a Local channel). Outgoing: the GSM channel is the destination (dstchannel). Everything
         // else (internal calls 11<->12, service channels for SMS/USSD) are not line calls.
@@ -157,8 +148,8 @@ namespace ghostline
             if (r.Dst is "sms" or "ussd") return (null, null);
 
             string device, direction;
-            if ((device = QuectelDevice(r.Channel)) != null) direction = "in";
-            else if ((device = QuectelDevice(r.DstChannel)) != null) direction = "out";
+            if ((device = Modems.Device(r.Channel)) != null) direction = "in";
+            else if ((device = Modems.Device(r.DstChannel)) != null) direction = "out";
             else if (!string.IsNullOrEmpty(r.Did) && settings.channels.Any(c => c.line == r.Did)) { device = r.Did; direction = "in"; }
             else return (null, null);
 

@@ -87,7 +87,7 @@ namespace ghostline
                         var s = Program.settings;
                         bool full = s?.FullMode == true;
                         var components = (s?.gateways ?? new List<Gateway>())
-                            .Select(g => Component(g.id, g.id, g.type, g.ip, g.type is "quectel" or "yeastar"))
+                            .Select(g => Component(g.id, g.id, g.type, g.ip, Modems.IsAmi(g.type)))
                             .ToList();
                         // Notification channels: only the ones switched on in the config.
                         if (Program.TelegramEnabled)

@@ -124,7 +124,7 @@ namespace ghostline
 
             var rows = new List<string>();
             foreach (var gw in settings.gateways ?? new())
-                rows.Add(Row(gw.id, gw.id, gw.type is "quectel" or "yeastar"));
+                rows.Add(Row(gw.id, gw.id, Modems.IsAmi(gw.type)));
             if (TelegramEnabled) rows.Add(Row("telegram", "Telegram", true));
             if (NtfyEnabled) rows.Add(Row("ntfy", "ntfy", true));
             if (settings.FullMode)

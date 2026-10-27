@@ -31,7 +31,7 @@ logger:
 
 gateways:
   - id: pbx
-    type: quectel             # quectel | yeastar | goip
+    type: quectel             # quectel | dongle | yeastar | goip
     ip: 10.0.0.10
     ami_port: 5038
     user: ghostline

@@ -4,14 +4,15 @@ using System.Text;
 namespace ghostline
 {
     // Radio state of a SIM line as chan_quectel reports it: registration, operator, network type,
-    // signal. Polled once a minute per quectel gateway (AMI QuectelShowDevices, which only reads the
-    // driver's state and sends nothing to the modems), kept in memory only.
+    // signal. Polled once a minute per modem gateway (AMI QuectelShowDevices / DongleShowDevices, which
+    // only read the driver's state), kept in memory only.
     public class RadioState
     {
         public string State { get; set; }           // chan_quectel device state: Free, Ring, GSM not registered...
         public string Registration { get; set; }    // "Registered, home network"
         public string Provider { get; set; }
         public int Act { get; set; } = -1;          // 3GPP 27.007 access technology; -1: unknown (stock chan_quectel)
+        public string Mode { get; set; }            // the driver's own mode text, from Huawei ^MODE (chan_dongle)
         public int Rssi { get; set; } = 99;         // 0..31, 99: unknown
         public string Lac { get; set; }
         public string Cell { get; set; }
@@ -29,6 +30,15 @@ namespace ghostline
             2 or 4 or 5 or 6 => "3G",
             7 or 9 or 10 => "4G",
             11 or 12 or 13 => "5G",
+            _ => NetOfMode(Mode)
+        };
+
+        // Huawei modules report the mode themselves (^MODE); the stock drivers keep it as text.
+        internal static string NetOfMode(string mode) => (mode ?? "").ToUpperInvariant() switch
+        {
+            "GSM" or "GPRS" or "EDGE" or "GSM/GPRS" => "2G",
+            "WCDMA" or "TD-SCDMA" or "HSDPA" or "HSUPA" or "HSDPA AND HSUPA" or "HSPA" or "HSPA+" => "3G",
+            "LTE" => "4G",
             _ => null
         };
 
@@ -57,10 +67,10 @@ namespace ghostline
 
         // Key: "<gateway id>|<device>" (channels[].line).
         private static readonly ConcurrentDictionary<string, RadioState> _radio = new();
-        // Gateways whose AMI user may not run QuectelShowDevices: polling stops until a restart.
+        // Gateways whose AMI user may not run the show-devices action: polling stops until a restart.
         private static readonly ConcurrentDictionary<string, bool> _radioDenied = new();
 
-        internal static bool RadioMonitored(Gateway gw) => gw != null && gw.type == "quectel" && gw.monitor;
+        internal static bool RadioMonitored(Gateway gw) => gw != null && Modems.IsModem(gw.type) && gw.monitor;
 
         // Data of the line, or null: not monitored, the gateway is down, or nothing came for 3 polls.
         internal static RadioState LineRadio(Channel ch)
@@ -71,15 +81,16 @@ namespace ghostline
                    && DateTime.Now - r.UpdatedAt < TimeSpan.FromSeconds(RadioPollSeconds * 3) ? r : null;
         }
 
-        private static async Task RadioPollLoop(string gatewayId)
+        private static async Task RadioPollLoop(Gateway gw)
         {
+            string action = Modems.For(gw.type).ShowDevicesAction;
             await Task.Delay(10000);   // after the AMI login
-            while (!_radioDenied.ContainsKey(gatewayId))
+            while (!_radioDenied.ContainsKey(gw.id))
             {
                 try
                 {
-                    if (_amiClients.TryGetValue(gatewayId, out var client) && client.Connected)
-                        client.GetStream().Write(Encoding.UTF8.GetBytes($"Action: QuectelShowDevices\r\nActionID: {RadioActionId}\r\n\r\n"));
+                    if (_amiClients.TryGetValue(gw.id, out var client) && client.Connected)
+                        client.GetStream().Write(Encoding.UTF8.GetBytes($"Action: {action}\r\nActionID: {RadioActionId}\r\n\r\n"));
                 }
                 catch { }
                 await Task.Delay(RadioPollSeconds * 1000);
@@ -93,11 +104,11 @@ namespace ghostline
             if (evt.GetValueOrDefault("Response") == "Error")
             {
                 if (_radioDenied.TryAdd(gw.id, true))
-                    Console.WriteLine($"AMI ({gw.id}): QuectelShowDevices refused ({evt.GetValueOrDefault("Message", "")}); " +
+                    Console.WriteLine($"AMI ({gw.id}): {Modems.For(gw.type)?.ShowDevicesAction} refused ({evt.GetValueOrDefault("Message", "")}); " +
                                       "line monitoring is off until a restart. The AMI user needs 'reporting' in 'write'.");
                 return true;
             }
-            if (evt.GetValueOrDefault("Event") != "QuectelDeviceEntry") return true;
+            if (evt.GetValueOrDefault("Event") != Modems.For(gw.type)?.DeviceEntryEvent) return true;
 
             string device = evt.GetValueOrDefault("Device", "");
             var ch = getChannelByLine(gw.id, device);
@@ -108,6 +119,8 @@ namespace ghostline
             r.Registration = evt.GetValueOrDefault("GSMRegistrationStatus");
             r.Provider = evt.GetValueOrDefault("ProviderName") is { } p && p != "NONE" ? ProviderName(p) : null;
             r.Act = ParseIntOr(evt, "AccessTechnology", -1);
+            // The submode is the more exact one ("HSDPA" within "WCDMA"), when the driver knows it.
+            r.Mode = RadioState.NetOfMode(evt.GetValueOrDefault("Submode")) != null ? evt["Submode"] : evt.GetValueOrDefault("Mode");
             // "RSSI: 29, -55 dBm"
             r.Rssi = int.TryParse(evt.GetValueOrDefault("RSSI", "").Split(',')[0].Trim(), out var rssi) ? rssi : 99;
             r.Rsrp = ParseIntOr(evt, "RSRP", int.MinValue) is var rsrp && rsrp != int.MinValue ? rsrp : null;

@@ -23,9 +23,9 @@ is what runs in the default `sms` mode.
 
 **SMS** (`mode: sms`, default)
 
-- Gateways: Yeastar (AMI), GoIP (SMTP + HTTP), Quectel modules through
-  `chan_quectel` in Asterisk/FreePBX (AMI). Several gateways of the same type
-  are supported.
+- Gateways: Yeastar (AMI), GoIP (SMTP + HTTP), Quectel/SIMCom modules
+  through `chan_quectel` and Huawei 3G sticks through `chan_dongle` in
+  Asterisk/FreePBX (AMI). Several gateways of the same type are supported.
 - Two notification channels, both optional and usable together: Telegram and
   [ntfy](https://ntfy.sh) (a self-hosted push server, works without Google
   services and without access to Telegram). Each line goes to its own
@@ -35,7 +35,7 @@ is what runs in the default `sms` mode.
 - Outgoing SMS from a Telegram chat, an ntfy topic or the web interface,
   through a persistent queue.
 - SMS history in SQLite, with search and export.
-- Line monitoring (`quectel`): registration, operator, network type, signal on
+- Line monitoring (`quectel`, `dongle`): registration, operator, network type, signal on
   the Status tab and in `/status`; a message when a line loses the network
   and when it is back.
 
@@ -266,12 +266,12 @@ from the web interface.
 | Field | Description |
 |---|---|
 | `id` | Unique name of the gateway, shown in the web interface |
-| `type` | `yeastar`, `goip` or `quectel` |
+| `type` | `quectel`, `dongle`, `yeastar` or `goip` |
 | `ip` | Gateway address |
-| `ami_port` | AMI port (`yeastar`, `quectel`) |
+| `ami_port` | AMI port (`quectel`, `dongle`, `yeastar`) |
 | `http_port` | HTTP port used for sending SMS (`yeastar`, `goip`) |
-| `user` / `password` | AMI credentials (`yeastar`, `quectel`) or HTTP credentials (`goip`) |
-| `monitor` | `quectel`: poll the lines' registration, operator, network type and signal; default `true`. The AMI user needs `reporting` in `write`, see [docs/quectel-setup.md](docs/quectel-setup.md#4-line-monitoring) |
+| `user` / `password` | AMI credentials (`quectel`, `dongle`, `yeastar`) or HTTP credentials (`goip`) |
+| `monitor` | `quectel`, `dongle`: poll the lines' registration, operator, network type and signal; default `true`. The AMI user needs `reporting` in `write`, see [docs/quectel-setup.md](docs/quectel-setup.md#4-line-monitoring) |
 
 `channels[]` (SIM lines):
 
@@ -280,7 +280,7 @@ from the web interface.
 | `name` | Line name, used in bot commands and in the interface; unique |
 | `gateway` | `gateways[].id` this line belongs to |
 | `pattern` | String incoming events are matched against |
-| `line` | Port number (`yeastar`, `goip`) or `chan_quectel` device name (`gsm1`, …) |
+| `line` | Port number (`yeastar`, `goip`) or `chan_quectel` / `chan_dongle` device name (`gsm1`, `hw1`, …) |
 | `number` | The line's own phone number, shown in transcript headers; optional |
 | `clients` | Clients of the line: notifications go only to the ones listed. No `clients` section — every client that is on; `clients: {}` — nowhere |
 | `clients.telegram.chat_ids` | Telegram chats of the line (SMS and calls); empty — the common ones |
@@ -301,7 +301,8 @@ from the web interface.
 PBX-side setup for `mode: full` (database user, HTTP access to recordings,
 recording each side of the call, transcription service) is described in
 [docs/pbx-setup-calls.md](docs/pbx-setup-calls.md). AMI and dialplan setup for
-`chan_quectel` is in [docs/quectel-setup.md](docs/quectel-setup.md).
+`chan_quectel` is in [docs/quectel-setup.md](docs/quectel-setup.md), for
+`chan_dongle` in [docs/dongle-setup.md](docs/dongle-setup.md).
 
 ### Contacts
 

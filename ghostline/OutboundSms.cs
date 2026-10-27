@@ -38,8 +38,8 @@ namespace ghostline
             if (string.IsNullOrEmpty(canonical) || !canonical.StartsWith("+"))
                 return canonical;
 
-            // quectel expects E.164 with "+", which is already the case.
-            if (gatewayType == "quectel")
+            // chan_quectel and chan_dongle expect E.164 with "+", which is already the case.
+            if (Modems.IsModem(gatewayType))
                 return canonical;
 
             // goip / yeastar: Russian dial plan, "8" for domestic numbers, "810" plus the
@@ -85,15 +85,15 @@ namespace ghostline
                 RecordOutgoing("g", chanOut, rawNumber, mcontent, sourceLabel);
                 HealthStatus.MarkActivity(gw.id);
             }
-            else if (gw.type == "quectel")
+            else if (Modems.For(gw.type) is { } modem)
             {
                 if (!_amiClients.TryGetValue(gw.id, out var amiClient))
                     throw new InvalidOperationException("AMI client for gateway '" + gw.id + "' is not initialized");
 
                 string dest = FormatForGateway(rawNumber, gw.type);
-                string command = "Action: Command\r\nCommand: quectel sms " + chanOut.line + " " + dest + " " + mcontent + "\r\n\r\n";
+                string command = "Action: Command\r\nCommand: " + modem.Cli + " sms " + chanOut.line + " " + dest + " " + mcontent + "\r\n\r\n";
                 amiClient.Client.Send(System.Text.Encoding.UTF8.GetBytes(command));
-                RecordOutgoing("q", chanOut, rawNumber, mcontent, sourceLabel);
+                RecordOutgoing(modem.Letter, chanOut, rawNumber, mcontent, sourceLabel);
                 HealthStatus.MarkActivity(gw.id);
             }
         }
