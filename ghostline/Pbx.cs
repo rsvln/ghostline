@@ -90,7 +90,14 @@ namespace ghostline
                 if (changed.Count > 0)
                 {
                     Console.WriteLine("PBX: wrote " + string.Join(", ", changed) + ", reloading");
-                    foreach (var cmd in new[] { "module reload res_pjsip.so", "dialplan reload" })
+                    var cmds = new List<string>();
+                    if (changed.Contains(PbxConfig.PjsipFile)) cmds.Add("module reload res_pjsip.so");
+                    // Before the modem reload: a modem's new context must exist when it comes up.
+                    if (changed.Contains(PbxConfig.DialplanFile)) cmds.Add("dialplan reload");
+                    // "gracefully": the driver waits until its calls end, then re-reads the devices.
+                    if (changed.Contains(PbxConfig.QuectelFile)) cmds.Add("quectel reload gracefully");
+                    if (changed.Contains(PbxConfig.DongleFile)) cmds.Add("dongle reload gracefully");
+                    foreach (var cmd in cmds)
                         output.Append("> ").Append(cmd).Append('\n').Append(await AmiCommand(s.pbx.asterisk, cmd)).Append('\n');
                 }
                 return new(true, new(), changed, output.ToString().TrimEnd());
@@ -281,6 +288,110 @@ namespace ghostline
                 File.WriteAllText(ConfigPath, yaml);
                 Console.WriteLine($"PBX: line {name} removed from the PBX tab");
                 return new(true, null, null);
+            }
+        }
+
+        // ---- USB modems on the Asterisk host (usb.json from scripts/gl-usb-inventory.py) ----------------
+
+        internal record UsbPort(string path, string tty, int @interface, bool access);
+        internal record UsbSound(string card, string alsadev, bool access);
+        internal record UsbDevice(string usb, string vid, string pid, string manufacturer, string product,
+                                  List<UsbPort> ports, List<UsbSound> sound);
+        internal record UsbInventory(List<UsbDevice> devices);
+
+        internal static (List<UsbDevice> devices, DateTime? at) ReadUsbInventory(Settings s)
+        {
+            string path = Path.Combine(s.pbx?.confDir ?? "", "usb.json");
+            if (string.IsNullOrEmpty(s.pbx?.confDir) || !File.Exists(path)) return (null, null);
+            try
+            {
+                var inv = System.Text.Json.JsonSerializer.Deserialize<UsbInventory>(File.ReadAllText(path));
+                return (inv?.devices ?? new(), File.GetLastWriteTime(path));
+            }
+            catch { return (null, null); }
+        }
+
+        internal record PbxModemEdit(string action, string name, string driver, string data, string audio, string alsadev, bool noqpcmv);
+        internal record PbxModemResult(bool ok, string error, bool restart);
+
+        // Adds or removes a modem in pbx.modems. Only ports the inventory lists and Asterisk may open are
+        // accepted, and no port of another modem. A modem needs a gateway of its driver on the managed
+        // Asterisk (ghostline handles that driver's SMS and monitoring through it); a missing one is added
+        // with the AMI login of pbx.asterisk, and then the service has to restart.
+        internal static PbxModemResult EditModem(PbxModemEdit e)
+        {
+            lock (_pbxSaveLock)
+            {
+                string yaml = File.ReadAllText(ConfigPath);
+                var s = SettingsFile.Parse(yaml);
+                string name = e?.name?.Trim() ?? "";
+                var modems = s.pbx.modems ?? new();
+                bool restart = false;
+
+                if (e?.action == "remove")
+                {
+                    if (!modems.Any(m => m.name == name)) return new(false, $"no modem '{name}'", false);
+                    var user = s.channels?.FirstOrDefault(c => c.line == name && PbxConfig.OnManagedAsterisk(s, c));
+                    if (user != null) return new(false, $"line {user.name} uses modem {name}: remove the line first", false);
+                    yaml = ConfigYaml.Remove(yaml, $"pbx.modems[name={name}]");
+                }
+                else if (e?.action == "add")
+                {
+                    if (!DeviceName.IsMatch(name)) return new(false, "the modem name: letters, digits, _ and - only, like gsm3", false);
+                    if (modems.Any(m => m.name == name)) return new(false, $"modem {name} already exists", false);
+                    if (!PbxConfig.Drivers.Contains(e.driver)) return new(false, "driver must be quectel or dongle", false);
+                    var (devices, _) = ReadUsbInventory(s);
+                    if (devices == null) return new(false, "no USB list from the Asterisk host (usb.json in conf_dir)", false);
+                    var ports = devices.SelectMany(d => d.ports).ToList();
+                    var taken = modems.SelectMany(m => new[] { m.data, m.audio, m.alsadev }).Where(x => !string.IsNullOrEmpty(x)).ToHashSet();
+                    foreach (var port in new[] { e.data, e.audio }.Where(x => !string.IsNullOrEmpty(x)))
+                    {
+                        var p = ports.FirstOrDefault(x => x.path == port);
+                        if (p == null) return new(false, $"{port} is not on the Asterisk host", false);
+                        if (!p.access) return new(false, $"Asterisk may not open {port} (not passed to its container)", false);
+                        if (taken.Contains(port)) return new(false, $"{port} is used by another modem", false);
+                    }
+                    if (!string.IsNullOrEmpty(e.alsadev))
+                    {
+                        var snd = devices.SelectMany(d => d.sound).FirstOrDefault(x => x.alsadev == e.alsadev);
+                        if (snd == null || !snd.access) return new(false, $"Asterisk may not open the sound card {e.alsadev}", false);
+                        if (taken.Contains(e.alsadev)) return new(false, $"{e.alsadev} is used by another modem", false);
+                    }
+
+                    // A new list item: its first key is the selector, the rest follow.
+                    string at = $"pbx.modems[name={name}]";
+                    yaml = ConfigYaml.Set(yaml, at + ".driver", e.driver);
+                    yaml = ConfigYaml.Set(yaml, at + ".data", e.data ?? "");
+                    if (!string.IsNullOrEmpty(e.audio)) yaml = ConfigYaml.Set(yaml, at + ".audio", e.audio);
+                    if (!string.IsNullOrEmpty(e.alsadev)) yaml = ConfigYaml.Set(yaml, at + ".alsadev", e.alsadev);
+                    if (e.noqpcmv) yaml = ConfigYaml.Set(yaml, at + ".noqpcmv", "true");
+
+                    var host = s.gateways?.FirstOrDefault(g => g.id == s.pbx.asterisk);
+                    if (host != null && !(s.gateways.Any(g => g.type == e.driver && g.ip == host.ip)))
+                    {
+                        string gid = $"{host.id}-{e.driver}";
+                        yaml = ConfigYaml.Set(yaml, $"gateways[id={gid}].type", e.driver);
+                        yaml = ConfigYaml.Set(yaml, $"gateways[id={gid}].ip", host.ip);
+                        yaml = ConfigYaml.Set(yaml, $"gateways[id={gid}].ami_port", host.amiPort.ToString());
+                        yaml = ConfigYaml.Set(yaml, $"gateways[id={gid}].user", host.user);
+                        yaml = ConfigYaml.Set(yaml, $"gateways[id={gid}].password", host.password);
+                        restart = true;
+                    }
+                }
+                else return new(false, "unknown action", false);
+
+                Settings after;
+                try { after = SettingsFile.Parse(yaml); }
+                catch (Exception ex) { return new(false, SettingsFile.Describe(ex), false); }
+                bool present = after.pbx.modems?.Any(m => m.name == name) == true;
+                if (present != (e.action == "add")) return new(false, "could not change pbx.modems in the config", false);
+                var errors = PbxConfig.Validate(after);
+                if (errors.Count > 0) return new(false, string.Join("; ", errors), false);
+
+                File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
+                File.WriteAllText(ConfigPath, yaml);
+                Console.WriteLine($"PBX: modem {name} {(e.action == "add" ? "added" : "removed")} from the PBX tab");
+                return new(true, null, restart);
             }
         }
 

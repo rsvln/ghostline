@@ -65,9 +65,23 @@ namespace ghostline
         public string externalAddress { get; set; }         // public name or IP for NAT
         public List<string> localNets { get; set; } = new();
         public string recordingsPath { get; set; } = "/var/spool/asterisk/monitor";   // on the Asterisk side
+        // Modems ghostline writes into quectel_ghostline.conf / dongle_ghostline.conf (PBX tab).
+        public List<PbxModem> modems { get; set; } = new();
 
         [YamlIgnore]
         public bool Managed => string.Equals(mode, "managed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // A modem of the managed Asterisk. Ports by path only (never discovery by IMEI/IMSI, which sends AT
+    // commands to every port of the host).
+    public class PbxModem
+    {
+        public string name { get; set; }        // device name: Quectel/<name>, Dongle/<name>; channels[].line
+        public string driver { get; set; }      // quectel | dongle
+        public string data { get; set; }        // AT port, /dev/serial/by-path/...
+        public string audio { get; set; }       // serial audio port; empty with a UAC sound card
+        public string alsadev { get; set; }     // UAC sound card (quectel): hw:CARD=<id>,DEV=0
+        public bool noqpcmv { get; set; }       // quectel on the ASR platform (EC200A)
     }
 
     public class PbxTls

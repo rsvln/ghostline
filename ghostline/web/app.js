@@ -572,6 +572,7 @@ async function loadPbx() {
   try { d = await (await fetch('/api/pbx')).json(); } catch { return; }
   if (!d.managed) return;
   pbxData = d;
+  renderPbxModems();
   const errs = (d.error ? [d.error] : []).concat(d.errors || []);
   document.getElementById('pbx-errors').innerHTML = errs.length
     ? `<h3>${esc(t('web.pbx.problems'))}</h3>` + errs.map(e => `<div class="pbx-err">${esc(e)}</div>`).join('')
@@ -638,6 +639,136 @@ async function loadPbx() {
     el.addEventListener('change', pbxMarkChanged);
   });
   pbxMarkChanged();
+}
+
+// Modems of the managed Asterisk (pbx.modems): ghostline writes their sections into
+// quectel_ghostline.conf / dongle_ghostline.conf. The USB list comes from the Asterisk host
+// (gl-usb-inventory: sysfs only, nothing is sent to the modems).
+function renderPbxModems() {
+  const d = pbxData;
+  const rows = (d.pbxModems || []).map(m => {
+    const port = p => p ? esc(p.replace('/dev/serial/by-path/', '')) : '';
+    const audio = m.alsadev ? `UAC ${esc(m.alsadev)}` : port(m.audio);
+    const state = m.state ? `<span class="hdot ${/free|ring|dial|active|busy/i.test(m.state) ? 'ok' : 'err'}"></span>${esc(m.state)}`
+      : `<span class="hdot err"></span>${esc(t('web.pbx.modem.not_seen'))}`;
+    return `<tr><td>${esc(m.name)}</td><td>${esc(m.driver)}</td><td>${esc(m.model || '')}</td>
+      <td>${esc(m.usb || '')}</td><td>${state}${m.provider ? ` <span class="muted">${esc(m.provider)}</span>` : ''}</td>
+      <td class="muted pbx-port">${port(m.data)}</td><td class="muted pbx-port">${audio}${m.noqpcmv ? ' · noqpcmv' : ''}</td>
+      <td>${m.line ? esc(m.line) : `<span class="muted">${esc(t('web.pbx.modem.free'))}</span>`}</td>
+      <td>${m.line ? '' : `<button class="btn" data-name="${esc(m.name)}" onclick="removePbxModem(this.dataset.name)"
+        title="${esc(t('web.pbx.modem.remove'))}">✕</button>`}</td></tr>`;
+  }).join('');
+  document.getElementById('pbx-modems').innerHTML = `<thead><tr><th>${esc(t('web.pbx.modem.name'))}</th>`
+    + `<th>${esc(t('web.pbx.modem.driver'))}</th><th>${esc(t('web.pbx.modem.model'))}</th><th>USB</th>`
+    + `<th>${esc(t('web.pbx.modem.state'))}</th><th>${esc(t('web.pbx.modem.data'))}</th><th>${esc(t('web.pbx.modem.audio'))}</th>`
+    + `<th>${esc(t('web.status.col.line'))}</th><th></th></tr></thead>`
+    + `<tbody>${rows || `<tr><td colspan="9" class="muted">${esc(t('web.pbx.modem.none'))}</td></tr>`}</tbody>`;
+  renderPbxModemAdd(false);
+}
+
+function renderPbxModemAdd(open) {
+  const host = document.getElementById('pbx-modem-add');
+  if (!open) {
+    host.innerHTML = `<button class="btn" onclick="renderPbxModemAdd(true)">${esc(t('web.pbx.modem.add'))}</button>`;
+    return;
+  }
+  const d = pbxData;
+  if (!d.usb) {
+    host.innerHTML = `<span class="muted">${esc(t('web.pbx.modem.no_usb'))}</span>
+      <button class="btn" onclick="renderPbxModemAdd(false)">${esc(t('web.cancel'))}</button>`;
+    return;
+  }
+  // USB devices not used by a modem yet; those Asterisk cannot open are listed but disabled.
+  const free = d.usb.filter(u => !u.configured);
+  const label = u => [`USB ${u.usb}`, u.model || `${u.manufacturer} ${u.product}`.trim(), `${u.vid}:${u.pid}`].join(' · ')
+    + (u.access ? '' : ' · ' + t('web.pbx.modem.no_access'));
+  const opts = free.map(u => `<option value="${esc(u.usb)}"${u.access ? '' : ' disabled'}>${esc(label(u))}</option>`).join('');
+  if (!free.some(u => u.access)) {
+    host.innerHTML = `<div class="muted">${esc(t('web.pbx.modem.no_free_usb'))}</div>
+      ${free.length ? `<div class="muted pbx-port">${free.map(u => esc(label(u))).join('<br>')}</div>` : ''}
+      <button class="btn" onclick="renderPbxModemAdd(false)">${esc(t('web.cancel'))}</button>`;
+    return;
+  }
+  host.innerHTML = `<div class="settings-grid pbx-add-form">
+    <label>${esc(t('web.pbx.modem.usb'))}<select id="pbx-m-usb" onchange="pbxModemUsbChanged()">${opts}</select></label>
+    <label>${esc(t('web.pbx.modem.name'))}<input id="pbx-m-name" maxlength="32" spellcheck="false"></label>
+    <label>${esc(t('web.pbx.modem.driver'))}<select id="pbx-m-driver" onchange="pbxModemDriverChanged()">${pbxOptions(['quectel', 'dongle'], 'quectel')}</select></label>
+    <label>${esc(t('web.pbx.modem.data'))}<select id="pbx-m-data"></select></label>
+    <label>${esc(t('web.pbx.modem.audio'))}<select id="pbx-m-audio"></select></label>
+    <label class="chk"><input type="checkbox" id="pbx-m-noqpcmv">noqpcmv (EC200A)</label>
+  </div>
+  <div class="pbx-add-buttons">
+    <button class="btn primary" onclick="addPbxModem()">${esc(t('web.pbx.modem.submit'))}</button>
+    <button class="btn" onclick="renderPbxModemAdd(false)">${esc(t('web.cancel'))}</button>
+    <span class="config-hint">${esc(t('web.pbx.modem.hint'))}</span>
+  </div>`;
+  const first = free.find(u => u.access);
+  document.getElementById('pbx-m-usb').value = first.usb;
+  pbxModemUsbChanged();
+}
+
+// A USB device was chosen: its ports in the combos, the suggestion for a known model, a free name.
+function pbxModemUsbChanged() {
+  const u = pbxData.usb.find(x => x.usb === document.getElementById('pbx-m-usb').value);
+  if (!u) return;
+  const s = u.suggest || {};
+  const driver = s.driver || 'quectel';
+  document.getElementById('pbx-m-driver').value = driver;
+  const portOpt = p => `<option value="${esc(p.path)}"${p.access && !p.used ? '' : ' disabled'}>`
+    + `${esc(t('web.pbx.modem.iface', p.interface))} · ${esc(p.path.replace('/dev/serial/by-path/', ''))}</option>`;
+  document.getElementById('pbx-m-data').innerHTML = u.ports.map(portOpt).join('');
+  document.getElementById('pbx-m-audio').innerHTML =
+    u.sound.map(x => `<option value="uac:${esc(x.alsadev)}"${x.access && !x.used ? '' : ' disabled'}>UAC ${esc(x.alsadev)}`
+      + `${x.access ? '' : ' · ' + esc(t('web.pbx.modem.no_access'))}</option>`).join('')
+    + u.ports.map(portOpt).join('');
+  if (s.data) document.getElementById('pbx-m-data').value = s.data;
+  if (s.alsadev) document.getElementById('pbx-m-audio').value = 'uac:' + s.alsadev;
+  else if (s.audio) document.getElementById('pbx-m-audio').value = s.audio;
+  document.getElementById('pbx-m-noqpcmv').checked = !!s.noqpcmv;
+  const prefix = driver === 'dongle' ? 'hw' : 'gsm';
+  const names = new Set((pbxData.pbxModems || []).map(m => m.name).concat((pbxData.lines || []).map(l => l.device)));
+  let n = 1;
+  while (names.has(prefix + n)) n++;
+  document.getElementById('pbx-m-name').value = prefix + n;
+  pbxModemDriverChanged();
+}
+
+function pbxModemDriverChanged() {
+  const dongle = document.getElementById('pbx-m-driver').value === 'dongle';
+  const box = document.getElementById('pbx-m-noqpcmv');
+  box.disabled = dongle;
+  if (dongle) box.checked = false;
+}
+
+async function addPbxModem() {
+  const audio = document.getElementById('pbx-m-audio').value;
+  const body = {
+    action: 'add', name: document.getElementById('pbx-m-name').value.trim(),
+    driver: document.getElementById('pbx-m-driver').value,
+    data: document.getElementById('pbx-m-data').value,
+    audio: audio.startsWith('uac:') ? '' : audio,
+    alsadev: audio.startsWith('uac:') ? audio.slice(4) : '',
+    noqpcmv: document.getElementById('pbx-m-noqpcmv').checked
+  };
+  await pbxModemRequest(body, t('web.pbx.modem.add_confirm', body.name, body.driver));
+}
+
+async function removePbxModem(name) {
+  await pbxModemRequest({ action: 'remove', name }, t('web.pbx.modem.remove_confirm', name));
+}
+
+async function pbxModemRequest(body, question) {
+  if (pbxEdits() && !confirm(t('web.pbx.discard_edits'))) return;
+  if (!confirm(question)) return;
+  setBusy(t('web.pbx.applying'));
+  const r = await configRequest('/api/pbx/modem', body);
+  setBusy(null);
+  if (!r) return;
+  if (r.applyErrors?.length) alert(r.applyErrors.join('\n'));
+  if (r.restarting) { await waitForRestart(); return; }
+  showToast(t('web.pbx.modem.done'), 'ok');
+  document.getElementById('pbx-output').innerHTML = r.output ? `<h3>Asterisk</h3><pre class="pbx-file">${esc(r.output)}</pre>` : '';
+  loadPbx();
 }
 
 // "+ Line": the modem is chosen from those the managed Asterisk knows and no line uses yet.

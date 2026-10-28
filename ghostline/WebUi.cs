@@ -216,9 +216,45 @@ namespace ghostline
                         var used = (s.channels ?? new()).Select(c => (s.gateways?.FirstOrDefault(g => g.id == c.gateway)?.type, c.line)).ToHashSet();
                         List<Program.AsteriskModem> modems = new();
                         try { modems = await Program.AsteriskModems(s); } catch { }
+                        // USB modems on the Asterisk host, for "+ Modem": known models get a suggested
+                        // driver and ports; ports already used by a modem are marked.
+                        var (usb, usbAt) = Program.ReadUsbInventory(s);
+                        var taken = (s.pbx.modems ?? new()).SelectMany(m => new[] { m.data, m.audio, m.alsadev })
+                            .Where(x => !string.IsNullOrEmpty(x)).ToHashSet();
+                        var usbList = usb?.Select(u =>
+                        {
+                            var prof = PbxConfig.Profile(u.vid, u.pid);
+                            string Port(int iface) => iface < 0 ? null : u.ports.FirstOrDefault(p => p.@interface == iface)?.path;
+                            return new
+                            {
+                                u.usb, u.vid, u.pid, u.manufacturer, u.product,
+                                model = prof?.Model,
+                                ports = u.ports.Select(p => new { p.path, p.@interface, p.access, used = taken.Contains(p.path) }),
+                                sound = u.sound.Select(x => new { x.card, x.alsadev, x.access, used = taken.Contains(x.alsadev) }),
+                                configured = u.ports.Any(p => taken.Contains(p.path)),
+                                access = u.ports.Any(p => p.access),
+                                suggest = prof == null ? null : new
+                                {
+                                    driver = prof.Driver, data = Port(prof.Data), audio = Port(prof.Audio),
+                                    alsadev = prof.Uac ? u.sound.FirstOrDefault()?.alsadev : null, noqpcmv = prof.NoQpcmv
+                                }
+                            };
+                        }).ToList();
                         return Results.Ok(new
                         {
                             managed = true,
+                            usb = usbList,
+                            usbAt,
+                            pbxModems = (s.pbx.modems ?? new()).Select(m => new
+                            {
+                                m.name, m.driver, m.data, m.audio, m.alsadev, m.noqpcmv,
+                                usb = usb?.FirstOrDefault(u => u.ports.Any(p => p.path == m.data))?.usb,
+                                model = usb?.Where(u => u.ports.Any(p => p.path == m.data))
+                                    .Select(u => PbxConfig.Profile(u.vid, u.pid)?.Model ?? u.product).FirstOrDefault(),
+                                state = modems.FirstOrDefault(x => x.device == m.name)?.state,
+                                provider = modems.FirstOrDefault(x => x.device == m.name)?.provider,
+                                line = s.channels?.FirstOrDefault(c => c.line == m.name && PbxConfig.OnManagedAsterisk(s, c))?.name
+                            }),
                             modems = modems.Select(m => new
                             {
                                 m.gateway, m.device, m.state, m.provider, m.model,
@@ -286,6 +322,21 @@ namespace ghostline
                         var applied = await Program.ApplyPbx();
                         RestartSoon();
                         return Results.Ok(new { ok = true, r.secret, applyErrors = applied.errors, restarting = true });
+                    });
+
+                    // A modem added or removed on the PBX tab: saved and applied (the driver reloads gracefully).
+                    // A new gateway for its driver needs a restart.
+                    app.MapPost("/api/pbx/modem", async (HttpRequest req) =>
+                    {
+                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { ok = false, error = "pbx.mode is not managed" });
+                        var data = await ReadJson<Program.PbxModemEdit>(req);
+                        Program.PbxModemResult r;
+                        try { r = Program.EditModem(data); }
+                        catch (Exception ex) { r = new(false, ex.Message, false); }
+                        if (!r.ok) return Results.Ok(new { ok = false, r.error });
+                        var applied = await Program.ApplyPbx();
+                        if (r.restart) RestartSoon();
+                        return Results.Ok(new { ok = true, restarting = r.restart, applyErrors = applied.errors, applied.output });
                     });
 
                     app.MapPost("/api/pbx/apply", async () =>

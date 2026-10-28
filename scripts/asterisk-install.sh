@@ -105,6 +105,17 @@ patch_file() {
   fi
 }
 
+# Prints the path of a file from scripts/, from the checkout or downloaded.
+script_file() {
+  local name=$1
+  if [ -f "$SCRIPT_DIR/$name" ]; then
+    echo "$SCRIPT_DIR/$name"
+  else
+    curl -fsSL "$GHOSTLINE_RAW/$GHOSTLINE_REF/scripts/$name" -o "$SRC/$name"
+    echo "$SRC/$name"
+  fi
+}
+
 log "Packages"
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
@@ -324,43 +335,36 @@ write = command,originate,message,reporting
 writetimeout = 5000
 EOF
 
-put_conf quectel.conf <<'EOF'
-; chan_quectel devices. Ports by path only: never discovery by IMEI/IMSI,
-; it sends AT commands to every ttyUSB on the host.
-; context: gl-in-<device>, the PBX tab of ghostline shows the exact line.
+# The modems are set up on ghostline's PBX tab and written into the included files.
+put_conf quectel.conf <<EOF
+; chan_quectel. The devices are added on ghostline's PBX tab (Modems) and
+; written into the included file. Ports by path only: never discovery by
+; IMEI/IMSI, it sends AT commands to every ttyUSB on the host.
 [general]
 interval=15
 
-;[gsm1]
-;data=/dev/serial/by-path/<path>-port0
-;audio=/dev/serial/by-path/<path>-port0  ; modules with a serial audio port
-;quec_uac=1                ; EC200A and other UAC modules, instead of audio=
-;noqpcmv=1                 ; EC200A (ASR platform), see docs/quectel-setup.md
-;alsadev=hw:CARD=<card>,DEV=0
-;context=gl-in-gsm1
-;group=1
-;resetquectel=yes
-;initstate=start
-;autodeletesms=yes
+#include $CONF_DIR/quectel_ghostline.conf
 EOF
 
-put_conf dongle.conf <<'EOF'
-; chan_dongle devices (Huawei sticks). Ports by path only, see docs/dongle-setup.md.
-; context: gl-in-<device>, the PBX tab of ghostline shows the exact line.
+put_conf dongle.conf <<EOF
+; chan_dongle (Huawei sticks). The devices are added on ghostline's PBX tab
+; (Modems) and written into the included file.
 [general]
 interval=15
 
 [defaults]
 group=3
+rxgain=0
+txgain=0
 autodeletesms=yes
 resetdongle=no
 u2diag=-1
+disablesms=no
+smsaspdu=yes
 initstate=start
+dtmf=relax
 
-;[hw1]
-;audio=/dev/serial/by-path/<path>-port0
-;data=/dev/serial/by-path/<path>-port0
-;context=gl-in-hw1
+#include $CONF_DIR/dongle_ghostline.conf
 EOF
 
 # Placeholders until the first Apply; ghostline replaces them.
@@ -369,6 +373,12 @@ put_conf pjsip_ghostline.conf 664 <<'EOF'
 ; Written by ghostline on Apply.
 EOF
 put_conf extensions_ghostline.conf 664 <<'EOF'
+; Written by ghostline on Apply.
+EOF
+put_conf quectel_ghostline.conf 664 <<'EOF'
+; Written by ghostline on Apply.
+EOF
+put_conf dongle_ghostline.conf 664 <<'EOF'
 ; Written by ghostline on Apply.
 EOF
 
@@ -384,6 +394,33 @@ else
   chmod 644 keys/sip.crt
   echo "  wrote self-signed $CONF_DIR/keys/sip.crt for $SIP_NAME"
 fi
+
+log "USB modem list"
+# The PBX tab offers modems from <conf-dir>/usb.json. The script reads sysfs only.
+install -m 755 "$(script_file gl-usb-inventory.py)" /usr/local/bin/gl-usb-inventory
+cat >/etc/systemd/system/gl-usb-inventory.service <<EOF
+[Unit]
+Description=USB modem list for ghostline
+
+[Service]
+Type=oneshot
+User=asterisk
+Group=asterisk
+SupplementaryGroups=dialout audio
+ExecStart=/usr/local/bin/gl-usb-inventory $CONF_DIR/usb.json
+EOF
+cat >/etc/systemd/system/gl-usb-inventory.timer <<'EOF'
+[Unit]
+Description=USB modem list for ghostline, every 30 s
+
+[Timer]
+OnBootSec=10
+OnUnitActiveSec=30
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target
+EOF
 
 log "systemd"
 cat >/etc/systemd/system/asterisk.service <<'EOF'
@@ -427,6 +464,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable asterisk >/dev/null 2>&1
+systemctl enable --now gl-usb-inventory.timer >/dev/null 2>&1
 systemctl restart asterisk
 
 log "fail2ban"
@@ -475,6 +513,6 @@ cat <<EOF
 Next (docs/asterisk-setup.md):
   - share $CONF_DIR with ghostline (pbx.conf_dir) and $CDR_DIR (calls.cdr_sqlite),
     and $REC_DIR for the recordings (calls.recordings_dir);
-  - describe the modems in quectel.conf / dongle.conf;
-  - set pbx.mode: managed in ghostline, add phone sections, Apply on the PBX tab.
+  - pass the modems' USB ports into this container if it is one;
+  - set pbx.mode: managed in ghostline; add modems, lines and phones on the PBX tab.
 EOF

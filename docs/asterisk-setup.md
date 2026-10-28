@@ -57,7 +57,8 @@ is shown only when `manager.conf` is created.
 | `logger.conf` | `messages` and `security` logs (fail2ban reads `security`) |
 | `modules.conf` | autoload without the CSV/manager CDR and unused drivers |
 | `rtp.conf` | RTP ports 10000–20000 |
-| `quectel.conf`, `dongle.conf` | templates; the devices are described by hand |
+| `quectel.conf`, `dongle.conf` | `[general]` / `[defaults]` and `#include` of the files ghostline writes; the modems are added on the PBX tab |
+| `gl-usb-inventory` (timer, every 30 s) | writes `<conf-dir>/usb.json`, the USB modems for the PBX tab; reads sysfs only |
 | `<conf-dir>/keys/sip.crt`, `sip.key` | self-signed certificate, so TLS starts |
 
 `pjsip_ghostline.conf` and `extensions_ghostline.conf` start as empty
@@ -69,18 +70,10 @@ others). These errors are expected.
 
 ## 3. Modems
 
-Describe each device in `quectel.conf` / `dongle.conf` as in
-[quectel-setup.md](quectel-setup.md) and [dongle-setup.md](dongle-setup.md):
-
-- ports by path only;
-- `context=gl-in-<device>`; the PBX tab shows the exact line.
-
-In a container the USB devices must be passed through first (below). Then:
-
-```
-asterisk -rx "module reload chan_quectel.so"
-asterisk -rx "dongle reload now"
-```
+The modems are added on ghostline's PBX tab ("+ Modem"): the USB device and
+its ports are chosen from lists, known models are filled in. In a container
+the USB devices must be passed through first (below); a modem Asterisk cannot
+open is listed as "not passed to Asterisk" and cannot be chosen.
 
 ## 4. Shared directories (Proxmox example)
 
@@ -112,9 +105,31 @@ Mount the directories **before** running the script, or copy the
 placeholders and `keys/` into the mounted directory afterwards. The script
 writes into whatever is mounted at `--conf-dir`.
 
-USB modems in an LXC container: pass through the serial ports (and for UAC
-modules the sound card) with `dev0:`/`lxc.mount.entry` lines in the
-container config. Use the same by-path names that `quectel.conf` uses.
+USB modems in an unprivileged LXC container (Proxmox example). Inside the
+container `/dev` nodes cannot be created, so the host's nodes are bind-mounted,
+and a udev rule on the host gives the chosen modems to the container's
+`dialout` group (gid 20, on the host 100020). Ports of other modems stay
+`root:dialout` on the host and closed to the container, so a modem used by
+another PBX cannot be taken by mistake.
+
+```
+# on the host: one line per modem, by its USB path (udevadm info -q property -n /dev/ttyUSBn | grep ID_PATH)
+cat > /etc/udev/rules.d/99-gl-modems.rules <<'EOF'
+SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ENV{ID_PATH}=="pci-0000:00:14.0-usb-0:7:*", GROUP="100020", MODE="0660"
+EOF
+udevadm control --reload && udevadm trigger --action=change --subsystem-match=tty
+
+# /etc/pve/lxc/<asterisk ct>.conf
+lxc.cgroup2.devices.allow: c 188:* rwm
+lxc.mount.entry: /dev/serial dev/serial none bind,optional,create=dir
+lxc.mount.entry: /dev/ttyUSB0 dev/ttyUSB0 none bind,optional,create=file
+# ... the same for ttyUSB1 to ttyUSB15
+```
+
+A UAC sound card (Quectel EC200A) is passed the same way: `c 116:* rwm`, a
+bind mount of `/dev/snd`, and a rule with `SUBSYSTEM=="sound"` and
+`GROUP="100029"` (`audio`). Restart the container. Within 30 s the PBX tab
+lists the modem as available.
 
 ## 5. ghostline
 

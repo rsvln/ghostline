@@ -404,6 +404,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .pbx-sip-form { max-width: 900px; margin-bottom: 14px; }
 .pbx-dirty { color: var(--yellow); font-size: 12px; }
 .pbx-add { margin-top: 10px; }
+.pbx-port { font-size: 11px; }
 .pbx-add-form { max-width: 900px; margin-bottom: 8px; }
 .pbx-add-buttons { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .sig { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; vertical-align: middle; }

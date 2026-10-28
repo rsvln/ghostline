@@ -5,6 +5,7 @@ namespace ghostline.Tests
 {
     // Saving the PBX tab into the config file: values change in place, comments stay, a new phone
     // gets a secret, an empty extension removes the phone, a dry run writes nothing.
+    [Collection("config file")]   // Program.ConfigPath is static: one test at a time
     public class PbxSaveTests : IDisposable
     {
         const string Yaml = """

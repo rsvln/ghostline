@@ -11,6 +11,12 @@ Asterisk itself, from its own lines:
 
 The PBX tab is where this is set up:
 
+- modems: "+ Modem" picks a USB device of the Asterisk host from a list (model,
+  USB port, VID:PID) and its AT and audio ports from combo boxes. Known models
+  (Huawei E1550, Quectel EC200A and EC25, SIMCom SIM7600) are filled in.
+  Only ports Asterisk may open and no other modem uses are offered. "✕"
+  removes a modem that no line uses. The driver reloads gracefully, after the
+  calls on it end;
 - per modem line: the phone's extension (empty: no phone), dial set and media
   encryption, its registration and a "New secret" button. A new phone gets a
   secret on Apply; it is shown once;
@@ -33,18 +39,24 @@ monitoring) works the same in both modes. To go back, set `pbx.mode: freepbx`.
 
 ## What ghostline writes, and what it does not
 
-ghostline writes two files into `pbx.conf_dir`, a directory shared with the
+ghostline writes its files into `pbx.conf_dir`, a directory shared with the
 Asterisk host. Asterisk sees it as `pbx.asterisk_dir`.
 
 | File | Contents |
 |---|---|
 | `pjsip_ghostline.conf` | TLS transport (and UDP if `udp_port` is set), NAT settings, one endpoint/auth/aor per phone |
-| `extensions_ghostline.conf` | `gl-in-<device>`: calls from the SIM; `gl-out-<device>`: what the phone may dial; recording |
+| `extensions_ghostline.conf` | `gl-in-<device>`: calls from the SIM; `gl-out-<device>`: what the phone may dial; recording. A modem without a phone gets only the SMS/USSD stubs; calls to it are not answered |
+| `quectel_ghostline.conf`, `dongle_ghostline.conf` | one section per modem of `pbx.modems`: ports by path, `context=gl-in-<device>` |
+
+The Asterisk host writes `usb.json` there (`gl-usb-inventory`, every 30 s):
+its USB devices with serial ports and sound cards, and whether Asterisk may
+open them. It reads sysfs only and sends nothing to the modems.
 
 On Apply ghostline:
 1. writes the files that changed; the previous copies go to `.bak`;
-2. runs `module reload res_pjsip.so` and `dialplan reload` over the AMI of the
-   gateway `pbx.asterisk`.
+2. over the AMI of the gateway `pbx.asterisk`, for what changed:
+   `module reload res_pjsip.so`, `dialplan reload`,
+   `quectel reload gracefully`, `dongle reload gracefully`.
 
 Written once, not by ghostline
 ([scripts/asterisk-install.sh](../scripts/asterisk-install.sh) writes them,
@@ -69,10 +81,14 @@ see [asterisk-setup.md](asterisk-setup.md)):
 
   There must be no other endpoints and no anonymous endpoint. Requests that
   match no phone are rejected.
-- `quectel.conf` / `dongle.conf`: the modems, with their ports by path as
-  before. Each device only points at its context, `context=gl-in-<device>`.
-  The PBX tab shows the exact line for each SIM. ghostline does not write the
-  modem configs: a wrong port there can disturb another modem.
+- `quectel.conf` / `dongle.conf`: `[general]` (and `[defaults]` for
+  chan_dongle), then `#include /etc/asterisk/ghostline/quectel_ghostline.conf`
+  (`dongle_ghostline.conf`). No device sections by hand.
+
+A modem needs a gateway of its driver (`type: quectel` / `dongle`) on the
+managed Asterisk: ghostline handles that driver's SMS and monitoring through
+it. "+ Modem" adds a missing one with the AMI login of `pbx.asterisk`
+(`<id>-quectel`, `<id>-dongle`) and restarts ghostline.
 - `manager.conf`: the AMI user of ghostline needs `command` and `reporting`
   in `write`, and `security` in `read` (for the failed attempts).
 - CDR: [cdr-sqlite.md](cdr-sqlite.md).
