@@ -96,8 +96,7 @@ namespace ghostline
                             components.Add(Component("ntfy", "ntfy", "ntfy", s.clients.ntfy.url, true));
                         if (full)
                         {
-                            var cdr = s.calls?.cdrDb;
-                            components.Add(Component("cdr", L10n.Web.T("web.status.cdr"), "cdr", cdr == null ? null : $"{cdr.host}:{cdr.port}", true));
+                            components.Add(Component("cdr", L10n.Web.T("web.status.cdr"), "cdr", Program.CdrSource(s.calls), true));
                             if (s.calls?.transcribe?.enabled == true)
                                 components.Add(Component("transcribe", L10n.Web.T("web.status.transcribe"), "transcribe", s.calls.transcribe.url, true));
                         }

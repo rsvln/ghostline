@@ -1,8 +1,11 @@
+using System.Data.Common;
+using Microsoft.Data.Sqlite;
 using MySqlConnector;
 
 namespace ghostline
 {
-    // Call journal: polling the PBX CDR (asteriskcdrdb.cdr) and turning rows into calls.
+    // Call journal: polling the PBX CDR and turning rows into calls. The CDR is either the FreePBX
+    // MySQL table (asteriskcdrdb.cdr) or a SQLite file written by Asterisk's cdr_sqlite3_custom.
     // Polling rather than AMI events: survives restarts of both sides and catches up on its own.
     // One CDR row = one call (on this PBX every call is one row with its own linkedid).
     internal partial class Program
@@ -10,10 +13,21 @@ namespace ghostline
         private const string KvInitialized = "calls_initialized";
         private const string KvWatermark = "cdr_watermark";
 
-        private static async Task CallsPollerLoop()
+        private static bool CdrIsSqlite => !string.IsNullOrEmpty(settings.calls.cdrSqlite);
+
+        private static DbConnection CdrConnection()
         {
+            if (CdrIsSqlite)
+                // Read-only: Asterisk is the only writer. A busy timeout rides over its short write locks.
+                return new SqliteConnection(new SqliteConnectionStringBuilder
+                {
+                    DataSource = settings.calls.cdrSqlite,
+                    Mode = SqliteOpenMode.ReadOnly,
+                    DefaultTimeout = 10
+                }.ConnectionString);
+
             var db = settings.calls.cdrDb;
-            string cs = new MySqlConnectionStringBuilder
+            return new MySqlConnection(new MySqlConnectionStringBuilder
             {
                 Server = db.host,
                 Port = (uint)db.port,
@@ -22,14 +36,23 @@ namespace ghostline
                 Password = db.password,
                 ConnectionTimeout = 10,
                 SslMode = MySqlSslMode.Preferred
-            }.ConnectionString;
+            }.ConnectionString);
+        }
 
+        // Where the CDR comes from, for the Status tab.
+        internal static string CdrSource(CallsSettings c) =>
+            !string.IsNullOrEmpty(c?.cdrSqlite) ? c.cdrSqlite
+            : c?.cdrDb is { } db ? $"{db.host}:{db.port}"
+            : null;
+
+        private static async Task CallsPollerLoop()
+        {
             HealthStatus.MarkConfigured("cdr");
             while (true)
             {
                 try
                 {
-                    int added = await PollCdrOnce(cs);
+                    int added = await PollCdrOnce();
                     HealthStatus.MarkConnected("cdr");
                     if (added > 0)
                         HealthStatus.MarkActivity("cdr");
@@ -48,37 +71,43 @@ namespace ghostline
         // A CDR row is written at hangup while calldate is the start time. A long call that
         // started before the last one seen shows up later, so the window overlaps one day
         // back and duplicates are dropped by UNIQUE(uniqueid).
-        private static async Task<int> PollCdrOnce(string connectionString)
+        private static async Task<int> PollCdrOnce()
         {
             bool initialized = Store.GetKv(KvInitialized) != null;
             string watermark = Store.GetKv(KvWatermark);
-            DateTime from = watermark != null ? ParseTs(watermark).AddDays(-1) : DateTime.MinValue;
+            DateTime from = watermark != null ? ParseTs(watermark).AddDays(-1) : new DateTime(2000, 1, 1);
 
             var rows = new List<CdrRow>();
-            await using (var conn = new MySqlConnection(connectionString))
+            await using (var conn = CdrConnection())
             {
                 await conn.OpenAsync();
                 await using var cmd = conn.CreateCommand();
+                // SQLite keeps calldate as "yyyy-MM-dd HH:mm:ss" text, which compares in time order; it has no
+                // sequence column, rowid is the insert order there.
                 cmd.CommandText = @"SELECT calldate, uniqueid, src, dst, did, channel, dstchannel, disposition,
                                            duration, billsec, recordingfile
-                                    FROM cdr WHERE calldate >= @from ORDER BY calldate, sequence";
-                cmd.Parameters.AddWithValue("@from", from == DateTime.MinValue ? new DateTime(2000, 1, 1) : from);
+                                    FROM cdr WHERE calldate >= @from ORDER BY calldate, " + (CdrIsSqlite ? "rowid" : "sequence");
+                var p = cmd.CreateParameter();
+                p.ParameterName = "@from";
+                p.Value = CdrIsSqlite ? from.ToString("yyyy-MM-dd HH:mm:ss") : from;
+                cmd.Parameters.Add(p);
                 await using var r = await cmd.ExecuteReaderAsync();
                 while (await r.ReadAsync())
                 {
+                    string Text(int i) => r.IsDBNull(i) ? "" : Convert.ToString(r.GetValue(i), System.Globalization.CultureInfo.InvariantCulture);
                     rows.Add(new CdrRow
                     {
-                        CallDate = r.GetDateTime(0),
-                        UniqueId = r.GetString(1),
-                        Src = r.IsDBNull(2) ? "" : r.GetString(2),
-                        Dst = r.IsDBNull(3) ? "" : r.GetString(3),
-                        Did = r.IsDBNull(4) ? "" : r.GetString(4),
-                        Channel = r.IsDBNull(5) ? "" : r.GetString(5),
-                        DstChannel = r.IsDBNull(6) ? "" : r.GetString(6),
-                        Disposition = r.IsDBNull(7) ? "" : r.GetString(7),
-                        Duration = r.GetInt32(8),
-                        Billsec = r.GetInt32(9),
-                        RecordingFile = r.IsDBNull(10) ? "" : r.GetString(10)
+                        CallDate = r.GetValue(0) is DateTime dt ? dt : ParseTs(Text(0)),
+                        UniqueId = Text(1),
+                        Src = Text(2),
+                        Dst = Text(3),
+                        Did = Text(4),
+                        Channel = Text(5),
+                        DstChannel = Text(6),
+                        Disposition = Text(7),
+                        Duration = int.TryParse(Text(8), out var dur) ? dur : 0,
+                        Billsec = int.TryParse(Text(9), out var bs) ? bs : 0,
+                        RecordingFile = Text(10)
                     });
                 }
             }

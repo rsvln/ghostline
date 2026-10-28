@@ -65,9 +65,19 @@ namespace ghostline
 
     public class CallsSettings
     {
+        // CDR source, one of the two: the FreePBX MySQL database, or a SQLite file that Asterisk writes
+        // with cdr_sqlite3_custom (a directory shared with the PBX). cdr_sqlite wins when both are set.
         public CdrDbSettings cdrDb { get; set; }
-        // PBX recordings directory over HTTP (Apache alias to /var/spool/asterisk/monitor).
+        public string cdrSqlite { get; set; }
+        // Recordings, one of the two: the PBX recordings directory over HTTP (Apache alias to
+        // /var/spool/asterisk/monitor), or that directory itself, shared with the PBX. recordings_dir wins.
         public string recordingsUrl { get; set; }
+        public string recordingsDir { get; set; }
+
+        [YamlIgnore]
+        internal bool CdrConfigured => !string.IsNullOrEmpty(cdrSqlite) || cdrDb != null;
+        [YamlIgnore]
+        internal bool RecordingsConfigured => !string.IsNullOrEmpty(recordingsDir) || !string.IsNullOrEmpty(recordingsUrl);
         public int pollSeconds { get; set; } = 15;
         public TranscribeSettings transcribe { get; set; }
     }

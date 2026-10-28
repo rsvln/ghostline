@@ -547,6 +547,8 @@ namespace ghostline
                 G("channels"),
                 G("calls",
                     F("calls.recordings_url", "text", c?.recordingsUrl),
+                    F("calls.recordings_dir", "text", c?.recordingsDir),
+                    F("calls.cdr_sqlite", "text", c?.cdrSqlite),
                     F("calls.poll_seconds", "number", n(c?.pollSeconds))),
                 G("cdr_db",
                     F("calls.cdr_db.host", "text", c?.cdrDb?.host),

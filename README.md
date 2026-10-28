@@ -293,7 +293,9 @@ from the web interface.
 | Field | Description |
 |---|---|
 | `cdr_db` | MySQL connection to `asteriskcdrdb`; a user with `SELECT` on `cdr` is enough |
+| `cdr_sqlite` | Instead of `cdr_db`: the SQLite file Asterisk writes with `cdr_sqlite3_custom`, in a directory shared with the PBX ([docs/cdr-sqlite.md](docs/cdr-sqlite.md)); wins over `cdr_db` |
 | `recordings_url` | HTTP URL of `/var/spool/asterisk/monitor` on the PBX |
+| `recordings_dir` | Instead of `recordings_url`: that directory itself, shared with the PBX; wins over `recordings_url` |
 | `poll_seconds` | How often the CDR table is polled |
 | `transcribe.url` / `model` / `language` | Transcription service |
 | `transcribe.prompt` | Hint for the speech model: names and terms that are often misrecognized. The contact name of the caller is added automatically |

@@ -3,8 +3,10 @@ using System.Net;
 
 namespace ghostline
 {
-    // Call recordings live on the PBX (/var/spool/asterisk/monitor, covered by its nightly backup)
-    // and are served over HTTP only to the ghostline address. They are not copied here, only fetched on demand.
+    // Call recordings live on the PBX (/var/spool/asterisk/monitor, covered by its nightly backup).
+    // ghostline reads them either over HTTP (calls.recordings_url, served only to the ghostline address)
+    // or from that directory shared with the PBX (calls.recordings_dir). They are not copied here,
+    // only read on demand.
     internal static class Recordings
     {
         private static readonly HttpClient http = new() { Timeout = TimeSpan.FromMinutes(2) };
@@ -14,9 +16,26 @@ namespace ghostline
             Program.settings.calls.recordingsUrl.TrimEnd('/') + "/" +
             string.Join("/", recPath.Split('/').Select(Uri.EscapeDataString));
 
+        private static string Dir => Program.settings.calls.recordingsDir;
+
+        // The file in calls.recordings_dir; null if the path leads out of it (it comes from the CDR).
+        private static string LocalPath(string recPath)
+        {
+            string root = Path.GetFullPath(Dir);
+            string full = Path.GetFullPath(Path.Combine(root, recPath));
+            return full.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar) ? full : null;
+        }
+
         // File size; 0: no file; -1: PBX unavailable (find out later).
         public static async Task<long> HeadSize(string recPath)
         {
+            if (!string.IsNullOrEmpty(Dir))
+            {
+                // A missing directory is a mount that is not there yet, not a missing file.
+                if (!Directory.Exists(Dir)) return -1;
+                var file = LocalPath(recPath) is { } p ? new FileInfo(p) : null;
+                return file?.Exists == true ? file.Length : 0;
+            }
             try
             {
                 using var req = new HttpRequestMessage(HttpMethod.Head, Url(recPath));
@@ -34,6 +53,12 @@ namespace ghostline
         // null: no file. PBX unavailable is an exception, the caller retries later.
         public static async Task<byte[]> Fetch(string recPath)
         {
+            if (!string.IsNullOrEmpty(Dir))
+            {
+                if (!Directory.Exists(Dir)) throw new DirectoryNotFoundException("recordings_dir is not available: " + Dir);
+                string p = LocalPath(recPath);
+                return p != null && File.Exists(p) ? await File.ReadAllBytesAsync(p) : null;
+            }
             using var resp = await http.GetAsync(Url(recPath));
             if (resp.StatusCode == HttpStatusCode.NotFound) return null;
             resp.EnsureSuccessStatusCode();

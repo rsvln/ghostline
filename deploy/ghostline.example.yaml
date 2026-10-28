@@ -58,6 +58,9 @@ channels:
 #     user: ghostline
 #     password: cdr-secret
 #   recordings_url: http://10.0.0.10/ghostline-rec/
+#   # Or, with directories shared with the PBX (these win over the two above):
+#   # cdr_sqlite: /srv/asterisk-cdr/cdr.db     # docs/cdr-sqlite.md
+#   # recordings_dir: /srv/asterisk-rec
 #   poll_seconds: 15
 #   transcribe:
 #     enabled: true

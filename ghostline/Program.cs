@@ -141,9 +141,10 @@ namespace ghostline
             Console.WriteLine("mode: " + (settings.FullMode ? "full" : "sms"));
             if (settings.FullMode)
             {
-                if (settings.calls?.cdrDb == null || string.IsNullOrEmpty(settings.calls.recordingsUrl))
+                if (settings.calls?.CdrConfigured != true || !settings.calls.RecordingsConfigured)
                 {
-                    Console.WriteLine("Config error: mode \"full\" needs calls.cdrDb and calls.recordingsUrl — calls are disabled");
+                    Console.WriteLine("Config error: mode \"full\" needs calls.cdr_db or calls.cdr_sqlite, and calls.recordings_url " +
+                                      "or calls.recordings_dir — calls are disabled");
                 }
                 else
                 {
