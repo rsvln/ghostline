@@ -390,6 +390,10 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 /* Line monitoring in the lines table: registration dot, signal bars */
 .stat-table td .hdot { margin-right: 6px; vertical-align: middle; }
 .stat-table td.muted, .stat-table .muted { color: var(--muted); }
+.pbx-err { color: var(--red); margin: 2px 0; }
+.pbx-file { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin: 6px 0 14px;
+  font-family: 'JetBrains Mono', monospace; font-size: 12px; white-space: pre; overflow-x: auto; }
+#panel-pbx .stat-table td { text-align: left; }
 .sig { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; vertical-align: middle; }
 .sig i { display: block; width: 3px; background: var(--bg3); border-radius: 1px; }
 .sig i:nth-child(1) { height: 25%; } .sig i:nth-child(2) { height: 50%; }

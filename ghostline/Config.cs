@@ -37,6 +37,46 @@ namespace ghostline
         // What to send for calls on this line (mode "full" only).
         // No section: everything on, the line's chats.
         public ChannelCalls calls { get; set; }
+        // The SIP phone of this line (pbx.mode: managed only): the SIM rings it, and it calls out
+        // through the SIM.
+        public LinePhone phone { get; set; }
+    }
+
+    public class LinePhone
+    {
+        public string extension { get; set; }               // "11"; also the SIP user name
+        public string secret { get; set; }                  // generated on the PBX tab
+        public string dial { get; set; } = "ru";            // ru | ru+intl: which numbers it may call
+        public string encryption { get; set; } = "sdes";    // sdes (SRTP) | no
+    }
+
+    // pbx.mode "freepbx" (the default): FreePBX owns the PBX config, ghostline only connects to it.
+    // "managed": ghostline writes the PJSIP and dialplan files of a plain Asterisk (the PBX tab).
+    public class PbxSettings
+    {
+        public string mode { get; set; } = "freepbx";
+        public string asterisk { get; set; }                // gateway id whose AMI reloads the config
+        // The shared directory for the generated files: as ghostline sees it, and as Asterisk sees it
+        // (its pjsip.conf / extensions.conf #include from there).
+        public string confDir { get; set; }
+        public string asteriskDir { get; set; } = "/etc/asterisk/ghostline";
+        public PbxTls tls { get; set; } = new();
+        public int udpPort { get; set; }                    // 0: no plain-UDP transport
+        public string externalAddress { get; set; }         // public name or IP for NAT
+        public List<string> localNets { get; set; } = new();
+        public string recordingsPath { get; set; } = "/var/spool/asterisk/monitor";   // on the Asterisk side
+
+        [YamlIgnore]
+        public bool Managed => string.Equals(mode, "managed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public class PbxTls
+    {
+        // Certificate and key: relative paths are inside conf_dir (then ghostline can read the
+        // certificate and warn before it expires), absolute ones are on the Asterisk side.
+        public string cert { get; set; }
+        public string key { get; set; }
+        public int port { get; set; } = 5061;
     }
 
     public class LineClients
@@ -120,6 +160,7 @@ namespace ghostline
         public CallsSettings calls { get; set; }
         public GoipSettings goip { get; set; } = new();
         public MonitorSettings monitor { get; set; } = new();
+        public PbxSettings pbx { get; set; } = new();
 
         // Before 2026-10-25 "telegram" was a top-level section; such configs are still read. It is
         // moved into clients after parsing (SettingsFile.Parse): a "clients" section further down

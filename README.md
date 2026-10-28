@@ -255,6 +255,8 @@ goip:
 | `logger.file` | Write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log` |
 | `goip.smtp.enabled` / `goip.smtp.port` | Built-in SMTP server for GoIP gateways that deliver SMS by e-mail |
 | `monitor.alert_minutes` | A monitored line without network this long gets a message in its chats/topic, and another when it is back; `0` — no messages. Default `2` |
+| `pbx.mode` | `freepbx` (default): FreePBX owns the PBX, ghostline only connects. `managed`: ghostline writes the PJSIP and dialplan of a plain Asterisk (PBX tab), see [docs/managed-pbx.md](docs/managed-pbx.md) |
+| `pbx.asterisk` / `conf_dir` / `asterisk_dir` / `tls` / `udp_port` / `external_address` / `local_nets` / `recordings_path` | `managed` only: see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
 
 A client is on when its section is there (with a token / url); remove the
 section to turn it off. A top-level `telegram` section of older configs is
@@ -287,6 +289,7 @@ from the web interface.
 | `clients.ntfy.topic` | ntfy topic of the line; empty — the common one |
 | `calls.voice` / `calls.transcript` / `calls.missed` | What to send for calls on this line |
 | `calls.chat_ids` | Telegram chats for this line's calls only; empty — the line's chats |
+| `phone.extension` / `dial` / `encryption` | `pbx.mode: managed` only: the line's SIP phone, see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
 
 `calls` (mode `full`):
 

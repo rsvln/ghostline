@@ -13,7 +13,7 @@ namespace ghostline
         public static readonly Regex NameOk = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.CultureInvariant);
 
         // List keys: a comma-separated value in the form, [a, b] in the YAML.
-        static readonly HashSet<string> ListKeys = new(StringComparer.OrdinalIgnoreCase) { "chat_ids" };
+        static readonly HashSet<string> ListKeys = new(StringComparer.OrdinalIgnoreCase) { "chat_ids", "local_nets" };
 
         // Value at a path: "web.password", "gateways[id=pbx].ami_port", "channels[name=home].calls.voice".
         // A missing key is added (with any missing intermediate sections); a missing list item with
@@ -543,6 +543,18 @@ namespace ghostline
                     F("web.password", "text", s.web?.password)),
                 G("logger", F("logger.file", "checkbox", b(s.logger?.file ?? false))),
                 G("monitor", F("monitor.alert_minutes", "number", (s.monitor?.alertMinutes ?? 2).ToString(CultureInfo.InvariantCulture))),
+                G("pbx",
+                    F("pbx.mode", "select", s.pbx?.mode ?? "freepbx", "freepbx", "managed"),
+                    F("pbx.asterisk", "select", s.pbx?.asterisk ?? "", new[] { "" }.Concat(gatewayIds).ToArray()),
+                    F("pbx.conf_dir", "text", s.pbx?.confDir),
+                    F("pbx.asterisk_dir", "text", s.pbx?.asteriskDir),
+                    F("pbx.tls.cert", "text", s.pbx?.tls?.cert),
+                    F("pbx.tls.key", "text", s.pbx?.tls?.key),
+                    F("pbx.tls.port", "number", n(s.pbx?.tls?.port)),
+                    F("pbx.udp_port", "number", n(s.pbx?.udpPort)),
+                    F("pbx.external_address", "text", s.pbx?.externalAddress),
+                    F("pbx.local_nets", "text", Csv(s.pbx?.localNets)),
+                    F("pbx.recordings_path", "text", s.pbx?.recordingsPath)),
                 G("gateways"),
                 G("channels"),
                 G("calls",
@@ -615,6 +627,11 @@ namespace ghostline
                 F($"{p}.calls.transcript", "checkbox", b(calls.transcript)),
                 F($"{p}.calls.missed", "checkbox", b(calls.missed)),
                 F($"{p}.calls.chat_ids", "text", Csv(calls.chatIds)),
+                // pbx.mode: managed. The secret is not a form field: the PBX tab generates it.
+                F($"{p}.phone.extension", "text", ch.phone?.extension),
+                // Empty for a line without a phone, so saving the form does not add a phone section to it.
+                F($"{p}.phone.dial", "select", ch.phone == null ? "" : ch.phone.dial ?? "ru", new[] { "" }.Concat(PbxConfig.DialSets).ToArray()),
+                F($"{p}.phone.encryption", "select", ch.phone == null ? "" : ch.phone.encryption ?? "sdes", new[] { "" }.Concat(PbxConfig.Encryptions).ToArray()),
             };
         }
 

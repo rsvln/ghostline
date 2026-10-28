@@ -51,7 +51,7 @@ namespace ghostline
                     });
 
                     // The page, at the address of every view (the script picks the view from the address).
-                    foreach (var path in new[] { "/", "/calls", "/sms", "/log", "/status", "/config", "/config/yaml", "/about" })
+                    foreach (var path in new[] { "/", "/calls", "/sms", "/log", "/status", "/pbx", "/config", "/config/yaml", "/about" })
                         app.MapGet(path, () => Results.Content(Localize(Asset("index.html")), "text/html; charset=utf-8"));
                     app.MapGet("/js/app.js", () => Results.Content(Localize(Asset("app.js")), "text/javascript; charset=utf-8"));
                     app.MapGet("/css/app.css", () => Results.Content(Asset("app.css"), "text/css; charset=utf-8"));
@@ -177,8 +177,85 @@ namespace ghostline
                     app.MapGet("/api/mode", () => Results.Ok(new
                     {
                         mode = Program.settings?.FullMode == true ? "full" : "sms",
-                        transcribe = Program.settings?.calls?.transcribe?.enabled == true
+                        transcribe = Program.settings?.calls?.transcribe?.enabled == true,
+                        pbx = Program.settings?.pbx?.Managed == true ? "managed" : "freepbx"
                     }));
+
+                    // --- PBX (pbx.mode: managed) ---
+
+                    app.MapGet("/api/pbx", async () =>
+                    {
+                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { managed = false });
+                        Settings s;
+                        try { s = Program.ReadSettingsFile(); }
+                        catch (Exception ex) { return Results.Ok(new { managed = true, error = SettingsFile.Describe(ex) }); }
+
+                        List<Program.PhoneContact> contacts = null;
+                        string contactsError = null;
+                        try { contacts = await Program.PhoneContacts(s.pbx.asterisk); }
+                        catch (Exception ex) { contactsError = ex.Message; }
+
+                        var lines = (s.channels ?? new()).Where(c => c.phone != null).Select(c => new
+                        {
+                            name = c.name, device = c.line, gateway = c.gateway,
+                            extension = c.phone.extension, dial = c.phone.dial ?? "ru", encryption = c.phone.encryption ?? "sdes",
+                            hasSecret = !string.IsNullOrEmpty(c.phone.secret),
+                            modemContext = PbxConfig.ModemContext(c.line),
+                            contacts = contacts?.Where(x => x.extension == c.phone.extension).ToList()
+                        }).ToList();
+                        var cert = Program.PbxCertificate(s);
+                        return Results.Ok(new
+                        {
+                            managed = true,
+                            asterisk = s.pbx.asterisk,
+                            asteriskConnected = HealthStatus.Find(s.pbx.asterisk)?.Connected == true,
+                            confDir = s.pbx.confDir,
+                            asteriskDir = s.pbx.asteriskDir,
+                            sip = new
+                            {
+                                tlsPort = s.pbx.tls?.port, udpPort = s.pbx.udpPort, s.pbx.externalAddress, s.pbx.localNets,
+                                cert = s.pbx.tls?.cert,
+                                certInfo = cert == null ? null : new { cert.subject, notAfter = cert.notAfter.ToString("yyyy-MM-dd"), cert.daysLeft }
+                            },
+                            lines,
+                            contactsError,
+                            errors = PbxConfig.Validate(s),
+                            security = Program.RecentSecurityEvents.Take(50)
+                        });
+                    });
+
+                    app.MapGet("/api/pbx/preview", () =>
+                    {
+                        try
+                        {
+                            var (errors, files) = Program.PreviewPbx();
+                            // Secrets are not shown, not even here.
+                            var masked = files.ToDictionary(kv => kv.Key,
+                                kv => System.Text.RegularExpressions.Regex.Replace(kv.Value, @"(?m)^password=.*$", "password=********"));
+                            return Results.Ok(new { ok = true, errors, files = masked });
+                        }
+                        catch (Exception ex) { return Results.Ok(new { ok = false, errors = new[] { SettingsFile.Describe(ex) } }); }
+                    });
+
+                    app.MapPost("/api/pbx/apply", async () =>
+                    {
+                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { ok = false, errors = new[] { "pbx.mode is not managed" } });
+                        return Results.Ok(await Program.ApplyPbx());
+                    });
+
+                    app.MapPost("/api/pbx/secret", async (HttpRequest req) =>
+                    {
+                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { ok = false, error = "pbx.mode is not managed" });
+                        var data = await ReadJson<SecretPayload>(req);
+                        try
+                        {
+                            string secret = Program.NewPhoneSecret(data?.line);
+                            return secret == null
+                                ? Results.Ok(new { ok = false, error = "the line has no phone.extension" })
+                                : Results.Ok(new { ok = true, secret });
+                        }
+                        catch (Exception ex) { return Results.Ok(new { ok = false, error = ex.Message }); }
+                    });
 
                     app.MapGet("/api/calls/list", (int? limit, string? channel, string? direction, bool? missed,
                                                    bool? rec, string? q, string? from, string? to) =>
@@ -437,5 +514,6 @@ namespace ghostline
         record ConfigPayload(string content, bool restart = false);
         record SettingsPayload(Dictionary<string, string> fields, string[] remove, bool restart = false, string[] add = null);
         record SendPayload(string channel, string number, string text);
+        record SecretPayload(string line);
     }
 }

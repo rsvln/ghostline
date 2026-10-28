@@ -68,10 +68,19 @@ namespace ghostline
 
             string dbPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(fs)), "ghostline.db");
             Store.Init(dbPath);
+            ConfigPath = fs;
             WebUi.Start(fs);
 
             settings.gateways ??= new List<Gateway>();
             settings.channels ??= new List<Channel>();
+            settings.pbx ??= new PbxSettings();
+
+            // pbx.mode: managed — ghostline writes the Asterisk config (PBX tab); otherwise FreePBX owns it.
+            Console.WriteLine("pbx: " + (settings.pbx.Managed ? "managed" : "freepbx"));
+            if (settings.pbx.Managed)
+                Task.Run(() => PbxCertWatchLoop());
+            else if (settings.channels.Any(c => c.phone != null))
+                Console.WriteLine("Config warning: channels[].phone is used only with pbx.mode: managed, ignored");
 
             // Inconsistent config: a channel refers to a gateway that is not in gateways[].
             // Nothing breaks loudly (the channel simply never fires), so warn explicitly

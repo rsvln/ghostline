@@ -138,9 +138,11 @@ namespace ghostline
 
         private static void ProcessAmiEvent(string eventBlock, Gateway gw)
         {
+            if (HandleAmiReply(eventBlock))
+                return;
             var evt = ParseAmiEvent(eventBlock);
 
-            if (HandleRadioEvent(evt, gw))
+            if (HandleRadioEvent(evt, gw) || HandleSecurityEvent(evt, gw))
                 return;
             if (Modems.For(gw.type) is { } modem && evt.GetValueOrDefault("Event") == modem.NewSmsEvent)
             {
