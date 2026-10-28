@@ -60,6 +60,15 @@ namespace ghostline
                     Modems.For(s.gateways?.FirstOrDefault(g => g.id == ch.gateway)?.type)?.Tech, ch.phone))
                 .ToList();
 
+        // The line's modem is on the managed Asterisk: its gateway has the address of pbx.asterisk. A line
+        // on another PBX (FreePBX during a move) cannot get a phone here.
+        public static bool OnManagedAsterisk(Settings s, Channel ch)
+        {
+            var host = s.gateways?.FirstOrDefault(g => g.id == s.pbx?.asterisk);
+            var gw = s.gateways?.FirstOrDefault(g => g.id == ch.gateway);
+            return host != null && gw != null && string.Equals(gw.ip, host.ip, StringComparison.OrdinalIgnoreCase);
+        }
+
         // Everything that would make a broken or unsafe config; empty: fine to generate.
         public static List<string> Validate(Settings s)
         {
@@ -88,6 +97,8 @@ namespace ghostline
             {
                 string at = $"line {l.Name}: ";
                 if (l.Tech == null) errors.Add(at + "its gateway is not a quectel or dongle modem");
+                else if (!OnManagedAsterisk(s, s.channels.First(c => c.name == l.Name)))
+                    errors.Add(at + "its modem is on another PBX (the gateway's address differs from pbx.asterisk)");
                 if (!DeviceOk.IsMatch(l.Device ?? "")) errors.Add(at + "line (the device name) is empty or has odd characters");
                 if (!ExtensionOk.IsMatch(l.Phone.extension)) errors.Add(at + "phone.extension must be 2-6 digits");
                 if (!SecretOk.IsMatch(l.Phone.secret ?? "")) errors.Add(at + "no phone secret yet (generate it on the PBX tab)");

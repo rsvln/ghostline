@@ -130,6 +130,79 @@ namespace ghostline
             return secret;
         }
 
+        // ---- Editing on the PBX tab ----------------------------------------------------------------------
+
+        internal record PbxLineEdit(string line, string extension, string dial, string encryption);
+        internal record PbxSipEdit(int? tlsPort, int? udpPort, string externalAddress, string localNets, string cert, string key);
+        internal record PbxEdit(PbxSipEdit sip, List<PbxLineEdit> lines, bool dryRun);
+        internal record PbxSaveResult(bool ok, List<string> errors, Dictionary<string, string> secrets, SortedDictionary<string, string> files);
+
+        private static readonly object _pbxSaveLock = new();
+
+        // Writes the PBX tab's changes into the config (comments kept, the old file goes to .bak). An empty
+        // extension removes the line's phone; a new phone gets a secret, returned once. With dryRun nothing
+        // is written and the files are returned as they would be generated.
+        internal static PbxSaveResult SavePbx(PbxEdit e)
+        {
+            lock (_pbxSaveLock)
+            {
+                string yaml = File.ReadAllText(ConfigPath);
+                var before = SettingsFile.Parse(yaml);
+                var errors = new List<string>();
+                var secrets = new Dictionary<string, string>();
+
+                if (e?.sip is { } sip)
+                {
+                    if (sip.tlsPort != null) yaml = ConfigYaml.Set(yaml, "pbx.tls.port", sip.tlsPort.ToString());
+                    if (sip.udpPort != null) yaml = ConfigYaml.Set(yaml, "pbx.udp_port", sip.udpPort.ToString());
+                    if (sip.externalAddress != null) yaml = ConfigYaml.Set(yaml, "pbx.external_address", sip.externalAddress.Trim());
+                    if (sip.localNets != null) yaml = ConfigYaml.Set(yaml, "pbx.local_nets", sip.localNets.Trim());
+                    if (sip.cert != null) yaml = ConfigYaml.Set(yaml, "pbx.tls.cert", sip.cert.Trim());
+                    if (sip.key != null) yaml = ConfigYaml.Set(yaml, "pbx.tls.key", sip.key.Trim());
+                }
+
+                foreach (var l in e?.lines ?? new())
+                {
+                    var ch = before.channels?.FirstOrDefault(c => c.name == l.line);
+                    if (ch == null || !ConfigYaml.NameOk.IsMatch(l.line ?? ""))
+                    {
+                        errors.Add($"no line '{l.line}'");
+                        continue;
+                    }
+                    string at = $"channels[name={l.line}].phone";
+                    string ext = l.extension?.Trim() ?? "";
+                    if (ext == "")
+                    {
+                        if (ch.phone != null) yaml = ConfigYaml.RemoveSection(yaml, at);
+                        continue;
+                    }
+                    yaml = ConfigYaml.Set(yaml, at + ".extension", ext);
+                    if (l.dial != null) yaml = ConfigYaml.Set(yaml, at + ".dial", l.dial);
+                    if (l.encryption != null) yaml = ConfigYaml.Set(yaml, at + ".encryption", l.encryption);
+                    if (string.IsNullOrEmpty(ch.phone?.secret))
+                    {
+                        secrets[l.line] = PbxConfig.NewSecret();
+                        yaml = ConfigYaml.Set(yaml, at + ".secret", secrets[l.line]);
+                    }
+                }
+                if (errors.Count > 0) return new(false, errors, new(), null);
+
+                Settings s;
+                try { s = SettingsFile.Parse(yaml); }
+                catch (Exception ex) { return new(false, new() { SettingsFile.Describe(ex) }, new(), null); }
+                errors = PbxConfig.Validate(s);
+                if (errors.Count > 0) return new(false, errors, new(), null);
+                if (e.dryRun) return new(true, errors, new(), PbxConfig.Generate(s));
+
+                File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
+                // In place, not via a temp file: the config keeps its mode (it holds secrets).
+                File.WriteAllText(ConfigPath, yaml);
+                Console.WriteLine("PBX: settings saved from the PBX tab"
+                    + (secrets.Count > 0 ? " (new phone secret for " + string.Join(", ", secrets.Keys) + ")" : ""));
+                return new(true, errors, secrets, null);
+            }
+        }
+
         // ---- Registrations -------------------------------------------------------------------------------
 
         internal record PhoneContact(string extension, string uri, string status, double? rttMs);

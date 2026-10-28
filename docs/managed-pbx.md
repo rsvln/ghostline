@@ -9,8 +9,20 @@ Asterisk itself, from its own lines:
 - the phone calls out through that SIM;
 - calls are recorded and land in the call journal as with FreePBX.
 
-The PBX tab shows the phones and their registration, failed SIP attempts and
-the TLS certificate. It previews the files and applies them.
+The PBX tab is where this is set up:
+
+- per modem line: the phone's extension (empty: no phone), dial set and media
+  encryption, its registration and a "New secret" button. A new phone gets a
+  secret on Apply; it is shown once;
+- the SIP transport: TLS and UDP ports, external address, local networks,
+  certificate and key;
+- failed SIP attempts and the TLS certificate's expiry.
+
+Apply saves the changes into ghostline.yaml (the previous copy goes to `.bak`),
+writes the files and reloads Asterisk; no restart is needed. Preview shows the
+files with the unsaved changes. A line whose modem is on another PBX (its
+gateway's address differs from `pbx.asterisk`) cannot get a phone; this is the
+case for lines still on FreePBX during a move.
 
 Everything else (SMS, Telegram, ntfy, the call journal, transcription,
 monitoring) works the same in both modes. To go back, set `pbx.mode: freepbx`.

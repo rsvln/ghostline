@@ -557,13 +557,21 @@ async function loadStatus() {
 }
 
 // ---- PBX (pbx.mode: managed) ----
-// ghostline writes the PJSIP and dialplan files of the plain Asterisk; this tab shows the phones of the
-// lines, previews the files and applies them. The settings themselves are edited on the Config tab.
+// ghostline writes the PJSIP and dialplan files of the plain Asterisk. On this tab: each modem line's
+// phone (extension, dial set, media encryption, secret) and the SIP transport. Apply saves the changes
+// into the config, writes the files and reloads Asterisk; Preview shows the files with the changes.
+
+let pbxData = null;
+
+function pbxOptions(values, current) {
+  return values.map(v => `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`).join('');
+}
 
 async function loadPbx() {
   let d;
   try { d = await (await fetch('/api/pbx')).json(); } catch { return; }
   if (!d.managed) return;
+  pbxData = d;
   const errs = (d.error ? [d.error] : []).concat(d.errors || []);
   document.getElementById('pbx-errors').innerHTML = errs.length
     ? `<h3>${esc(t('web.pbx.problems'))}</h3>` + errs.map(e => `<div class="pbx-err">${esc(e)}</div>`).join('')
@@ -571,28 +579,47 @@ async function loadPbx() {
 
   const rows = (d.lines || []).map(l => {
     const c = (l.contacts || [])[0];
-    const reg = !d.asteriskConnected ? `<span class="muted">${esc(t('web.pbx.no_ami'))}</span>`
+    const reg = !l.managedHere ? `<span class="muted">${esc(t('web.pbx.other_pbx', l.gatewayIp || l.gateway))}</span>`
+      : !l.hasPhone ? ''
+      : !d.asteriskConnected ? `<span class="muted">${esc(t('web.pbx.no_ami'))}</span>`
       : c ? `<span class="hdot ${/avail|reachable/i.test(c.status) ? 'ok' : 'err'}"></span>${esc(c.status)}`
             + (c.rttMs != null ? ` <span class="muted">${esc(c.rttMs.toFixed(0))} ms</span>` : '')
       : `<span class="hdot err"></span>${esc(t('web.pbx.not_registered'))}`;
-    return `<tr><td>${esc(l.name)}</td><td>${esc(l.extension)}</td><td>${esc(l.device)}</td>
-      <td title="${esc(c ? c.uri : '')}">${reg}</td><td>${esc(l.dial)}</td><td>${esc(l.encryption)}</td>
-      <td>${l.hasSecret ? '' : `<span class="pbx-err">${esc(t('web.pbx.no_secret'))}</span> `}<button class="btn" data-line="${esc(l.name)}" onclick="newSecret(this.dataset.line)">${esc(t('web.pbx.new_secret'))}</button></td>
-      <td class="muted">${esc(l.modemContext)}</td></tr>`;
+    const secret = !l.hasPhone ? ''
+      : (l.hasSecret ? '' : `<span class="pbx-err">${esc(t('web.pbx.no_secret'))}</span> `)
+        + `<button class="btn" data-line="${esc(l.name)}" onclick="newSecret(this.dataset.line)">${esc(t('web.pbx.new_secret'))}</button>`;
+    const off = l.managedHere ? '' : ' disabled';
+    return `<tr data-line="${esc(l.name)}"><td>${esc(l.name)}</td><td>${esc(l.device)}</td>
+      <td><input class="pbx-in pbx-ext" data-k="extension" value="${esc(l.extension)}" data-orig="${esc(l.extension)}"
+        placeholder="${esc(t('web.pbx.no_phone'))}" inputmode="numeric" maxlength="6"${off}></td>
+      <td><select class="pbx-in" data-k="dial" data-orig="${esc(l.dial)}">${pbxOptions(['ru', 'ru+intl'], l.dial)}</select></td>
+      <td><select class="pbx-in" data-k="encryption" data-orig="${esc(l.encryption)}">${pbxOptions(['sdes', 'no'], l.encryption)}</select></td>
+      <td title="${esc(c ? c.uri : '')}">${reg}</td>
+      <td>${secret}</td>
+      <td class="muted">${l.hasPhone ? esc(l.modemContext) : ''}</td></tr>`;
   }).join('');
-  document.getElementById('pbx-lines').innerHTML = `<thead><tr><th>${esc(t('web.status.col.line'))}</th><th>${esc(t('web.pbx.col.ext'))}</th>`
-    + `<th>${esc(t('web.pbx.col.device'))}</th><th>${esc(t('web.pbx.col.reg'))}</th><th>${esc(t('web.pbx.col.dial'))}</th>`
-    + `<th>${esc(t('web.pbx.col.srtp'))}</th><th>${esc(t('web.pbx.col.secret'))}</th><th>${esc(t('web.pbx.col.modem'))}</th></tr></thead>`
+  document.getElementById('pbx-lines').innerHTML = `<thead><tr><th>${esc(t('web.status.col.line'))}</th>`
+    + `<th>${esc(t('web.pbx.col.device'))}</th><th>${esc(t('web.pbx.col.ext'))}</th><th>${esc(t('web.pbx.col.dial'))}</th>`
+    + `<th>${esc(t('web.pbx.col.srtp'))}</th><th>${esc(t('web.pbx.col.reg'))}</th><th>${esc(t('web.pbx.col.secret'))}</th>`
+    + `<th>${esc(t('web.pbx.col.modem'))}</th></tr></thead>`
     + `<tbody>${rows || `<tr><td colspan="8" class="muted">${esc(t('web.pbx.no_phones'))}</td></tr>`}</tbody>`;
 
   const s = d.sip || {};
+  const field = (k, label, value, attrs = '') =>
+    `<label>${esc(label)}<input class="pbx-in" data-k="${k}" value="${esc(value ?? '')}" data-orig="${esc(value ?? '')}" ${attrs}></label>`;
+  document.getElementById('pbx-sip-form').innerHTML =
+    field('tlsPort', t('web.pbx.tls_port'), s.tlsPort, 'inputmode="numeric"')
+    + field('udpPort', t('web.pbx.udp_port'), s.udpPort || 0, `inputmode="numeric" title="${esc(t('web.pbx.udp_hint'))}"`)
+    + field('externalAddress', t('web.pbx.external'), s.externalAddress, 'placeholder="sip.example.org"')
+    + field('localNets', t('web.pbx.local_nets'), (s.localNets || []).join(', '), 'placeholder="192.168.0.0/16, 10.0.0.0/8"')
+    + field('cert', t('web.pbx.cert_path'), s.cert, 'placeholder="keys/sip.crt"')
+    + field('key', t('web.pbx.key_path'), s.key, 'placeholder="keys/sip.key"');
+
   const cert = s.certInfo
     ? [[t('web.pbx.cert.subject'), s.certInfo.subject], [t('web.pbx.cert.until'), `${s.certInfo.notAfter} (${t('web.pbx.cert.days', s.certInfo.daysLeft)})`]]
     : [[t('web.pbx.cert.file'), s.cert || '-']];
   document.getElementById('pbx-sip').innerHTML =
-    queueCard(t('web.pbx.transport'), [[t('web.pbx.tls_port'), s.tlsPort || '-'], [t('web.pbx.udp_port'), s.udpPort || t('web.off')],
-      [t('web.pbx.external'), s.externalAddress || '-'], [t('web.pbx.local_nets'), (s.localNets || []).join(', ') || '-']])
-    + queueCard(t('web.pbx.cert'), cert)
+    queueCard(t('web.pbx.cert'), cert)
     + queueCard('Asterisk', [[t('web.pbx.gateway'), (d.asterisk || '-') + ' · ' + t(d.asteriskConnected ? 'web.status.state.ok' : 'web.status.state.err')],
       [t('web.pbx.conf_dir'), d.confDir || '-'], [t('web.pbx.asterisk_dir'), d.asteriskDir || '-']]);
 
@@ -601,6 +628,52 @@ async function loadPbx() {
   document.getElementById('pbx-security').innerHTML = `<thead><tr><th>${esc(t('web.pbx.sec.time'))}</th><th>${esc(t('web.pbx.sec.address'))}</th>`
     + `<th>${esc(t('web.pbx.sec.account'))}</th><th>${esc(t('web.pbx.sec.event'))}</th></tr></thead>`
     + `<tbody>${sec || `<tr><td colspan="4" class="muted">${esc(t('web.pbx.sec.none'))}</td></tr>`}</tbody>`;
+
+  document.querySelectorAll('#panel-pbx .pbx-in').forEach(el => {
+    el.addEventListener('input', pbxMarkChanged);
+    el.addEventListener('change', pbxMarkChanged);
+  });
+  pbxMarkChanged();
+}
+
+// Changed fields are outlined; a line without an extension has no phone, so its dial and media are off.
+function pbxMarkChanged() {
+  document.querySelectorAll('#panel-pbx .pbx-in').forEach(el => el.classList.toggle('changed', el.value !== el.dataset.orig));
+  document.querySelectorAll('#pbx-lines tr[data-line]').forEach(tr => {
+    const none = tr.querySelector('.pbx-ext').value.trim() === '' || tr.querySelector('.pbx-ext').disabled;
+    tr.querySelectorAll('select.pbx-in').forEach(el => { el.disabled = none; });
+  });
+  document.getElementById('pbx-dirty').textContent =
+    document.querySelector('#panel-pbx .pbx-in.changed') ? t('web.pbx.unsaved') : '';
+}
+
+// The changes on the tab, or null when there are none.
+function pbxEdits() {
+  if (!document.querySelector('#panel-pbx .pbx-in.changed')) return null;
+  const lines = [...document.querySelectorAll('#pbx-lines tr[data-line]')]
+    .filter(tr => tr.querySelector('.pbx-in.changed'))
+    .map(tr => {
+      const v = k => tr.querySelector(`[data-k="${k}"]`).value;
+      return { line: tr.dataset.line, extension: v('extension').trim(), dial: v('dial'), encryption: v('encryption') };
+    });
+  const f = k => document.querySelector(`#pbx-sip-form [data-k="${k}"]`);
+  const changed = k => f(k).classList.contains('changed');
+  const port = k => changed(k) ? parseInt(f(k).value || '0', 10) : null;
+  const text = k => changed(k) ? f(k).value : null;
+  const sip = { tlsPort: port('tlsPort'), udpPort: port('udpPort'), externalAddress: text('externalAddress'),
+    localNets: text('localNets'), cert: text('cert'), key: text('key') };
+  return { sip, lines };
+}
+
+// A phone that is removed: confirm, its secret is gone with it.
+function pbxConfirmRemovals(edits) {
+  const removed = edits.lines.filter(l => l.extension === '' && pbxData.lines.find(x => x.name === l.line)?.hasPhone);
+  return !removed.length || confirm(t('web.pbx.remove_confirm', removed.map(l => l.line).join(', ')));
+}
+
+function pbxShowErrors(errors) {
+  document.getElementById('pbx-output').innerHTML =
+    `<h3>${esc(t('web.pbx.problems'))}</h3>` + (errors || []).map(e => `<div class="pbx-err">${esc(e)}</div>`).join('');
 }
 
 async function newSecret(line) {
@@ -613,23 +686,46 @@ async function newSecret(line) {
 }
 
 async function previewPbx() {
+  const edits = pbxEdits();
   let d;
-  try { d = await (await fetch('/api/pbx/preview')).json(); } catch { return; }
+  try {
+    d = edits
+      ? await (await fetch('/api/pbx/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...edits, dryRun: true }) })).json()
+      : await (await fetch('/api/pbx/preview')).json();
+  } catch { return; }
   const errs = (d.errors || []).map(e => `<div class="pbx-err">${esc(e)}</div>`).join('');
   const files = Object.entries(d.files || {}).map(([name, text]) =>
     `<h3>${esc(name)}</h3><pre class="pbx-file">${esc(text)}</pre>`).join('');
   document.getElementById('pbx-output').innerHTML = errs + (files || `<div class="muted">${esc(t('web.pbx.nothing'))}</div>`);
 }
 
+// Saves the changes (if any) into the config, then writes the files and reloads Asterisk.
 async function applyPbx() {
+  const edits = pbxEdits();
+  if (edits && !pbxConfirmRemovals(edits)) return;
   setBusy(t('web.pbx.applying'));
   let d;
-  try { d = await (await fetch('/api/pbx/apply', { method: 'POST' })).json(); }
-  catch (e) { setBusy(); showToast(t('web.network_error', e.message), 'err'); return; }
+  try {
+    if (edits) {
+      const r = await (await fetch('/api/pbx/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(edits) })).json();
+      if (!r.ok) {
+        setBusy();
+        showToast(t('web.pbx.apply_failed'), 'err');
+        pbxShowErrors(r.errors);
+        return;
+      }
+      // A new phone's secret: shown once, afterwards it is only in the config.
+      for (const [line, secret] of Object.entries(r.secrets || {})) prompt(t('web.pbx.secret_shown', line), secret);
+    }
+    d = await (await fetch('/api/pbx/apply', { method: 'POST' })).json();
+  } catch (e) { setBusy(); showToast(t('web.network_error', e.message), 'err'); return; }
   setBusy();
   if (!d.ok) {
     showToast(t('web.pbx.apply_failed'), 'err');
-    document.getElementById('pbx-output').innerHTML = (d.errors || []).map(e => `<div class="pbx-err">${esc(e)}</div>`).join('');
+    pbxShowErrors(d.errors);
+    loadPbx();
     return;
   }
   showToast(d.changed.length ? t('web.pbx.applied', d.changed.join(', ')) : t('web.pbx.unchanged'), 'ok');

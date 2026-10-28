@@ -195,13 +195,21 @@ namespace ghostline
                         try { contacts = await Program.PhoneContacts(s.pbx.asterisk); }
                         catch (Exception ex) { contactsError = ex.Message; }
 
-                        var lines = (s.channels ?? new()).Where(c => c.phone != null).Select(c => new
+                        // Every modem line, so a phone can be added to one that has none.
+                        var lines = (s.channels ?? new())
+                            .Where(c => Modems.For(s.gateways?.FirstOrDefault(g => g.id == c.gateway)?.type) != null)
+                            .Select(c => new
                         {
                             name = c.name, device = c.line, gateway = c.gateway,
-                            extension = c.phone.extension, dial = c.phone.dial ?? "ru", encryption = c.phone.encryption ?? "sdes",
-                            hasSecret = !string.IsNullOrEmpty(c.phone.secret),
+                            hasPhone = !string.IsNullOrWhiteSpace(c.phone?.extension),
+                            managedHere = PbxConfig.OnManagedAsterisk(s, c),
+                            gatewayIp = s.gateways?.FirstOrDefault(g => g.id == c.gateway)?.ip,
+                            extension = c.phone?.extension ?? "",
+                            dial = string.IsNullOrEmpty(c.phone?.dial) ? "ru" : c.phone.dial,
+                            encryption = string.IsNullOrEmpty(c.phone?.encryption) ? "sdes" : c.phone.encryption,
+                            hasSecret = !string.IsNullOrEmpty(c.phone?.secret),
                             modemContext = PbxConfig.ModemContext(c.line),
-                            contacts = contacts?.Where(x => x.extension == c.phone.extension).ToList()
+                            contacts = contacts?.Where(x => x.extension == c.phone?.extension).ToList()
                         }).ToList();
                         var cert = Program.PbxCertificate(s);
                         return Results.Ok(new
@@ -214,7 +222,7 @@ namespace ghostline
                             sip = new
                             {
                                 tlsPort = s.pbx.tls?.port, udpPort = s.pbx.udpPort, s.pbx.externalAddress, s.pbx.localNets,
-                                cert = s.pbx.tls?.cert,
+                                cert = s.pbx.tls?.cert, key = s.pbx.tls?.key,
                                 certInfo = cert == null ? null : new { cert.subject, notAfter = cert.notAfter.ToString("yyyy-MM-dd"), cert.daysLeft }
                             },
                             lines,
@@ -233,6 +241,20 @@ namespace ghostline
                             var masked = files.ToDictionary(kv => kv.Key,
                                 kv => System.Text.RegularExpressions.Regex.Replace(kv.Value, @"(?m)^password=.*$", "password=********"));
                             return Results.Ok(new { ok = true, errors, files = masked });
+                        }
+                        catch (Exception ex) { return Results.Ok(new { ok = false, errors = new[] { SettingsFile.Describe(ex) } }); }
+                    });
+
+                    app.MapPost("/api/pbx/save", async (HttpRequest req) =>
+                    {
+                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { ok = false, errors = new[] { "pbx.mode is not managed" } });
+                        var data = await ReadJson<Program.PbxEdit>(req);
+                        try
+                        {
+                            var r = Program.SavePbx(data);
+                            var files = r.files?.ToDictionary(kv => kv.Key,
+                                kv => System.Text.RegularExpressions.Regex.Replace(kv.Value, @"(?m)^password=.*$", "password=********"));
+                            return Results.Ok(new { r.ok, r.errors, r.secrets, files });
                         }
                         catch (Exception ex) { return Results.Ok(new { ok = false, errors = new[] { SettingsFile.Describe(ex) } }); }
                     });

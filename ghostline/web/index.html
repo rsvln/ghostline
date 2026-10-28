@@ -124,6 +124,7 @@
       <button class="btn" onclick="loadPbx()">{{web.refresh}}</button>
       <button class="btn" onclick="previewPbx()">{{web.pbx.preview}}</button>
       <button class="btn primary" onclick="applyPbx()">{{web.pbx.apply}}</button>
+      <span class="pbx-dirty" id="pbx-dirty"></span>
       <span class="config-hint">{{web.pbx.hint}}</span>
     </div>
     <div class="scroll">
@@ -134,6 +135,7 @@
       </div>
       <div class="section">
         <h3>{{web.pbx.sip}}</h3>
+        <div class="settings-grid pbx-sip-form" id="pbx-sip-form"></div>
         <div class="status-grid" id="pbx-sip"></div>
       </div>
       <div class="section">
