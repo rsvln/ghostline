@@ -596,13 +596,17 @@ async function loadPbx() {
       <td><select class="pbx-in" data-k="encryption" data-orig="${esc(l.encryption)}">${pbxOptions(['sdes', 'no'], l.encryption)}</select></td>
       <td title="${esc(c ? c.uri : '')}">${reg}</td>
       <td>${secret}</td>
-      <td class="muted">${l.hasPhone ? esc(l.modemContext) : ''}</td></tr>`;
+      <td class="muted">${l.hasPhone ? esc(l.modemContext) : ''}</td>
+      <td>${l.managedHere ? `<button class="btn" data-line="${esc(l.name)}" onclick="removePbxLine(this.dataset.line)"
+        title="${esc(t('web.pbx.remove_line'))}">✕</button>` : ''}</td></tr>`;
   }).join('');
   document.getElementById('pbx-lines').innerHTML = `<thead><tr><th>${esc(t('web.status.col.line'))}</th>`
     + `<th>${esc(t('web.pbx.col.device'))}</th><th>${esc(t('web.pbx.col.ext'))}</th><th>${esc(t('web.pbx.col.dial'))}</th>`
     + `<th>${esc(t('web.pbx.col.srtp'))}</th><th>${esc(t('web.pbx.col.reg'))}</th><th>${esc(t('web.pbx.col.secret'))}</th>`
-    + `<th>${esc(t('web.pbx.col.modem'))}</th></tr></thead>`
-    + `<tbody>${rows || `<tr><td colspan="8" class="muted">${esc(t('web.pbx.no_phones'))}</td></tr>`}</tbody>`;
+    + `<th>${esc(t('web.pbx.col.modem'))}</th><th></th></tr></thead>`
+    + `<tbody>${rows || `<tr><td colspan="9" class="muted">${esc(t('web.pbx.no_phones'))}</td></tr>`}</tbody>`;
+
+  renderPbxAdd(false);
 
   const s = d.sip || {};
   const field = (k, label, value, attrs = '') =>
@@ -634,6 +638,64 @@ async function loadPbx() {
     el.addEventListener('change', pbxMarkChanged);
   });
   pbxMarkChanged();
+}
+
+// "+ Line": the modem is chosen from those the managed Asterisk knows and no line uses yet.
+function renderPbxAdd(open) {
+  const host = document.getElementById('pbx-add');
+  if (!open) {
+    host.innerHTML = `<button class="btn" onclick="renderPbxAdd(true)">${esc(t('web.pbx.add_line'))}</button>`;
+    return;
+  }
+  const free = (pbxData.modems || []).filter(m => !m.used);
+  if (!free.length) {
+    host.innerHTML = `<span class="muted">${esc(t('web.pbx.no_free_modems'))}</span>
+      <button class="btn" onclick="renderPbxAdd(false)">${esc(t('web.cancel'))}</button>`;
+    return;
+  }
+  const opts = free.map(m => `<option value="${esc(m.gateway + '|' + m.device)}">${esc(
+    [m.device, m.model, m.provider, m.state].filter(Boolean).join(' · '))}</option>`).join('');
+  host.innerHTML = `<div class="settings-grid pbx-add-form">
+    <label>${esc(t('web.pbx.add.name'))}<input id="pbx-add-name" maxlength="64" spellcheck="false" placeholder="line4"></label>
+    <label>${esc(t('web.pbx.add.modem'))}<select id="pbx-add-modem">${opts}</select></label>
+    <label>${esc(t('web.pbx.col.ext'))}<input id="pbx-add-ext" inputmode="numeric" maxlength="6" placeholder="${esc(t('web.pbx.no_phone'))}"></label>
+    <label>${esc(t('web.pbx.col.dial'))}<select id="pbx-add-dial">${pbxOptions(['ru', 'ru+intl'], 'ru')}</select></label>
+    <label>${esc(t('web.pbx.col.srtp'))}<select id="pbx-add-enc">${pbxOptions(['sdes', 'no'], 'sdes')}</select></label>
+  </div>
+  <div class="pbx-add-buttons">
+    <button class="btn primary" onclick="addPbxLine()">${esc(t('web.pbx.add.submit'))}</button>
+    <button class="btn" onclick="renderPbxAdd(false)">${esc(t('web.cancel'))}</button>
+    <span class="config-hint">${esc(t('web.pbx.add.hint'))}</span>
+  </div>`;
+  document.getElementById('pbx-add-name').focus();
+}
+
+async function addPbxLine() {
+  const [gateway, device] = document.getElementById('pbx-add-modem').value.split('|');
+  const body = {
+    action: 'add', name: document.getElementById('pbx-add-name').value.trim(), gateway, device,
+    extension: document.getElementById('pbx-add-ext').value.trim(),
+    dial: document.getElementById('pbx-add-dial').value, encryption: document.getElementById('pbx-add-enc').value
+  };
+  await pbxLineRequest(body, t('web.pbx.add_confirm', body.name, device));
+}
+
+async function removePbxLine(line) {
+  await pbxLineRequest({ action: 'remove', name: line }, t('web.pbx.remove_line_confirm', line));
+}
+
+// The line is saved, the files applied, then the service restarts and the page reloads.
+async function pbxLineRequest(body, question) {
+  if (pbxEdits() && !confirm(t('web.pbx.discard_edits'))) return;
+  if (!confirm(question)) return;
+  setBusy(t('web.pbx.applying'));
+  const r = await configRequest('/api/pbx/line', body);
+  setBusy(null);
+  if (!r) return;
+  // A new phone's secret: shown once, afterwards it is only in the config.
+  if (r.secret) prompt(t('web.pbx.secret_shown', body.name), r.secret);
+  if (r.applyErrors?.length) alert(r.applyErrors.join('\n'));
+  await waitForRestart();
 }
 
 // Changed fields are outlined; a line without an extension has no phone, so its dial and media are off.

@@ -212,9 +212,18 @@ namespace ghostline
                             contacts = contacts?.Where(x => x.extension == c.phone?.extension).ToList()
                         }).ToList();
                         var cert = Program.PbxCertificate(s);
+                        // Modems the managed Asterisk knows, for choosing one when a line is added.
+                        var used = (s.channels ?? new()).Select(c => (s.gateways?.FirstOrDefault(g => g.id == c.gateway)?.type, c.line)).ToHashSet();
+                        List<Program.AsteriskModem> modems = new();
+                        try { modems = await Program.AsteriskModems(s); } catch { }
                         return Results.Ok(new
                         {
                             managed = true,
+                            modems = modems.Select(m => new
+                            {
+                                m.gateway, m.device, m.state, m.provider, m.model,
+                                used = used.Contains((s.gateways.First(g => g.id == m.gateway).type, m.device))
+                            }),
                             asterisk = s.pbx.asterisk,
                             asteriskConnected = HealthStatus.Find(s.pbx.asterisk)?.Connected == true,
                             confDir = s.pbx.confDir,
@@ -257,6 +266,26 @@ namespace ghostline
                             return Results.Ok(new { r.ok, r.errors, r.secrets, files });
                         }
                         catch (Exception ex) { return Results.Ok(new { ok = false, errors = new[] { SettingsFile.Describe(ex) } }); }
+                    });
+
+                    // A line added or removed on the PBX tab: saved, the files applied, then the service
+                    // restarts (the lines are read at start).
+                    app.MapPost("/api/pbx/line", async (HttpRequest req) =>
+                    {
+                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { ok = false, error = "pbx.mode is not managed" });
+                        var data = await ReadJson<PbxLinePayload>(req);
+                        Program.PbxLineResult r;
+                        try
+                        {
+                            r = data?.action == "remove" ? Program.RemoveLine(data.name)
+                                : data?.action == "add" ? Program.AddLine(new(data.name, data.gateway, data.device, data.extension, data.dial, data.encryption))
+                                : new(false, "unknown action", null);
+                        }
+                        catch (Exception ex) { r = new(false, ex.Message, null); }
+                        if (!r.ok) return Results.Ok(new { ok = false, r.error });
+                        var applied = await Program.ApplyPbx();
+                        RestartSoon();
+                        return Results.Ok(new { ok = true, r.secret, applyErrors = applied.errors, restarting = true });
                     });
 
                     app.MapPost("/api/pbx/apply", async () =>
@@ -537,5 +566,6 @@ namespace ghostline
         record SettingsPayload(Dictionary<string, string> fields, string[] remove, bool restart = false, string[] add = null);
         record SendPayload(string channel, string number, string text);
         record SecretPayload(string line);
+        record PbxLinePayload(string action, string name, string gateway, string device, string extension, string dial, string encryption);
     }
 }

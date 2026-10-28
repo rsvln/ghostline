@@ -203,6 +203,131 @@ namespace ghostline
             }
         }
 
+        // ---- Lines added and removed on the PBX tab ---------------------------------------------------------
+
+        internal record PbxLineAdd(string name, string gateway, string device, string extension, string dial, string encryption);
+        internal record PbxLineResult(bool ok, string error, string secret);
+
+        private static readonly Regex DeviceName = new(@"^[A-Za-z0-9_-]{1,32}$");
+
+        // A new line on a modem gateway of the managed Asterisk, optionally with its phone. The modem itself
+        // is described in quectel.conf / dongle.conf by hand. The caller restarts the service: the lines
+        // are read at start.
+        internal static PbxLineResult AddLine(PbxLineAdd a)
+        {
+            lock (_pbxSaveLock)
+            {
+                string yaml = File.ReadAllText(ConfigPath);
+                var s = SettingsFile.Parse(yaml);
+                string name = a?.name?.Trim() ?? "", device = a?.device?.Trim() ?? "", ext = a?.extension?.Trim() ?? "";
+                if (!ConfigYaml.NameOk.IsMatch(name)) return new(false, "the line name: letters, digits, _ . - only", null);
+                if (s.channels?.Any(c => c.name == name) == true) return new(false, $"line {name} already exists", null);
+                var gw = s.gateways?.FirstOrDefault(g => g.id == a.gateway);
+                if (gw == null || Modems.For(gw.type) == null) return new(false, "the gateway must be a quectel or dongle gateway", null);
+                if (!PbxConfig.OnManagedAsterisk(s, new Channel { gateway = gw.id }))
+                    return new(false, $"gateway {gw.id} is not on the managed Asterisk (pbx.asterisk)", null);
+                if (!DeviceName.IsMatch(device)) return new(false, "the device: its name in quectel.conf / dongle.conf, like gsm3", null);
+                if (s.channels?.Any(c => c.line == device && s.gateways.FirstOrDefault(g => g.id == c.gateway)?.ip == gw.ip) == true)
+                    return new(false, $"device {device} already has a line", null);
+
+                string at = $"channels[name={name}]";
+                yaml = ConfigYaml.Set(yaml, at + ".gateway", gw.id);
+                yaml = ConfigYaml.Set(yaml, at + ".pattern", device);
+                yaml = ConfigYaml.Set(yaml, at + ".line", device);
+                string secret = null;
+                if (ext != "")
+                {
+                    secret = PbxConfig.NewSecret();
+                    yaml = ConfigYaml.Set(yaml, at + ".phone.extension", ext);
+                    yaml = ConfigYaml.Set(yaml, at + ".phone.dial", string.IsNullOrEmpty(a.dial) ? "ru" : a.dial);
+                    yaml = ConfigYaml.Set(yaml, at + ".phone.encryption", string.IsNullOrEmpty(a.encryption) ? "sdes" : a.encryption);
+                    yaml = ConfigYaml.Set(yaml, at + ".phone.secret", secret);
+                }
+
+                Settings after;
+                try { after = SettingsFile.Parse(yaml); }
+                catch (Exception ex) { return new(false, SettingsFile.Describe(ex), null); }
+                if (after.channels?.Any(c => c.name == name && c.line == device) != true)
+                    return new(false, "could not add the line to the config", null);
+                var errors = PbxConfig.Validate(after);
+                if (errors.Count > 0) return new(false, string.Join("; ", errors), null);
+
+                File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
+                File.WriteAllText(ConfigPath, yaml);
+                Console.WriteLine($"PBX: line {name} ({gw.id}/{device}) added from the PBX tab");
+                return new(true, null, secret);
+            }
+        }
+
+        // Removes a line of the managed Asterisk (its phone with it). The caller applies and restarts.
+        internal static PbxLineResult RemoveLine(string name)
+        {
+            lock (_pbxSaveLock)
+            {
+                string yaml = File.ReadAllText(ConfigPath);
+                var s = SettingsFile.Parse(yaml);
+                var ch = s.channels?.FirstOrDefault(c => c.name == name);
+                if (ch == null || !ConfigYaml.NameOk.IsMatch(name)) return new(false, $"no line '{name}'", null);
+                if (!PbxConfig.OnManagedAsterisk(s, ch)) return new(false, $"line {name} is on another PBX", null);
+                yaml = ConfigYaml.Remove(yaml, $"channels[name={name}]");
+                try
+                {
+                    if (SettingsFile.Parse(yaml).channels?.Any(c => c.name == name) == true)
+                        return new(false, "could not remove the line from the config", null);
+                }
+                catch (Exception ex) { return new(false, SettingsFile.Describe(ex), null); }
+
+                File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
+                File.WriteAllText(ConfigPath, yaml);
+                Console.WriteLine($"PBX: line {name} removed from the PBX tab");
+                return new(true, null, null);
+            }
+        }
+
+        // ---- Modems the managed Asterisk knows ------------------------------------------------------------
+
+        internal record AsteriskModem(string gateway, string device, string state, string provider, string model);
+
+        // "quectel show devices" / "dongle show devices" of every modem gateway on the managed Asterisk.
+        // Only the driver's state is read; nothing is sent to the modems. IMEI, IMSI and the number are
+        // in that table too and are left out.
+        internal static async Task<List<AsteriskModem>> AsteriskModems(Settings s)
+        {
+            var list = new List<AsteriskModem>();
+            var seen = new HashSet<string>();
+            foreach (var gw in s.gateways ?? new())
+            {
+                if (Modems.For(gw.type) == null || !PbxConfig.OnManagedAsterisk(s, new Channel { gateway = gw.id })) continue;
+                if (!seen.Add(gw.type)) continue;   // one driver, one table
+                string text;
+                try { text = await AmiCommand(gw.id, gw.type + " show devices"); }
+                catch { continue; }
+                list.AddRange(ParseDeviceTable(text).Select(r => new AsteriskModem(gw.id, r.id, r.state, r.provider, r.model)));
+            }
+            return list;
+        }
+
+        // A fixed-width table: the columns are cut at the header's positions (the provider has spaces).
+        internal static List<(string id, string state, string provider, string model)> ParseDeviceTable(string text)
+        {
+            var result = new List<(string, string, string, string)>();
+            var lines = text.Replace("\r", "").Split('\n');
+            int h = Array.FindIndex(lines, l => Regex.IsMatch(l, @"^ID\s+Group\s+State"));
+            if (h < 0) return result;
+            string head = lines[h];
+            int Col(string name) => head.IndexOf(name, StringComparison.Ordinal);
+            int cState = Col("State"), cRssi = Col("RSSI"), cProv = Col("Provider"), cModel = Col("Model"), cFw = Col("Firmware");
+            string Cut(string l, int from, int to) =>
+                from < 0 || from >= l.Length ? "" : l.Substring(from, Math.Max(0, Math.Min(to < 0 ? l.Length : to, l.Length) - from)).Trim();
+            foreach (var l in lines.Skip(h + 1))
+            {
+                var m = Regex.Match(l, @"^([A-Za-z0-9_-]+)\s");
+                if (!m.Success || m.Groups[1].Value == "ID") continue;
+                result.Add((m.Groups[1].Value, Cut(l, cState, cRssi), Cut(l, cProv, cModel), Cut(l, cModel, cFw)));
+            }
+            return result;
+        }
+
         // ---- Registrations -------------------------------------------------------------------------------
 
         internal record PhoneContact(string extension, string uri, string status, double? rttMs);

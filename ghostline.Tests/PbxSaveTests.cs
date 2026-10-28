@@ -119,6 +119,38 @@ namespace ghostline.Tests
         }
 
         [Fact]
+        public void AddsAndRemovesLine()
+        {
+            var r = Program.AddLine(new("line4", "pbx", "gsm4", "14", "ru", "sdes"));
+            Assert.True(r.ok, r.error);
+            Assert.Matches("^[A-Za-z0-9]{24}$", r.secret);
+            var ch = SettingsFile.Parse(File.ReadAllText(_path)).channels.Single(c => c.name == "line4");
+            Assert.Equal(("pbx", "gsm4", "gsm4", "14"), (ch.gateway, ch.pattern, ch.line, ch.phone.extension));
+
+            Assert.False(Program.AddLine(new("line5", "pbx", "gsm4", "", null, null)).ok);   // device taken
+            Assert.False(Program.AddLine(new("line4", "pbx", "gsm5", "", null, null)).ok);   // name taken
+            Assert.False(Program.AddLine(new("line6", "pbx", "gsm6", "11", null, null)).ok); // extension taken
+
+            Assert.True(Program.RemoveLine("line4").ok);
+            Assert.DoesNotContain(SettingsFile.Parse(File.ReadAllText(_path)).channels, c => c.name == "line4");
+            Assert.Contains("# line 2", File.ReadAllText(_path));
+        }
+
+        [Fact]
+        public void ParsesDeviceTable()
+        {
+            const string text = """
+                ID           Group State      RSSI Mode Submode Provider Name  Model      Firmware          IMEI             IMSI             Number
+                hw1          3     Free       16   0    0       t2 rus         E1550      11.608.14.15.311  000000000000000  000000000000000  Unknown
+                gsm1         1     Ring       27   0    0       MTS 5G         EC200A     EC200AEUHAR01A30M 000000000000000  000000000000000  +79001234567
+                """;
+            var rows = Program.ParseDeviceTable(text);
+            Assert.Equal(2, rows.Count);
+            Assert.Equal(("hw1", "Free", "t2 rus", "E1550"), rows[0]);
+            Assert.Equal(("gsm1", "Ring", "MTS 5G", "EC200A"), rows[1]);
+        }
+
+        [Fact]
         public void BadValuesAreRefused()
         {
             var r = Program.SavePbx(Edit(lines: new Program.PbxLineEdit("home", "1x", "ru", "sdes")));

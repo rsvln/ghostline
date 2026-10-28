@@ -16,6 +16,10 @@ The PBX tab is where this is set up:
   secret on Apply; it is shown once;
 - the SIP transport: TLS and UDP ports, external address, local networks,
   certificate and key;
+- "+ Line": a new line on a modem the managed Asterisk already knows (chosen
+  from a list that shows the model, operator and state; modems taken by a line
+  are not offered), optionally with its phone. "✕" removes a line with its
+  phone. Both save the config, apply the files and restart ghostline;
 - failed SIP attempts and the TLS certificate's expiry.
 
 Apply saves the changes into ghostline.yaml (the previous copy goes to `.bak`),
