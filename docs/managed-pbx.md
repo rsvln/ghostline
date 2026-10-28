@@ -30,7 +30,9 @@ On Apply ghostline:
 2. runs `module reload res_pjsip.so` and `dialplan reload` over the AMI of the
    gateway `pbx.asterisk`.
 
-Written once by hand, not by ghostline:
+Written once, not by ghostline
+([scripts/asterisk-install.sh](../scripts/asterisk-install.sh) writes them,
+see [asterisk-setup.md](asterisk-setup.md)):
 
 - `pjsip.conf` and `extensions.conf` include the generated files:
 

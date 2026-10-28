@@ -42,6 +42,10 @@ asterisk -rx "module load cdr_sqlite3_custom.so"
 The module creates the file and the table at the first call. It can run next
 to the MySQL CDR of FreePBX; both get the same rows.
 
+On a plain Asterisk set `unanswered=yes` in `cdr.conf`. Without it a call to
+a phone that is not registered leaves no CDR, and the missed call is not in the
+journal. [asterisk-setup.md](asterisk-setup.md) does this.
+
 ## 3. ghostline
 
 ```yaml

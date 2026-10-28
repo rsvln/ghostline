@@ -49,6 +49,18 @@ channels:
     line: gsm1
     number: "+79001234567"
 
+# pbx.mode: managed only: ghostline writes the PBX config of a plain Asterisk
+# (docs/managed-pbx.md, docs/asterisk-setup.md). Lines then get a phone:
+#   channels: [{ ..., phone: { extension: "11", dial: ru, encryption: sdes } }]
+# pbx:
+#   mode: managed                    # freepbx (default) | managed
+#   asterisk: pbx                    # gateway id of the managed Asterisk
+#   conf_dir: /srv/asterisk-conf     # shared with Asterisk
+#   asterisk_dir: /etc/asterisk/ghostline
+#   tls: { cert: keys/sip.crt, key: keys/sip.key, port: 5061 }
+#   external_address: sip.example.org
+#   local_nets: [10.0.0.0/8]
+
 # mode: full only
 # calls:
 #   cdr_db:

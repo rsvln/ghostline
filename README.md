@@ -307,7 +307,10 @@ PBX-side setup for `mode: full` (database user, HTTP access to recordings,
 recording each side of the call, transcription service) is described in
 [docs/pbx-setup-calls.md](docs/pbx-setup-calls.md). AMI and dialplan setup for
 `chan_quectel` is in [docs/quectel-setup.md](docs/quectel-setup.md), for
-`chan_dongle` in [docs/dongle-setup.md](docs/dongle-setup.md).
+`chan_dongle` in [docs/dongle-setup.md](docs/dongle-setup.md). A plain
+Asterisk without FreePBX, for `pbx.mode: managed`, is set up by
+[scripts/asterisk-install.sh](scripts/asterisk-install.sh), see
+[docs/asterisk-setup.md](docs/asterisk-setup.md).
 
 ### Contacts
 
