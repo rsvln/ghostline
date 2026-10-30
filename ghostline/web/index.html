@@ -19,7 +19,6 @@
     <a class="tab" data-tab="sms" href="/sms">{{web.tab.sms}}</a>
     <a class="tab" data-tab="log" href="/log">{{web.tab.log}}</a>
     <a class="tab" data-tab="status" href="/status">{{web.tab.status}}</a>
-    <a class="tab" data-tab="pbx" href="/pbx" id="tab-pbx" hidden>{{web.tab.pbx}}</a>
     <a class="tab" data-tab="config" href="/config">{{web.tab.config}}</a>
     <a class="tab" data-tab="about" href="/about">{{web.tab.about}}</a>
   </div>
@@ -116,39 +115,7 @@
         <h3>{{web.status.lines}}</h3>
         <table class="stat-table" id="status-lines"></table>
       </div>
-    </div>
-  </div>
-
-  <div class="panel" id="panel-pbx">
-    <div class="toolbar">
-      <button class="btn" onclick="loadPbx()">{{web.refresh}}</button>
-      <button class="btn" onclick="previewPbx()">{{web.pbx.preview}}</button>
-      <button class="btn primary" onclick="applyPbx()">{{web.pbx.apply}}</button>
-      <span class="pbx-dirty" id="pbx-dirty"></span>
-      <span class="config-hint">{{web.pbx.hint}}</span>
-    </div>
-    <div class="scroll">
-      <div class="section" id="pbx-errors"></div>
-      <div class="section">
-        <h3>{{web.pbx.modems}}</h3>
-        <table class="stat-table" id="pbx-modems"></table>
-        <div class="pbx-add" id="pbx-modem-add"></div>
-      </div>
-      <div class="section">
-        <h3>{{web.pbx.phones}}</h3>
-        <table class="stat-table" id="pbx-lines"></table>
-        <div class="pbx-add" id="pbx-add"></div>
-      </div>
-      <div class="section">
-        <h3>{{web.pbx.sip}}</h3>
-        <div class="settings-grid pbx-sip-form" id="pbx-sip-form"></div>
-        <div class="status-grid" id="pbx-sip"></div>
-      </div>
-      <div class="section">
-        <h3>{{web.pbx.security}}</h3>
-        <table class="stat-table" id="pbx-security"></table>
-      </div>
-      <div class="section" id="pbx-output"></div>
+      <div id="status-pbx"></div>
     </div>
   </div>
 

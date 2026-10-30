@@ -5,14 +5,20 @@ using System.Text.RegularExpressions;
 
 namespace ghostline
 {
-    // pbx.mode: managed. Applying the generated files (PbxConfig), the phones' registrations, the
-    // SIP security events and the TLS certificate. Settings are read from the file on every call, so
-    // the PBX tab works with what was just saved, without a restart.
+    // gateways[].pbx: managed. Applying the generated files (PbxConfig), the modems, the phones'
+    // registrations, the SIP security events and the TLS certificate. Settings are read from the file on
+    // every call, so what was just saved works without a restart.
     internal partial class Program
     {
         internal static string ConfigPath { get; set; }
 
         internal static Settings ReadSettingsFile() => SettingsFile.Parse(File.ReadAllText(ConfigPath));
+
+        internal static Settings TryReadSettingsFile()
+        {
+            try { return ReadSettingsFile(); }
+            catch { return null; }
+        }
 
         // ---- AMI commands with a reply -----------------------------------------------------------------
 
@@ -72,13 +78,15 @@ namespace ghostline
                 var s = ReadSettingsFile();
                 var errors = PbxConfig.Validate(s);
                 if (errors.Count > 0) return new(false, errors, new(), "");
-                if (!Directory.Exists(s.pbx.confDir))
-                    return new(false, new() { $"pbx.conf_dir {s.pbx.confDir} does not exist (is the shared directory mounted?)" }, new(), "");
+                var gw = s.ManagedGateway;
+                string confDir = gw.managed.confDir;
+                if (!Directory.Exists(confDir))
+                    return new(false, new() { $"managed.conf_dir {confDir} does not exist (is the shared directory mounted?)" }, new(), "");
 
                 var changed = new List<string>();
                 foreach (var (name, text) in PbxConfig.Generate(s))
                 {
-                    string path = Path.Combine(s.pbx.confDir, name);
+                    string path = Path.Combine(confDir, name);
                     if (File.Exists(path) && File.ReadAllText(path) == text) continue;
                     if (File.Exists(path)) File.Copy(path, path + ".bak", overwrite: true);
                     File.WriteAllText(path + ".tmp", text);
@@ -98,7 +106,7 @@ namespace ghostline
                     if (changed.Contains(PbxConfig.QuectelFile)) cmds.Add("quectel reload gracefully");
                     if (changed.Contains(PbxConfig.DongleFile)) cmds.Add("dongle reload gracefully");
                     foreach (var cmd in cmds)
-                        output.Append("> ").Append(cmd).Append('\n').Append(await AmiCommand(s.pbx.asterisk, cmd)).Append('\n');
+                        output.Append("> ").Append(cmd).Append('\n').Append(await AmiCommand(gw.id, cmd)).Append('\n');
                 }
                 return new(true, new(), changed, output.ToString().TrimEnd());
             }
@@ -112,7 +120,7 @@ namespace ghostline
             }
         }
 
-        // The generated files as they would be written now, for the preview on the PBX tab.
+        // The generated files as they would be written now, for the preview.
         internal static (List<string> errors, SortedDictionary<string, string> files) PreviewPbx()
         {
             var s = ReadSettingsFile();
@@ -126,10 +134,10 @@ namespace ghostline
         internal static string NewPhoneSecret(string lineName)
         {
             var s = ReadSettingsFile();
-            var ch = s.channels?.FirstOrDefault(c => c.name == lineName);
+            var ch = s.lines?.FirstOrDefault(c => c.name == lineName);
             if (ch?.phone == null || string.IsNullOrWhiteSpace(ch.phone.extension)) return null;
             string secret = PbxConfig.NewSecret();
-            string yaml = ConfigYaml.Set(File.ReadAllText(ConfigPath), $"channels[name={lineName}].phone.secret", secret);
+            string yaml = ConfigYaml.Set(File.ReadAllText(ConfigPath), $"lines[name={lineName}].phone.secret", secret);
             SettingsFile.Parse(yaml);
             File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
             File.WriteAllText(ConfigPath, yaml);
@@ -137,159 +145,32 @@ namespace ghostline
             return secret;
         }
 
-        // ---- Editing on the PBX tab ----------------------------------------------------------------------
-
-        internal record PbxLineEdit(string line, string extension, string dial, string encryption);
-        internal record PbxSipEdit(int? tlsPort, int? udpPort, string externalAddress, string localNets, string cert, string key);
-        internal record PbxEdit(PbxSipEdit sip, List<PbxLineEdit> lines, bool dryRun);
-        internal record PbxSaveResult(bool ok, List<string> errors, Dictionary<string, string> secrets, SortedDictionary<string, string> files);
-
-        private static readonly object _pbxSaveLock = new();
-
-        // Writes the PBX tab's changes into the config (comments kept, the old file goes to .bak). An empty
-        // extension removes the line's phone; a new phone gets a secret, returned once. With dryRun nothing
-        // is written and the files are returned as they would be generated.
-        internal static PbxSaveResult SavePbx(PbxEdit e)
+        // Phones of the managed Asterisk that have an extension but no secret yet get one, written into the
+        // config. Returns line -> secret, to be shown once; nothing is logged but the line names.
+        internal static Dictionary<string, string> AddMissingPhoneSecrets()
         {
+            var secrets = new Dictionary<string, string>();
             lock (_pbxSaveLock)
             {
                 string yaml = File.ReadAllText(ConfigPath);
-                var before = SettingsFile.Parse(yaml);
-                var errors = new List<string>();
-                var secrets = new Dictionary<string, string>();
-
-                if (e?.sip is { } sip)
+                var s = SettingsFile.Parse(yaml);
+                foreach (var ch in (s.lines ?? new()).Where(c => PbxConfig.OnManagedAsterisk(s, c)
+                             && !string.IsNullOrWhiteSpace(c.phone?.extension) && string.IsNullOrEmpty(c.phone.secret)))
                 {
-                    if (sip.tlsPort != null) yaml = ConfigYaml.Set(yaml, "pbx.tls.port", sip.tlsPort.ToString());
-                    if (sip.udpPort != null) yaml = ConfigYaml.Set(yaml, "pbx.udp_port", sip.udpPort.ToString());
-                    if (sip.externalAddress != null) yaml = ConfigYaml.Set(yaml, "pbx.external_address", sip.externalAddress.Trim());
-                    if (sip.localNets != null) yaml = ConfigYaml.Set(yaml, "pbx.local_nets", sip.localNets.Trim());
-                    if (sip.cert != null) yaml = ConfigYaml.Set(yaml, "pbx.tls.cert", sip.cert.Trim());
-                    if (sip.key != null) yaml = ConfigYaml.Set(yaml, "pbx.tls.key", sip.key.Trim());
+                    secrets[ch.name] = PbxConfig.NewSecret();
+                    yaml = ConfigYaml.Set(yaml, $"lines[name={ch.name}].phone.secret", secrets[ch.name]);
                 }
-
-                foreach (var l in e?.lines ?? new())
-                {
-                    var ch = before.channels?.FirstOrDefault(c => c.name == l.line);
-                    if (ch == null || !ConfigYaml.NameOk.IsMatch(l.line ?? ""))
-                    {
-                        errors.Add($"no line '{l.line}'");
-                        continue;
-                    }
-                    string at = $"channels[name={l.line}].phone";
-                    string ext = l.extension?.Trim() ?? "";
-                    if (ext == "")
-                    {
-                        if (ch.phone != null) yaml = ConfigYaml.RemoveSection(yaml, at);
-                        continue;
-                    }
-                    yaml = ConfigYaml.Set(yaml, at + ".extension", ext);
-                    if (l.dial != null) yaml = ConfigYaml.Set(yaml, at + ".dial", l.dial);
-                    if (l.encryption != null) yaml = ConfigYaml.Set(yaml, at + ".encryption", l.encryption);
-                    if (string.IsNullOrEmpty(ch.phone?.secret))
-                    {
-                        secrets[l.line] = PbxConfig.NewSecret();
-                        yaml = ConfigYaml.Set(yaml, at + ".secret", secrets[l.line]);
-                    }
-                }
-                if (errors.Count > 0) return new(false, errors, new(), null);
-
-                Settings s;
-                try { s = SettingsFile.Parse(yaml); }
-                catch (Exception ex) { return new(false, new() { SettingsFile.Describe(ex) }, new(), null); }
-                errors = PbxConfig.Validate(s);
-                if (errors.Count > 0) return new(false, errors, new(), null);
-                if (e.dryRun) return new(true, errors, new(), PbxConfig.Generate(s));
-
-                File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
+                if (secrets.Count == 0) return secrets;
+                SettingsFile.Parse(yaml);
                 // In place, not via a temp file: the config keeps its mode (it holds secrets).
                 File.WriteAllText(ConfigPath, yaml);
-                Console.WriteLine("PBX: settings saved from the PBX tab"
-                    + (secrets.Count > 0 ? " (new phone secret for " + string.Join(", ", secrets.Keys) + ")" : ""));
-                return new(true, errors, secrets, null);
+                Console.WriteLine("PBX: new phone secret for " + string.Join(", ", secrets.Keys));
             }
+            return secrets;
         }
 
-        // ---- Lines added and removed on the PBX tab ---------------------------------------------------------
-
-        internal record PbxLineAdd(string name, string gateway, string device, string extension, string dial, string encryption);
-        internal record PbxLineResult(bool ok, string error, string secret);
-
+        private static readonly object _pbxSaveLock = new();
         private static readonly Regex DeviceName = new(@"^[A-Za-z0-9_-]{1,32}$");
-
-        // A new line on a modem gateway of the managed Asterisk, optionally with its phone. The modem itself
-        // is described in quectel.conf / dongle.conf by hand. The caller restarts the service: the lines
-        // are read at start.
-        internal static PbxLineResult AddLine(PbxLineAdd a)
-        {
-            lock (_pbxSaveLock)
-            {
-                string yaml = File.ReadAllText(ConfigPath);
-                var s = SettingsFile.Parse(yaml);
-                string name = a?.name?.Trim() ?? "", device = a?.device?.Trim() ?? "", ext = a?.extension?.Trim() ?? "";
-                if (!ConfigYaml.NameOk.IsMatch(name)) return new(false, "the line name: letters, digits, _ . - only", null);
-                if (s.channels?.Any(c => c.name == name) == true) return new(false, $"line {name} already exists", null);
-                var gw = s.gateways?.FirstOrDefault(g => g.id == a.gateway);
-                if (gw == null || Modems.For(gw.type) == null) return new(false, "the gateway must be a quectel or dongle gateway", null);
-                if (!PbxConfig.OnManagedAsterisk(s, new Channel { gateway = gw.id }))
-                    return new(false, $"gateway {gw.id} is not on the managed Asterisk (pbx.asterisk)", null);
-                if (!DeviceName.IsMatch(device)) return new(false, "the device: its name in quectel.conf / dongle.conf, like gsm3", null);
-                if (s.channels?.Any(c => c.line == device && s.gateways.FirstOrDefault(g => g.id == c.gateway)?.ip == gw.ip) == true)
-                    return new(false, $"device {device} already has a line", null);
-
-                string at = $"channels[name={name}]";
-                yaml = ConfigYaml.Set(yaml, at + ".gateway", gw.id);
-                yaml = ConfigYaml.Set(yaml, at + ".pattern", device);
-                yaml = ConfigYaml.Set(yaml, at + ".line", device);
-                string secret = null;
-                if (ext != "")
-                {
-                    secret = PbxConfig.NewSecret();
-                    yaml = ConfigYaml.Set(yaml, at + ".phone.extension", ext);
-                    yaml = ConfigYaml.Set(yaml, at + ".phone.dial", string.IsNullOrEmpty(a.dial) ? "ru" : a.dial);
-                    yaml = ConfigYaml.Set(yaml, at + ".phone.encryption", string.IsNullOrEmpty(a.encryption) ? "sdes" : a.encryption);
-                    yaml = ConfigYaml.Set(yaml, at + ".phone.secret", secret);
-                }
-
-                Settings after;
-                try { after = SettingsFile.Parse(yaml); }
-                catch (Exception ex) { return new(false, SettingsFile.Describe(ex), null); }
-                if (after.channels?.Any(c => c.name == name && c.line == device) != true)
-                    return new(false, "could not add the line to the config", null);
-                var errors = PbxConfig.Validate(after);
-                if (errors.Count > 0) return new(false, string.Join("; ", errors), null);
-
-                File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
-                File.WriteAllText(ConfigPath, yaml);
-                Console.WriteLine($"PBX: line {name} ({gw.id}/{device}) added from the PBX tab");
-                return new(true, null, secret);
-            }
-        }
-
-        // Removes a line of the managed Asterisk (its phone with it). The caller applies and restarts.
-        internal static PbxLineResult RemoveLine(string name)
-        {
-            lock (_pbxSaveLock)
-            {
-                string yaml = File.ReadAllText(ConfigPath);
-                var s = SettingsFile.Parse(yaml);
-                var ch = s.channels?.FirstOrDefault(c => c.name == name);
-                if (ch == null || !ConfigYaml.NameOk.IsMatch(name)) return new(false, $"no line '{name}'", null);
-                if (!PbxConfig.OnManagedAsterisk(s, ch)) return new(false, $"line {name} is on another PBX", null);
-                yaml = ConfigYaml.Remove(yaml, $"channels[name={name}]");
-                try
-                {
-                    if (SettingsFile.Parse(yaml).channels?.Any(c => c.name == name) == true)
-                        return new(false, "could not remove the line from the config", null);
-                }
-                catch (Exception ex) { return new(false, SettingsFile.Describe(ex), null); }
-
-                File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
-                File.WriteAllText(ConfigPath, yaml);
-                Console.WriteLine($"PBX: line {name} removed from the PBX tab");
-                return new(true, null, null);
-            }
-        }
 
         // ---- USB modems on the Asterisk host (usb.json from scripts/gl-usb-inventory.py) ----------------
 
@@ -301,8 +182,10 @@ namespace ghostline
 
         internal static (List<UsbDevice> devices, DateTime? at) ReadUsbInventory(Settings s)
         {
-            string path = Path.Combine(s.pbx?.confDir ?? "", "usb.json");
-            if (string.IsNullOrEmpty(s.pbx?.confDir) || !File.Exists(path)) return (null, null);
+            string confDir = s.ManagedGateway?.managed?.confDir;
+            if (string.IsNullOrEmpty(confDir)) return (null, null);
+            string path = Path.Combine(confDir, "usb.json");
+            if (!File.Exists(path)) return (null, null);
             try
             {
                 var inv = System.Text.Json.JsonSerializer.Deserialize<UsbInventory>(File.ReadAllText(path));
@@ -311,87 +194,84 @@ namespace ghostline
             catch { return (null, null); }
         }
 
-        internal record PbxModemEdit(string action, string name, string driver, string data, string audio, string alsadev, bool noqpcmv);
-        internal record PbxModemResult(bool ok, string error, bool restart);
+        internal record PbxModemEdit(string action, string gateway, string name, string driver, string data, string audio, string alsadev, bool noqpcmv);
+        internal record PbxModemResult(bool ok, string error);
 
-        // Adds or removes a modem in pbx.modems. Only ports the inventory lists and Asterisk may open are
-        // accepted, and no port of another modem. A modem needs a gateway of its driver on the managed
-        // Asterisk (ghostline handles that driver's SMS and monitoring through it); a missing one is added
-        // with the AMI login of pbx.asterisk, and then the service has to restart.
+        // Adds or removes a modem of an Asterisk gateway. On the managed Asterisk only ports the inventory
+        // lists and Asterisk may open are accepted, and no port of another modem; under FreePBX a modem is
+        // only its name and driver (FreePBX owns the driver config). A modem a line uses stays.
         internal static PbxModemResult EditModem(PbxModemEdit e)
         {
             lock (_pbxSaveLock)
             {
                 string yaml = File.ReadAllText(ConfigPath);
                 var s = SettingsFile.Parse(yaml);
-                string name = e?.name?.Trim() ?? "";
-                var modems = s.pbx.modems ?? new();
-                bool restart = false;
+                var gw = s.gateways?.FirstOrDefault(g => g.id == e?.gateway);
+                if (gw == null || !gw.IsAsterisk || !ConfigYaml.NameOk.IsMatch(gw.id)) return new(false, $"no Asterisk gateway '{e?.gateway}'");
+                string name = e.name?.Trim() ?? "";
+                var modems = gw.modems ?? new();
+                string at = $"gateways[id={gw.id}].modems[name={name}]";
 
-                if (e?.action == "remove")
+                if (e.action == "remove")
                 {
-                    if (!modems.Any(m => m.name == name)) return new(false, $"no modem '{name}'", false);
-                    var user = s.channels?.FirstOrDefault(c => c.line == name && PbxConfig.OnManagedAsterisk(s, c));
-                    if (user != null) return new(false, $"line {user.name} uses modem {name}: remove the line first", false);
-                    yaml = ConfigYaml.Remove(yaml, $"pbx.modems[name={name}]");
+                    if (!modems.Any(m => m.name == name)) return new(false, $"no modem '{name}'");
+                    var user = s.lines?.FirstOrDefault(c => c.gateway == gw.id && c.modem == name);
+                    if (user != null) return new(false, $"line {user.name} uses modem {name}: remove the line or move it to another modem first");
+                    yaml = ConfigYaml.Remove(yaml, at);
                 }
-                else if (e?.action == "add")
+                else if (e.action == "add")
                 {
-                    if (!DeviceName.IsMatch(name)) return new(false, "the modem name: letters, digits, _ and - only, like gsm3", false);
-                    if (modems.Any(m => m.name == name)) return new(false, $"modem {name} already exists", false);
-                    if (!PbxConfig.Drivers.Contains(e.driver)) return new(false, "driver must be quectel or dongle", false);
-                    var (devices, _) = ReadUsbInventory(s);
-                    if (devices == null) return new(false, "no USB list from the Asterisk host (usb.json in conf_dir)", false);
-                    var ports = devices.SelectMany(d => d.ports).ToList();
-                    var taken = modems.SelectMany(m => new[] { m.data, m.audio, m.alsadev }).Where(x => !string.IsNullOrEmpty(x)).ToHashSet();
-                    foreach (var port in new[] { e.data, e.audio }.Where(x => !string.IsNullOrEmpty(x)))
+                    if (!DeviceName.IsMatch(name)) return new(false, "the modem name: letters, digits, _ and - only, like gsm3");
+                    if (modems.Any(m => m.name == name)) return new(false, $"modem {name} already exists");
+                    if (!PbxConfig.Drivers.Contains(e.driver)) return new(false, "driver must be quectel or dongle");
+                    if (gw.Managed)
                     {
-                        var p = ports.FirstOrDefault(x => x.path == port);
-                        if (p == null) return new(false, $"{port} is not on the Asterisk host", false);
-                        if (!p.access) return new(false, $"Asterisk may not open {port} (not passed to its container)", false);
-                        if (taken.Contains(port)) return new(false, $"{port} is used by another modem", false);
-                    }
-                    if (!string.IsNullOrEmpty(e.alsadev))
-                    {
-                        var snd = devices.SelectMany(d => d.sound).FirstOrDefault(x => x.alsadev == e.alsadev);
-                        if (snd == null || !snd.access) return new(false, $"Asterisk may not open the sound card {e.alsadev}", false);
-                        if (taken.Contains(e.alsadev)) return new(false, $"{e.alsadev} is used by another modem", false);
+                        var (devices, _) = ReadUsbInventory(s);
+                        if (devices == null) return new(false, "no USB list from the Asterisk host (usb.json in managed.conf_dir)");
+                        var ports = devices.SelectMany(d => d.ports).ToList();
+                        var taken = modems.SelectMany(m => new[] { m.data, m.audio, m.alsadev }).Where(x => !string.IsNullOrEmpty(x)).ToHashSet();
+                        foreach (var port in new[] { e.data, e.audio }.Where(x => !string.IsNullOrEmpty(x)))
+                        {
+                            var p = ports.FirstOrDefault(x => x.path == port);
+                            if (p == null) return new(false, $"{port} is not on the Asterisk host");
+                            if (!p.access) return new(false, $"Asterisk may not open {port} (not passed to its container)");
+                            if (taken.Contains(port)) return new(false, $"{port} is used by another modem");
+                        }
+                        if (!string.IsNullOrEmpty(e.alsadev))
+                        {
+                            var snd = devices.SelectMany(d => d.sound).FirstOrDefault(x => x.alsadev == e.alsadev);
+                            if (snd == null || !snd.access) return new(false, $"Asterisk may not open the sound card {e.alsadev}");
+                            if (taken.Contains(e.alsadev)) return new(false, $"{e.alsadev} is used by another modem");
+                        }
                     }
 
                     // A new list item: its first key is the selector, the rest follow.
-                    string at = $"pbx.modems[name={name}]";
                     yaml = ConfigYaml.Set(yaml, at + ".driver", e.driver);
-                    yaml = ConfigYaml.Set(yaml, at + ".data", e.data ?? "");
-                    if (!string.IsNullOrEmpty(e.audio)) yaml = ConfigYaml.Set(yaml, at + ".audio", e.audio);
-                    if (!string.IsNullOrEmpty(e.alsadev)) yaml = ConfigYaml.Set(yaml, at + ".alsadev", e.alsadev);
-                    if (e.noqpcmv) yaml = ConfigYaml.Set(yaml, at + ".noqpcmv", "true");
-
-                    var host = s.gateways?.FirstOrDefault(g => g.id == s.pbx.asterisk);
-                    if (host != null && !(s.gateways.Any(g => g.type == e.driver && g.ip == host.ip)))
+                    if (gw.Managed)
                     {
-                        string gid = $"{host.id}-{e.driver}";
-                        yaml = ConfigYaml.Set(yaml, $"gateways[id={gid}].type", e.driver);
-                        yaml = ConfigYaml.Set(yaml, $"gateways[id={gid}].ip", host.ip);
-                        yaml = ConfigYaml.Set(yaml, $"gateways[id={gid}].ami_port", host.amiPort.ToString());
-                        yaml = ConfigYaml.Set(yaml, $"gateways[id={gid}].user", host.user);
-                        yaml = ConfigYaml.Set(yaml, $"gateways[id={gid}].password", host.password);
-                        restart = true;
+                        yaml = ConfigYaml.Set(yaml, at + ".data", e.data ?? "");
+                        if (!string.IsNullOrEmpty(e.audio)) yaml = ConfigYaml.Set(yaml, at + ".audio", e.audio);
+                        if (!string.IsNullOrEmpty(e.alsadev)) yaml = ConfigYaml.Set(yaml, at + ".alsadev", e.alsadev);
+                        if (e.noqpcmv) yaml = ConfigYaml.Set(yaml, at + ".noqpcmv", "true");
                     }
                 }
-                else return new(false, "unknown action", false);
+                else return new(false, "unknown action");
 
                 Settings after;
                 try { after = SettingsFile.Parse(yaml); }
-                catch (Exception ex) { return new(false, SettingsFile.Describe(ex), false); }
-                bool present = after.pbx.modems?.Any(m => m.name == name) == true;
-                if (present != (e.action == "add")) return new(false, "could not change pbx.modems in the config", false);
-                var errors = PbxConfig.Validate(after);
-                if (errors.Count > 0) return new(false, string.Join("; ", errors), false);
+                catch (Exception ex) { return new(false, SettingsFile.Describe(ex)); }
+                bool present = after.gateways.First(g => g.id == gw.id).Modem(name) != null;
+                if (present != (e.action == "add")) return new(false, "could not change the modems in the config");
+                if (gw.Managed)
+                {
+                    var errors = PbxConfig.Validate(after);
+                    if (errors.Count > 0) return new(false, string.Join("; ", errors));
+                }
 
                 File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
                 File.WriteAllText(ConfigPath, yaml);
-                Console.WriteLine($"PBX: modem {name} {(e.action == "add" ? "added" : "removed")} from the PBX tab");
-                return new(true, null, restart);
+                Console.WriteLine($"PBX: modem {gw.id}/{name} {(e.action == "add" ? "added" : "removed")}");
+                return new(true, null);
             }
         }
 
@@ -399,22 +279,20 @@ namespace ghostline
 
         internal record AsteriskModem(string gateway, string device, string state, string provider, string model);
 
-        // "quectel show devices" / "dongle show devices" of every modem gateway on the managed Asterisk.
-        // Only the driver's state is read; nothing is sent to the modems. IMEI, IMSI and the number are
-        // in that table too and are left out.
+        // "quectel show devices" / "dongle show devices" of every Asterisk gateway, for the drivers its modems
+        // use. Only the driver's state is read; nothing is sent to the modems. IMEI, IMSI and the number
+        // are in that table too and are left out.
         internal static async Task<List<AsteriskModem>> AsteriskModems(Settings s)
         {
             var list = new List<AsteriskModem>();
-            var seen = new HashSet<string>();
-            foreach (var gw in s.gateways ?? new())
-            {
-                if (Modems.For(gw.type) == null || !PbxConfig.OnManagedAsterisk(s, new Channel { gateway = gw.id })) continue;
-                if (!seen.Add(gw.type)) continue;   // one driver, one table
-                string text;
-                try { text = await AmiCommand(gw.id, gw.type + " show devices"); }
-                catch { continue; }
-                list.AddRange(ParseDeviceTable(text).Select(r => new AsteriskModem(gw.id, r.id, r.state, r.provider, r.model)));
-            }
+            foreach (var gw in (s.gateways ?? new()).Where(g => g.IsAsterisk))
+                foreach (var driver in (gw.modems ?? new()).Select(m => m.driver).Where(d => Modems.For(d) != null).Distinct())
+                {
+                    string text;
+                    try { text = await AmiCommand(gw.id, driver + " show devices", 5000); }
+                    catch { continue; }
+                    list.AddRange(ParseDeviceTable(text).Select(r => new AsteriskModem(gw.id, r.id, r.state, r.provider, r.model)));
+                }
             return list;
         }
 
@@ -476,7 +354,7 @@ namespace ghostline
         {
             string kind = evt.GetValueOrDefault("Event");
             if (kind is not ("InvalidPassword" or "ChallengeResponseFailed" or "InvalidAccountID" or "FailedACL")) return false;
-            if (settings.pbx?.Managed != true || gw.id != settings.pbx.asterisk) return true;
+            if (settings.ManagedGateway?.id != gw.id) return true;
 
             // RemoteAddress: "IPV4/TLS/203.0.113.5/46334"
             var parts = evt.GetValueOrDefault("RemoteAddress", "").Split('/');
@@ -513,9 +391,10 @@ namespace ghostline
         // Only a certificate inside conf_dir can be read here; null otherwise.
         internal static CertInfo PbxCertificate(Settings s)
         {
-            string cert = s.pbx?.tls?.cert;
-            if (string.IsNullOrWhiteSpace(cert) || cert.StartsWith("/") || string.IsNullOrWhiteSpace(s.pbx.confDir)) return null;
-            string path = Path.Combine(s.pbx.confDir, cert);
+            var p = s.ManagedGateway?.managed;
+            string cert = p?.sip?.tls?.cert;
+            if (string.IsNullOrWhiteSpace(cert) || cert.StartsWith("/") || string.IsNullOrWhiteSpace(p.confDir)) return null;
+            string path = Path.Combine(p.confDir, cert);
             if (!File.Exists(path)) return null;
             try
             {

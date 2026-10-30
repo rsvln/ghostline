@@ -179,10 +179,10 @@ namespace ghostline
             string device, direction;
             if ((device = Modems.Device(r.Channel)) != null) direction = "in";
             else if ((device = Modems.Device(r.DstChannel)) != null) direction = "out";
-            else if (!string.IsNullOrEmpty(r.Did) && settings.channels.Any(c => c.line == r.Did)) { device = r.Did; direction = "in"; }
+            else if (!string.IsNullOrEmpty(r.Did) && settings.lines.Any(c => c.Device == r.Did)) { device = r.Did; direction = "in"; }
             else return (null, null);
 
-            var ch = settings.channels.FirstOrDefault(c => c.line == device);
+            var ch = settings.lines.FirstOrDefault(c => c.Device == device);
             if (ch == null) return (null, null);
 
             string peer = ToE164(direction == "in" ? r.Src : r.Dst);

@@ -144,7 +144,7 @@ namespace ghostline
 
             if (HandleRadioEvent(evt, gw) || HandleSecurityEvent(evt, gw))
                 return;
-            if (Modems.For(gw.type) is { } modem && evt.GetValueOrDefault("Event") == modem.NewSmsEvent)
+            if (gw.IsAsterisk && Modems.All.FirstOrDefault(f => evt.GetValueOrDefault("Event") == f.NewSmsEvent) is { } modem)
             {
                 HandleModemSms(evt, gw, modem);
             }

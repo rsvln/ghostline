@@ -51,7 +51,7 @@ namespace ghostline
                     });
 
                     // The page, at the address of every view (the script picks the view from the address).
-                    foreach (var path in new[] { "/", "/calls", "/sms", "/log", "/status", "/pbx", "/config", "/config/yaml", "/about" })
+                    foreach (var path in new[] { "/", "/calls", "/sms", "/log", "/status", "/config", "/config/yaml", "/about" })
                         app.MapGet(path, () => Results.Content(Localize(Asset("index.html")), "text/html; charset=utf-8"));
                     app.MapGet("/js/app.js", () => Results.Content(Localize(Asset("app.js")), "text/javascript; charset=utf-8"));
                     app.MapGet("/css/app.css", () => Results.Content(Asset("app.css"), "text/css; charset=utf-8"));
@@ -76,7 +76,7 @@ namespace ghostline
 
                     app.MapGet("/api/channels", () =>
                     {
-                        var list = (Program.settings?.channels ?? new List<Channel>())
+                        var list = (Program.settings?.lines ?? new List<Channel>())
                             .Select(c => new { c.name, gateway = c.gateway, type = Program.getGatewayById(c.gateway)?.type })
                             .ToList();
                         return Results.Ok(list);
@@ -102,13 +102,13 @@ namespace ghostline
                         }
                         var sms = Store.GetStats();
                         var calls = full ? Store.CallStatsByChannel() : new();
-                        var configured = (s?.channels ?? new List<Channel>()).Select(c => c.name).ToList();
+                        var configured = (s?.lines ?? new List<Channel>()).Select(c => c.name).ToList();
                         // Configured lines first, then lines that are only in the history (renamed or removed).
                         var names = configured.Concat(sms.Select(x => x.Channel).Concat(calls.Select(x => x.channel))
                                                          .Where(n => !string.IsNullOrEmpty(n) && !configured.Contains(n)).Distinct());
                         var lines = names.Select(n =>
                         {
-                            var ch = s?.channels?.FirstOrDefault(c => c.name == n);
+                            var ch = s?.lines?.FirstOrDefault(c => c.name == n);
                             var st = sms.FirstOrDefault(x => x.Channel == n);
                             var cs = calls.FirstOrDefault(x => x.channel == n);
                             return new
@@ -178,102 +178,112 @@ namespace ghostline
                     {
                         mode = Program.settings?.FullMode == true ? "full" : "sms",
                         transcribe = Program.settings?.calls?.transcribe?.enabled == true,
-                        pbx = Program.settings?.pbx?.Managed == true ? "managed" : "freepbx"
+                        pbx = Program.settings?.ManagedGateway?.id
                     }));
 
-                    // --- PBX (pbx.mode: managed) ---
+                    // --- PBX: Asterisk gateways, their modems, the phones of the managed one ---
 
-                    app.MapGet("/api/pbx", async () =>
+                    // Live state for the Status tab. Read from the file, so a modem just added shows up.
+                    app.MapGet("/api/status/pbx", async () =>
                     {
-                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { managed = false });
-                        Settings s;
-                        try { s = Program.ReadSettingsFile(); }
-                        catch (Exception ex) { return Results.Ok(new { managed = true, error = SettingsFile.Describe(ex) }); }
+                        var s = Program.TryReadSettingsFile() ?? Program.settings;
+                        var asterisks = (s?.gateways ?? new()).Where(g => g.IsAsterisk).ToList();
+                        if (asterisks.Count == 0) return Results.Ok(new { gateways = Array.Empty<object>() });
+                        var managed = s.ManagedGateway;
 
+                        List<Program.AsteriskModem> known = new();
+                        try { known = await Program.AsteriskModems(s); } catch { }
                         List<Program.PhoneContact> contacts = null;
                         string contactsError = null;
-                        try { contacts = await Program.PhoneContacts(s.pbx.asterisk); }
-                        catch (Exception ex) { contactsError = ex.Message; }
-
-                        // Every modem line, so a phone can be added to one that has none.
-                        var lines = (s.channels ?? new())
-                            .Where(c => Modems.For(s.gateways?.FirstOrDefault(g => g.id == c.gateway)?.type) != null)
-                            .Select(c => new
+                        if (managed != null)
                         {
-                            name = c.name, device = c.line, gateway = c.gateway,
-                            hasPhone = !string.IsNullOrWhiteSpace(c.phone?.extension),
-                            managedHere = PbxConfig.OnManagedAsterisk(s, c),
-                            gatewayIp = s.gateways?.FirstOrDefault(g => g.id == c.gateway)?.ip,
-                            extension = c.phone?.extension ?? "",
-                            dial = string.IsNullOrEmpty(c.phone?.dial) ? "ru" : c.phone.dial,
-                            encryption = string.IsNullOrEmpty(c.phone?.encryption) ? "sdes" : c.phone.encryption,
-                            hasSecret = !string.IsNullOrEmpty(c.phone?.secret),
-                            modemContext = PbxConfig.ModemContext(c.line),
-                            contacts = contacts?.Where(x => x.extension == c.phone?.extension).ToList()
-                        }).ToList();
-                        var cert = Program.PbxCertificate(s);
-                        // Modems the managed Asterisk knows, for choosing one when a line is added.
-                        var used = (s.channels ?? new()).Select(c => (s.gateways?.FirstOrDefault(g => g.id == c.gateway)?.type, c.line)).ToHashSet();
-                        List<Program.AsteriskModem> modems = new();
-                        try { modems = await Program.AsteriskModems(s); } catch { }
-                        // USB modems on the Asterisk host, for "+ Modem": known models get a suggested
-                        // driver and ports; ports already used by a modem are marked.
+                            try { contacts = await Program.PhoneContacts(managed.id); }
+                            catch (Exception ex) { contactsError = ex.Message; }
+                        }
                         var (usb, usbAt) = Program.ReadUsbInventory(s);
-                        var taken = (s.pbx.modems ?? new()).SelectMany(m => new[] { m.data, m.audio, m.alsadev })
+                        var taken = (managed?.modems ?? new()).SelectMany(m => new[] { m.data, m.audio, m.alsadev })
                             .Where(x => !string.IsNullOrEmpty(x)).ToHashSet();
-                        var usbList = usb?.Select(u =>
-                        {
-                            var prof = PbxConfig.Profile(u.vid, u.pid);
-                            string Port(int iface) => iface < 0 ? null : u.ports.FirstOrDefault(p => p.@interface == iface)?.path;
-                            return new
-                            {
-                                u.usb, u.vid, u.pid, u.manufacturer, u.product,
-                                model = prof?.Model,
-                                ports = u.ports.Select(p => new { p.path, p.@interface, p.access, used = taken.Contains(p.path) }),
-                                sound = u.sound.Select(x => new { x.card, x.alsadev, x.access, used = taken.Contains(x.alsadev) }),
-                                configured = u.ports.Any(p => taken.Contains(p.path)),
-                                access = u.ports.Any(p => p.access),
-                                suggest = prof == null ? null : new
-                                {
-                                    driver = prof.Driver, data = Port(prof.Data), audio = Port(prof.Audio),
-                                    alsadev = prof.Uac ? u.sound.FirstOrDefault()?.alsadev : null, noqpcmv = prof.NoQpcmv
-                                }
-                            };
-                        }).ToList();
+                        var cert = Program.PbxCertificate(s);
+
                         return Results.Ok(new
                         {
-                            managed = true,
-                            usb = usbList,
-                            usbAt,
-                            pbxModems = (s.pbx.modems ?? new()).Select(m => new
+                            gateways = asterisks.Select(g => new
                             {
-                                m.name, m.driver, m.data, m.audio, m.alsadev, m.noqpcmv,
-                                usb = usb?.FirstOrDefault(u => u.ports.Any(p => p.path == m.data))?.usb,
-                                model = usb?.Where(u => u.ports.Any(p => p.path == m.data))
-                                    .Select(u => PbxConfig.Profile(u.vid, u.pid)?.Model ?? u.product).FirstOrDefault(),
-                                state = modems.FirstOrDefault(x => x.device == m.name)?.state,
-                                provider = modems.FirstOrDefault(x => x.device == m.name)?.provider,
-                                line = s.channels?.FirstOrDefault(c => c.line == m.name && PbxConfig.OnManagedAsterisk(s, c))?.name
+                                g.id, managed = g.Managed,
+                                connected = HealthStatus.Find(g.id)?.Connected == true,
+                                cert = g.Managed && cert != null ? new { cert.subject, notAfter = cert.notAfter.ToString("yyyy-MM-dd"), cert.daysLeft } : null,
+                                modems = (g.modems ?? new()).Select(m =>
+                                {
+                                    var k = known.FirstOrDefault(x => x.gateway == g.id && x.device == m.name);
+                                    var dev = g.Managed ? usb?.FirstOrDefault(u => u.ports.Any(p => p.path == m.data)) : null;
+                                    return new
+                                    {
+                                        m.name, m.driver, found = k != null, state = k?.state, provider = k?.provider,
+                                        model = dev == null ? k?.model : PbxConfig.Profile(dev.vid, dev.pid)?.Model ?? dev.product,
+                                        usb = dev?.usb,
+                                        line = s.lines?.FirstOrDefault(c => c.gateway == g.id && c.modem == m.name)?.name
+                                    };
+                                }),
+                                // Devices the driver has that are not in the settings.
+                                unknown = known.Where(x => x.gateway == g.id && g.Modem(x.device) == null)
+                                    .Select(x => new { x.device, x.state, x.provider, x.model }),
+                                // USB modems of the managed Asterisk's host that no modem uses yet.
+                                usb = !g.Managed ? null : usb?.Where(u => !u.ports.Any(p => taken.Contains(p.path))).Select(u => new
+                                {
+                                    u.usb, u.vid, u.pid, u.product,
+                                    model = PbxConfig.Profile(u.vid, u.pid)?.Model,
+                                    access = u.ports.Any(p => p.access)
+                                }),
+                                usbAt = g.Managed ? usbAt : null,
+                                errors = g.Managed ? PbxConfig.Validate(s) : new List<string>()
                             }),
-                            modems = modems.Select(m => new
-                            {
-                                m.gateway, m.device, m.state, m.provider, m.model,
-                                used = used.Contains((s.gateways.First(g => g.id == m.gateway).type, m.device))
-                            }),
-                            asterisk = s.pbx.asterisk,
-                            asteriskConnected = HealthStatus.Find(s.pbx.asterisk)?.Connected == true,
-                            confDir = s.pbx.confDir,
-                            asteriskDir = s.pbx.asteriskDir,
-                            sip = new
-                            {
-                                tlsPort = s.pbx.tls?.port, udpPort = s.pbx.udpPort, s.pbx.externalAddress, s.pbx.localNets,
-                                cert = s.pbx.tls?.cert, key = s.pbx.tls?.key,
-                                certInfo = cert == null ? null : new { cert.subject, notAfter = cert.notAfter.ToString("yyyy-MM-dd"), cert.daysLeft }
-                            },
-                            lines,
+                            phones = (s.lines ?? new()).Where(c => PbxConfig.OnManagedAsterisk(s, c) && !string.IsNullOrWhiteSpace(c.phone?.extension))
+                                .Select(c => new
+                                {
+                                    line = c.name, c.phone.extension,
+                                    contacts = contacts?.Where(x => x.extension == c.phone.extension).ToList()
+                                }),
                             contactsError,
-                            errors = PbxConfig.Validate(s),
-                            security = Program.RecentSecurityEvents.Take(50)
+                            security = managed == null ? null : Program.RecentSecurityEvents.Take(50)
+                        });
+                    });
+
+                    // USB modems of the managed Asterisk's host for "+ Modem" in the settings: known models get
+                    // a suggested driver and ports; ports already used by a modem are marked.
+                    app.MapGet("/api/pbx/usb", () =>
+                    {
+                        Settings s;
+                        try { s = Program.ReadSettingsFile(); }
+                        catch (Exception ex) { return Results.Ok(new { ok = false, error = SettingsFile.Describe(ex) }); }
+                        var managed = s.ManagedGateway;
+                        if (managed == null) return Results.Ok(new { ok = false, error = "no gateway has pbx: managed" });
+                        var (usb, usbAt) = Program.ReadUsbInventory(s);
+                        var taken = (managed.modems ?? new()).SelectMany(m => new[] { m.data, m.audio, m.alsadev })
+                            .Where(x => !string.IsNullOrEmpty(x)).ToHashSet();
+                        return Results.Ok(new
+                        {
+                            ok = true,
+                            gateway = managed.id,
+                            usbAt,
+                            usb = usb?.Select(u =>
+                            {
+                                var prof = PbxConfig.Profile(u.vid, u.pid);
+                                string Port(int iface) => iface < 0 ? null : u.ports.FirstOrDefault(p => p.@interface == iface)?.path;
+                                return new
+                                {
+                                    u.usb, u.vid, u.pid, u.manufacturer, u.product,
+                                    model = prof?.Model,
+                                    ports = u.ports.Select(p => new { p.path, p.@interface, p.access, used = taken.Contains(p.path) }),
+                                    sound = u.sound.Select(x => new { x.card, x.alsadev, x.access, used = taken.Contains(x.alsadev) }),
+                                    configured = u.ports.Any(p => taken.Contains(p.path)),
+                                    access = u.ports.Any(p => p.access),
+                                    suggest = prof == null ? null : new
+                                    {
+                                        driver = prof.Driver, data = Port(prof.Data), audio = Port(prof.Audio),
+                                        alsadev = prof.Uac ? u.sound.FirstOrDefault()?.alsadev : null, noqpcmv = prof.NoQpcmv
+                                    }
+                                };
+                            }).ToList()
                         });
                     });
 
@@ -290,71 +300,30 @@ namespace ghostline
                         catch (Exception ex) { return Results.Ok(new { ok = false, errors = new[] { SettingsFile.Describe(ex) } }); }
                     });
 
-                    app.MapPost("/api/pbx/save", async (HttpRequest req) =>
-                    {
-                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { ok = false, errors = new[] { "pbx.mode is not managed" } });
-                        var data = await ReadJson<Program.PbxEdit>(req);
-                        try
-                        {
-                            var r = Program.SavePbx(data);
-                            var files = r.files?.ToDictionary(kv => kv.Key,
-                                kv => System.Text.RegularExpressions.Regex.Replace(kv.Value, @"(?m)^password=.*$", "password=********"));
-                            return Results.Ok(new { r.ok, r.errors, r.secrets, files });
-                        }
-                        catch (Exception ex) { return Results.Ok(new { ok = false, errors = new[] { SettingsFile.Describe(ex) } }); }
-                    });
-
-                    // A line added or removed on the PBX tab: saved, the files applied, then the service
-                    // restarts (the lines are read at start).
-                    app.MapPost("/api/pbx/line", async (HttpRequest req) =>
-                    {
-                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { ok = false, error = "pbx.mode is not managed" });
-                        var data = await ReadJson<PbxLinePayload>(req);
-                        Program.PbxLineResult r;
-                        try
-                        {
-                            r = data?.action == "remove" ? Program.RemoveLine(data.name)
-                                : data?.action == "add" ? Program.AddLine(new(data.name, data.gateway, data.device, data.extension, data.dial, data.encryption))
-                                : new(false, "unknown action", null);
-                        }
-                        catch (Exception ex) { r = new(false, ex.Message, null); }
-                        if (!r.ok) return Results.Ok(new { ok = false, r.error });
-                        var applied = await Program.ApplyPbx();
-                        RestartSoon();
-                        return Results.Ok(new { ok = true, r.secret, applyErrors = applied.errors, restarting = true });
-                    });
-
-                    // A modem added or removed on the PBX tab: saved and applied (the driver reloads gracefully).
-                    // A new gateway for its driver needs a restart.
+                    // A modem added or removed in the settings: saved and, on the managed Asterisk, applied (the
+                    // driver reloads gracefully, after the calls on it end).
                     app.MapPost("/api/pbx/modem", async (HttpRequest req) =>
                     {
-                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { ok = false, error = "pbx.mode is not managed" });
                         var data = await ReadJson<Program.PbxModemEdit>(req);
                         Program.PbxModemResult r;
                         try { r = Program.EditModem(data); }
-                        catch (Exception ex) { r = new(false, ex.Message, false); }
+                        catch (Exception ex) { r = new(false, ex.Message); }
                         if (!r.ok) return Results.Ok(new { ok = false, r.error });
+                        var s = Program.TryReadSettingsFile();
+                        if (s?.ManagedGateway?.id != data.gateway) return Results.Ok(new { ok = true });
                         var applied = await Program.ApplyPbx();
-                        if (r.restart) RestartSoon();
-                        return Results.Ok(new { ok = true, restarting = r.restart, applyErrors = applied.errors, applied.output });
-                    });
-
-                    app.MapPost("/api/pbx/apply", async () =>
-                    {
-                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { ok = false, errors = new[] { "pbx.mode is not managed" } });
-                        return Results.Ok(await Program.ApplyPbx());
+                        return Results.Ok(new { ok = true, applyErrors = applied.errors, applied.output });
                     });
 
                     app.MapPost("/api/pbx/secret", async (HttpRequest req) =>
                     {
-                        if (Program.settings?.pbx?.Managed != true) return Results.Ok(new { ok = false, error = "pbx.mode is not managed" });
                         var data = await ReadJson<SecretPayload>(req);
                         try
                         {
                             string secret = Program.NewPhoneSecret(data?.line);
-                            return secret == null
-                                ? Results.Ok(new { ok = false, error = "the line has no phone.extension" })
-                                : Results.Ok(new { ok = true, secret });
+                            if (secret == null) return Results.Ok(new { ok = false, error = "the line has no phone.extension" });
+                            var applied = await Program.ApplyPbx();
+                            return Results.Ok(new { ok = true, secret, applyErrors = applied.errors });
                         }
                         catch (Exception ex) { return Results.Ok(new { ok = false, error = ex.Message }); }
                     });
@@ -454,7 +423,7 @@ namespace ghostline
                         var data = await ReadJson<ConfigPayload>(req);
                         if (data?.content == null)
                             return Results.Ok(new { ok = false, error = "Empty content" });
-                        return SaveYaml(configPath, data.content, data.restart);
+                        return await SaveYaml(configPath, data.content, data.restart);
                     });
 
                     // Settings form (a tree of sections): fields from the current file.
@@ -489,7 +458,7 @@ namespace ghostline
                             if (ClientSectionPath.IsMatch(path ?? "") && SettingsForm.NewSection(path) is { } first)
                                 yaml = ConfigYaml.AddSection(yaml, path, first);
                         yaml = ConfigYaml.Apply(yaml, data.fields);
-                        return SaveYaml(configPath, yaml, data.restart);
+                        return await SaveYaml(configPath, yaml, data.restart);
                     });
 
                     app.MapPost("/api/restart", () =>
@@ -551,12 +520,15 @@ namespace ghostline
 
         private static string CallFileName(CallRecord c) => Program.CallFileBase(c) + ".wav";
 
-        // Saves the config if it parses; the previous version goes to .bak. With restart, restarts.
-        private static IResult SaveYaml(string configPath, string content, bool restart)
+        // Saves the config if it parses; the previous version goes to .bak. With a managed Asterisk, new
+        // phones get their secret (returned once) and the Asterisk files are written and reloaded. With
+        // restart, restarts.
+        private static async Task<IResult> SaveYaml(string configPath, string content, bool restart)
         {
+            Settings parsed;
             try
             {
-                SettingsFile.Parse(content);
+                parsed = SettingsFile.Parse(content);
             }
             catch (Exception yex)
             {
@@ -573,8 +545,23 @@ namespace ghostline
                 return Results.Ok(new { ok = false, error = ex.Message });
             }
             Console.WriteLine("Settings saved from the web UI" + (restart ? ", restarting" : ""));
+            Dictionary<string, string> secrets = new();
+            Program.PbxApplyResult applied = null;
+            if (parsed.ManagedGateway != null)
+            {
+                try
+                {
+                    secrets = Program.AddMissingPhoneSecrets();
+                    applied = await Program.ApplyPbx();
+                }
+                catch (Exception ex) { applied = new(false, new() { ex.Message }, new(), ""); }
+            }
             if (restart) RestartSoon();
-            return Results.Ok(new { ok = true, restarting = restart });
+            return Results.Ok(new
+            {
+                ok = true, restarting = restart, secrets,
+                pbx = applied == null ? null : new { applied.ok, applied.errors, applied.changed, applied.output }
+            });
         }
 
         // Exit: systemd (Restart=always) or Docker (restart: unless-stopped) brings the service
@@ -583,10 +570,10 @@ namespace ghostline
             _ = Task.Run(async () => { await Task.Delay(500); Environment.Exit(0); });
 
         private static readonly System.Text.RegularExpressions.Regex RemovablePath =
-            new(@"^(gateways\[id=|channels\[name=)[A-Za-z0-9][A-Za-z0-9_.-]*\]$");
+            new(@"^(gateways\[id=|lines\[name=)[A-Za-z0-9][A-Za-z0-9_.-]*\]$");
 
         private static readonly System.Text.RegularExpressions.Regex ClientSectionPath =
-            new(@"^(channels\[name=[A-Za-z0-9][A-Za-z0-9_.-]*\]\.)?clients\.(telegram|ntfy)$");
+            new(@"^(lines\[name=[A-Za-z0-9][A-Za-z0-9_.-]*\]\.)?clients\.(telegram|ntfy)$");
 
         private static async Task<T> ReadJson<T>(HttpRequest req)
         {
@@ -617,6 +604,5 @@ namespace ghostline
         record SettingsPayload(Dictionary<string, string> fields, string[] remove, bool restart = false, string[] add = null);
         record SendPayload(string channel, string number, string text);
         record SecretPayload(string line);
-        record PbxLinePayload(string action, string name, string gateway, string device, string extension, string dial, string encryption);
     }
 }

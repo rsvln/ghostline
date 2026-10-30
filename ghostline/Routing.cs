@@ -8,7 +8,7 @@ namespace ghostline
     //    "line / number / text" when it serves several (the line name first is accepted anyway).
     internal partial class Program
     {
-        private static IEnumerable<Channel> AllLines => settings.channels ?? new List<Channel>();
+        private static IEnumerable<Channel> AllLines => settings.lines ?? new List<Channel>();
 
         // A line uses the clients of its "clients" section; a line without that section (older configs)
         // uses every client that is on. Inside a client section empty chats / topic mean the common ones.

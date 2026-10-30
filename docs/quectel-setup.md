@@ -1,4 +1,4 @@
-# Asterisk/FreePBX setup for `type: quectel`
+# Asterisk/FreePBX setup for chan_quectel (`driver: quectel`)
 
 How to connect ghostline to `chan_quectel` in Asterisk/FreePBX. Tested with
 FreePBX 17 / Asterisk 22 and Quectel EC200A-EU / SIMCom SIM7600G-H modules.
@@ -63,22 +63,25 @@ warning once and the Status tab shows no network data.
 ```yaml
 gateways:
   - id: pbx
-    type: quectel
+    type: asterisk
     ip: 10.0.0.10
     ami_port: 5038
     user: ghostline
     password: <password>
+    modems:
+      - name: gsm1      # device name from quectel.conf
+        driver: quectel
 
-channels:
+lines:
   - name: personal
     gateway: pbx
     pattern: gsm1
-    line: gsm1          # device name from quectel.conf
+    modem: gsm1
 ```
 
 ## 4. Line monitoring
 
-With `monitor: true` (the default for `quectel` gateways) ghostline polls
+With `monitor: true` (the default for `asterisk` gateways) ghostline polls
 `QuectelShowDevices` once a minute. The action only reads the driver's state
 and sends nothing to the modems. Per line it shows:
 
@@ -88,7 +91,7 @@ and sends nothing to the modems. Per line it shows:
 - LAC and cell id (in the tooltip);
 - the modem model and its USB port (taken from `data=`; the full path in the
   tooltip);
-- the SIM's own number when the SIM reports it, else `channels[].number`.
+- the SIM's own number when the SIM reports it, else `lines[].number`.
 
 This is shown on the Status tab and in `/status`. When a line has had no
 network for `monitor.alert_minutes` (default 2), a message goes to the line's

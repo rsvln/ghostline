@@ -56,6 +56,7 @@ namespace ghostline
             try
             {
                 SettingsFile.MigrateFromJson(fs);
+                SettingsFile.MigrateToV2(fs);
                 settings = SettingsFile.Parse(System.IO.File.ReadAllText(fs));
             }
             catch (Exception ex)
@@ -72,23 +73,26 @@ namespace ghostline
             WebUi.Start(fs);
 
             settings.gateways ??= new List<Gateway>();
-            settings.channels ??= new List<Channel>();
-            settings.pbx ??= new PbxSettings();
+            settings.lines ??= new List<Channel>();
 
-            // pbx.mode: managed — ghostline writes the Asterisk config (PBX tab); otherwise FreePBX owns it.
-            Console.WriteLine("pbx: " + (settings.pbx.Managed ? "managed" : "freepbx"));
-            if (settings.pbx.Managed)
+            // gateways[].pbx: managed — ghostline writes that Asterisk's config; otherwise FreePBX owns it.
+            var managed = settings.ManagedGateway;
+            Console.WriteLine("pbx: " + (managed != null ? "managed (" + managed.id + ")" : "freepbx"));
+            if (managed != null)
                 Task.Run(() => PbxCertWatchLoop());
-            else if (settings.channels.Any(c => c.phone != null))
-                Console.WriteLine("Config warning: channels[].phone is used only with pbx.mode: managed, ignored");
+            if (settings.lines.Any(c => c.phone != null && c.gateway != managed?.id))
+                Console.WriteLine("Config warning: lines[].phone is used only on a gateway with pbx: managed, ignored");
 
             // Inconsistent config: a channel refers to a gateway that is not in gateways[].
             // Nothing breaks loudly (the channel simply never fires), so warn explicitly
             // in the log instead of leaving the user guessing why a SIM line is silent.
-            foreach (var ch in settings.channels)
+            foreach (var ch in settings.lines)
             {
-                if (settings.gateways.All(g => g.id != ch.gateway))
-                    Console.WriteLine($"Config warning: channel '{ch.name}' references unknown gateway '{ch.gateway}'");
+                var gw = settings.gateways.FirstOrDefault(g => g.id == ch.gateway);
+                if (gw == null)
+                    Console.WriteLine($"Config warning: line '{ch.name}' references unknown gateway '{ch.gateway}'");
+                else if (gw.IsAsterisk && gw.Modem(ch.modem) == null)
+                    Console.WriteLine($"Config warning: line '{ch.name}': gateway '{gw.id}' has no modem '{ch.modem}'");
             }
 
             foreach (var gw in settings.gateways)

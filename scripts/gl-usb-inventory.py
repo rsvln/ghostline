@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# USB modem inventory for ghostline's PBX tab (pbx.mode: managed). Runs on the Asterisk host as the
+# USB modem inventory for ghostline (gateway pbx: managed). Runs on the Asterisk host as the
 # asterisk user and writes <conf-dir>/usb.json: every USB device with serial ports, its interfaces
 # and sound cards, and whether Asterisk may open them. Only sysfs and file permissions are read;
 # nothing is sent to the modems (no AT commands, no port is opened).

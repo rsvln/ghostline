@@ -1,4 +1,4 @@
-# Plain Asterisk for `pbx.mode: managed`
+# Plain Asterisk for `pbx: managed`
 
 [scripts/asterisk-install.sh](../scripts/asterisk-install.sh) sets up a
 plain Asterisk that ghostline manages ([managed-pbx.md](managed-pbx.md)),
@@ -57,12 +57,12 @@ is shown only when `manager.conf` is created.
 | `logger.conf` | `messages` and `security` logs (fail2ban reads `security`) |
 | `modules.conf` | autoload without the CSV/manager CDR and unused drivers |
 | `rtp.conf` | RTP ports 10000–20000 |
-| `quectel.conf`, `dongle.conf` | `[general]` / `[defaults]` and `#include` of the files ghostline writes; the modems are added on the PBX tab |
-| `gl-usb-inventory` (timer, every 30 s) | writes `<conf-dir>/usb.json`, the USB modems for the PBX tab; reads sysfs only |
+| `quectel.conf`, `dongle.conf` | `[general]` / `[defaults]` and `#include` of the files ghostline writes; the modems are added in ghostline's settings |
+| `gl-usb-inventory` (timer, every 30 s) | writes `<conf-dir>/usb.json`, the USB modems ghostline offers; reads sysfs only |
 | `<conf-dir>/keys/sip.crt`, `sip.key` | self-signed certificate, so TLS starts |
 
 `pjsip_ghostline.conf` and `extensions_ghostline.conf` start as empty
-placeholders. ghostline replaces them on Apply.
+placeholders. ghostline replaces them when its settings are saved.
 
 There are no sample configs, so at start Asterisk logs "Unable to load config
 file" for modules that are not used here (ARI, parking, confbridge and
@@ -70,7 +70,8 @@ others). These errors are expected.
 
 ## 3. Modems
 
-The modems are added on ghostline's PBX tab ("+ Modem"): the USB device and
+The modems are added in ghostline's settings (Gateways → gateway → Modems,
+"+ Modem"): the USB device and
 its ports are chosen from lists, known models are filled in. In a container
 the USB devices must be passed through first (below); a modem Asterisk cannot
 open is listed as "not passed to Asterisk" and cannot be chosen.
@@ -128,39 +129,38 @@ lxc.mount.entry: /dev/ttyUSB0 dev/ttyUSB0 none bind,optional,create=file
 
 A UAC sound card (Quectel EC200A) is passed the same way: `c 116:* rwm`, a
 bind mount of `/dev/snd`, and a rule with `SUBSYSTEM=="sound"` and
-`GROUP="100029"` (`audio`). Restart the container. Within 30 s the PBX tab
-lists the modem as available.
+`GROUP="100029"` (`audio`). Restart the container. Within 30 s the Status
+tab lists the modem as a free USB modem, and "+ Modem" offers it.
 
 ## 5. ghostline
 
 ```yaml
 gateways:
   - id: pbx
-    type: quectel            # dongle for chan_dongle; one entry per driver
+    type: asterisk
     ip: 10.0.0.12            # the Asterisk container
     ami_port: 5038
     user: ghostline
     password: <from the script>
-
-pbx:
-  mode: managed
-  asterisk: pbx
-  conf_dir: /srv/asterisk-conf
-  asterisk_dir: /etc/asterisk/ghostline
-  tls:
-    cert: keys/sip.crt
-    key: keys/sip.key
-    port: 5061
-  external_address: sip.example.org
-  local_nets: [10.0.0.0/8]
+    pbx: managed
+    managed:
+      conf_dir: /srv/asterisk-conf
+      asterisk_dir: /etc/asterisk/ghostline
+      sip:
+        tls:
+          cert: keys/sip.crt
+          key: keys/sip.key
+          port: 5061
+        external_address: sip.example.org
+        local_nets: [10.0.0.0/8]
 
 calls:
   cdr_sqlite: /srv/asterisk-cdr/cdr.db
   recordings_dir: /srv/asterisk-rec
 ```
 
-Then on the PBX tab: add a `phone` to the lines, "New secret" for each, and
-Apply. Check in Asterisk:
+Then in Settings: add the modems ("+ Modem"), the lines on them and their
+phones, and save; each new phone's secret is shown once. Check in Asterisk:
 
 ```
 asterisk -rx "pjsip show transports"
@@ -175,11 +175,11 @@ usually refuse it. Put a real one at the same paths, `keys/sip.crt` (with the
 chain) and `keys/sip.key`, readable by `asterisk`. For example, use acme.sh
 with a DNS challenge and a deploy hook that copies the files and runs
 `asterisk -rx "module reload res_pjsip.so"`. ghostline shows the expiry on
-the PBX tab and warns 14 days ahead.
+the Status tab and warns 14 days ahead.
 
 ## 7. Firewall and NAT
 
-From outside only SIP TLS (`pbx.tls.port`) and the RTP range
+From outside only SIP TLS (`managed.sip.tls.port`) and the RTP range
 (10000–20000/udp) need to be forwarded. AMI (5038) must not be reachable from
 outside; `manager.conf` permits only ghostline anyway.
 

@@ -1,6 +1,8 @@
 # ghostline configuration. All keys are described in README.md (Configuration).
 # An unknown key stops the service at startup, so a typo cannot silently disable an option.
-# After the first start the file can also be edited in the web interface (Config tab).
+# After the first start the file can also be edited in the web interface (Settings tab).
+# Files of older versions (channels, gateway types quectel/dongle, a top-level pbx section) are
+# converted once on start; the old file is kept as ghostline.yaml.bak-v2.
 
 mode: sms                     # sms | full (full also handles calls)
 
@@ -31,35 +33,46 @@ logger:
 
 gateways:
   - id: pbx
-    type: quectel             # quectel | dongle | yeastar | goip
+    type: asterisk            # asterisk | yeastar | goip
     ip: 10.0.0.10
     ami_port: 5038
     user: ghostline
     password: ami-secret
-    monitor: true             # quectel: registration, operator, network, signal
+    monitor: true             # registration, operator, network, signal of every modem
+    pbx: freepbx              # freepbx (default) | managed (docs/managed-pbx.md)
+    modems:                   # as named in quectel.conf / dongle.conf
+      - name: gsm1
+        driver: quectel       # quectel | dongle
 
 # A line without network for this many minutes: a message to its chats/topic; 0: none.
 monitor:
   alert_minutes: 2
 
-channels:
+lines:
   - name: personal
     gateway: pbx
     pattern: gsm1
-    line: gsm1
+    modem: gsm1               # a modem of the gateway; yeastar / goip: port: <n>
     number: "+79001234567"
 
-# pbx.mode: managed only: ghostline writes the PBX config of a plain Asterisk
-# (docs/managed-pbx.md, docs/asterisk-setup.md). Lines then get a phone:
-#   channels: [{ ..., phone: { extension: "11", dial: ru, encryption: sdes } }]
-# pbx:
-#   mode: managed                    # freepbx (default) | managed
-#   asterisk: pbx                    # gateway id of the managed Asterisk
-#   conf_dir: /srv/asterisk-conf     # shared with Asterisk
-#   asterisk_dir: /etc/asterisk/ghostline
-#   tls: { cert: keys/sip.crt, key: keys/sip.key, port: 5061 }
-#   external_address: sip.example.org
-#   local_nets: [10.0.0.0/8]
+# A plain Asterisk managed by ghostline (docs/managed-pbx.md, docs/asterisk-setup.md):
+# ghostline writes its PJSIP, dialplan and modem files, and its lines can have a phone.
+#   gateways:
+#     - id: pbx
+#       type: asterisk
+#       ...
+#       pbx: managed
+#       managed:
+#         conf_dir: /srv/asterisk-conf     # shared with Asterisk
+#         asterisk_dir: /etc/asterisk/ghostline
+#         sip:
+#           tls: { cert: keys/sip.crt, key: keys/sip.key, port: 5061 }
+#           external_address: sip.example.org
+#           local_nets: [10.0.0.0/8]
+#       modems:
+#         - { name: gsm1, driver: quectel, data: /dev/serial/by-path/..., audio: /dev/serial/by-path/... }
+#   lines:
+#     - { ..., phone: { extension: "11", dial: ru, encryption: sdes } }
 
 # mode: full only
 # calls:

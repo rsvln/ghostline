@@ -134,7 +134,7 @@ namespace ghostline
             }
 
             // Monitored lines: operator, network type, signal; or how long the line has had no network.
-            var radio = (settings.channels ?? new())
+            var radio = (settings.lines ?? new())
                 .Where(ch => RadioMonitored(getGatewayById(ch.gateway)))
                 .Select(ch => LineRadio(ch) is { } r
                     ? $"{(r.Up ? "📶" : "⚠️")} {Html(ch.name)}: {Html(RadioSummary(r))}"

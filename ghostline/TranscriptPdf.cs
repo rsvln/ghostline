@@ -41,7 +41,7 @@ namespace ghostline
             string when = Program.ParseTs(call.Ts).ToString("dd.MM.yyyy HH:mm");
             string dur = $"{call.Billsec / 60}:{call.Billsec % 60:D2}";
 
-            var ch = Program.settings.channels?.FirstOrDefault(c => c.name == call.Channel);
+            var ch = Program.settings.lines?.FirstOrDefault(c => c.name == call.Channel);
             string number = Program.LineNumber(ch);
             string mine = number == null ? call.Channel : FormatPhone(number);
             string peer = FormatPhone(call.Peer) + (string.IsNullOrEmpty(call.PeerName) ? "" : $" ({call.PeerName})");

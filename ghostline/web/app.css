@@ -393,16 +393,10 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .pbx-err { color: var(--red); margin: 2px 0; }
 .pbx-file { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin: 6px 0 14px;
   font-family: 'JetBrains Mono', monospace; font-size: 12px; white-space: pre; overflow-x: auto; }
-#panel-pbx .stat-table td { text-align: left; vertical-align: middle; }
-#pbx-lines input, #pbx-lines select {
-  background: var(--bg3); border: 1px solid var(--border); color: var(--text);
-  padding: 4px 6px; border-radius: 6px; font-size: 13px; font-family: inherit;
-}
-#pbx-lines input { width: 9ch; }
-#pbx-lines select:disabled { opacity: .4; }
-#pbx-lines .changed { border-color: var(--yellow); }
-.pbx-sip-form { max-width: 900px; margin-bottom: 14px; }
-.pbx-dirty { color: var(--yellow); font-size: 12px; }
+#status-pbx .stat-table td, .tree-pane .stat-table td { text-align: left; vertical-align: middle; }
+.tree-pane .stat-table { margin-top: 4px; }
+.pbx-usb { margin-top: 8px; font-size: 12px; line-height: 1.6; }
+.pbx-usb b { display: block; font-weight: 500; color: var(--muted); }
 .pbx-add { margin-top: 10px; }
 .pbx-port { font-size: 11px; }
 .pbx-add-form { max-width: 900px; margin-bottom: 8px; }

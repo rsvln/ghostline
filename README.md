@@ -193,17 +193,20 @@ logger:
 
 gateways:
   - id: pbx
-    type: quectel
+    type: asterisk
     ip: 10.0.0.10
     ami_port: 5038
     user: ghostline
     password: ami-secret
+    modems:                   # as named in quectel.conf / dongle.conf
+      - name: gsm1
+        driver: quectel
 
-channels:
+lines:
   - name: personal
     gateway: pbx
     pattern: gsm1
-    line: gsm1
+    modem: gsm1
     number: "+79001234567"    # optional; used when the SIM does not report its own number
     clients:                  # optional; without it the common chats and topic
       telegram:
@@ -255,41 +258,46 @@ goip:
 | `logger.file` | Write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log` |
 | `goip.smtp.enabled` / `goip.smtp.port` | Built-in SMTP server for GoIP gateways that deliver SMS by e-mail |
 | `monitor.alert_minutes` | A monitored line without network this long gets a message in its chats/topic, and another when it is back; `0` — no messages. Default `2` |
-| `pbx.mode` | `freepbx` (default): FreePBX owns the PBX, ghostline only connects. `managed`: ghostline writes the PJSIP and dialplan of a plain Asterisk (PBX tab), see [docs/managed-pbx.md](docs/managed-pbx.md) |
-| `pbx.asterisk` / `conf_dir` / `asterisk_dir` / `tls` / `udp_port` / `external_address` / `local_nets` / `recordings_path` | `managed` only: see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
 
 A client is on when its section is there (with a token / url); remove the
 section to turn it off. A top-level `telegram` section of older configs is
 still read as `clients.telegram` and is moved there when the config is saved
-from the web interface.
+from the web interface. Files of versions before the managed PBX (`channels`,
+gateway types `quectel` / `dongle`, a top-level `pbx` section) are converted
+once on start, keeping the comments; the old file stays as
+`ghostline.yaml.bak-v2`.
 
 `gateways[]`:
 
 | Field | Description |
 |---|---|
 | `id` | Unique name of the gateway, shown in the web interface |
-| `type` | `quectel`, `dongle`, `yeastar` or `goip` |
+| `type` | `asterisk` (with chan_quectel / chan_dongle modems), `yeastar` or `goip` |
 | `ip` | Gateway address |
-| `ami_port` | AMI port (`quectel`, `dongle`, `yeastar`) |
+| `ami_port` | AMI port (`asterisk`, `yeastar`) |
 | `http_port` | HTTP port used for sending SMS (`yeastar`, `goip`) |
-| `user` / `password` | AMI credentials (`quectel`, `dongle`, `yeastar`) or HTTP credentials (`goip`) |
-| `monitor` | `quectel`, `dongle`: poll the lines' registration, operator, network type and signal; default `true`. The AMI user needs `reporting` in `write`, see [docs/quectel-setup.md](docs/quectel-setup.md#4-line-monitoring) |
+| `user` / `password` | AMI credentials (`asterisk`, `yeastar`) or HTTP credentials (`goip`) |
+| `monitor` | `asterisk`: poll the modems' registration, operator, network type and signal; default `true`. The AMI user needs `reporting` in `write`, see [docs/quectel-setup.md](docs/quectel-setup.md#4-line-monitoring) |
+| `pbx` | `asterisk`: `freepbx` (default): FreePBX owns the PBX, ghostline only connects. `managed`: ghostline writes the PJSIP, dialplan and modem files of a plain Asterisk, see [docs/managed-pbx.md](docs/managed-pbx.md); one gateway at most |
+| `managed.*` | `pbx: managed` only: `conf_dir`, `asterisk_dir`, `recordings_path`, `sip.tls`, `sip.udp_port`, `sip.external_address`, `sip.local_nets`, see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
+| `modems[]` | `asterisk`: its modems. `name` (device name in quectel.conf / dongle.conf) and `driver` (`quectel` / `dongle`); with `pbx: managed` also the ports `data`, `audio` or `alsadev`, and `noqpcmv` |
 
-`channels[]` (SIM lines):
+`lines[]` (SIM lines):
 
 | Field | Description |
 |---|---|
 | `name` | Line name, used in bot commands and in the interface; unique |
 | `gateway` | `gateways[].id` this line belongs to |
 | `pattern` | String incoming events are matched against |
-| `line` | Port number (`yeastar`, `goip`) or `chan_quectel` / `chan_dongle` device name (`gsm1`, `hw1`, …) |
-| `number` | The line's own phone number, for the Status tab and transcript headers; optional. A number the SIM reports itself (`quectel`, `dongle`) takes precedence |
+| `modem` | `asterisk`: one of the gateway's `modems[].name` |
+| `port` | `yeastar`, `goip`: port number |
+| `number` | The line's own phone number, for the Status tab and transcript headers; optional. A number the SIM reports itself (`asterisk` modems) takes precedence |
 | `clients` | Clients of the line: notifications go only to the ones listed. No `clients` section — every client that is on; `clients: {}` — nowhere |
 | `clients.telegram.chat_ids` | Telegram chats of the line (SMS and calls); empty — the common ones |
 | `clients.ntfy.topic` | ntfy topic of the line; empty — the common one |
 | `calls.voice` / `calls.transcript` / `calls.missed` | What to send for calls on this line |
 | `calls.chat_ids` | Telegram chats for this line's calls only; empty — the line's chats |
-| `phone.extension` / `dial` / `encryption` | `pbx.mode: managed` only: the line's SIP phone, see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
+| `phone.extension` / `dial` / `encryption` | A line on the gateway with `pbx: managed` only: the line's SIP phone, see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
 
 `calls` (mode `full`):
 
@@ -308,7 +316,7 @@ recording each side of the call, transcription service) is described in
 [docs/pbx-setup-calls.md](docs/pbx-setup-calls.md). AMI and dialplan setup for
 `chan_quectel` is in [docs/quectel-setup.md](docs/quectel-setup.md), for
 `chan_dongle` in [docs/dongle-setup.md](docs/dongle-setup.md). A plain
-Asterisk without FreePBX, for `pbx.mode: managed`, is set up by
+Asterisk without FreePBX, for `pbx: managed`, is set up by
 [scripts/asterisk-install.sh](scripts/asterisk-install.sh), see
 [docs/asterisk-setup.md](docs/asterisk-setup.md).
 

@@ -131,7 +131,7 @@ clients:
     token: tk_...
     topic:                           # common topic, for lines without their own
 
-channels:
+lines:
   - name: home
     ...
     clients:
@@ -142,7 +142,7 @@ channels:
 Each line goes to its own topic or to the common one, the same way as
 Telegram chats (`clients.telegram.chat_ids`). Both channels can be on at the
 same time; an empty `url` turns ntfy off. The same settings are in the web
-interface: Config → Clients → ntfy, and Lines → line → Clients → ntfy.
+interface: Settings → Clients → ntfy, and Lines → line → Clients → ntfy.
 
 The state of the connection is on the Status tab and in `/status`.
 

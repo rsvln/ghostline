@@ -8,6 +8,7 @@ namespace ghostline.Tests
     // then review the diff before committing.
     public class PbxConfigTests
     {
+        // In the format before 2026-10-30 on purpose: it goes through SettingsFile.Normalize.
         static Settings Sample() => SettingsFile.Parse("""
             mode: full
             gateways:
@@ -55,6 +56,10 @@ namespace ghostline.Tests
               udp_port: 5060
               external_address: sip.example.org
               local_nets: [192.0.2.0/24, 10.0.0.0/8]
+              modems:
+                - { name: gsm1, driver: quectel, data: /dev/serial/by-path/usb-0:1:1.3-port0, alsadev: "hw:CARD=Android,DEV=0", noqpcmv: true }
+                - { name: gsm2, driver: quectel, data: /dev/serial/by-path/usb-0:2:1.3-port0, audio: /dev/serial/by-path/usb-0:2:1.4-port0 }
+                - { name: hw1, driver: dongle, data: /dev/serial/by-path/usb-0:7:1.3-port0, audio: /dev/serial/by-path/usb-0:7:1.2-port0 }
             """);
 
         static string GoldenDir => Path.Combine(AppContext.BaseDirectory, "golden");
@@ -93,10 +98,10 @@ namespace ghostline.Tests
         public void ValidationCatchesUnsafeValues()
         {
             var s = Sample();
-            s.channels[0].phone.secret = "short";
-            s.channels[1].phone.extension = "11";
-            s.pbx.externalAddress = "evil\nhost";
-            s.pbx.localNets = new() { "not a net" };
+            s.lines[0].phone.secret = "short";
+            s.lines[1].phone.extension = "11";
+            s.ManagedGateway.managed.sip.externalAddress = "evil\nhost";
+            s.ManagedGateway.managed.sip.localNets = new() { "not a net" };
             var errors = PbxConfig.Validate(s);
             Assert.Contains(errors, e => e.Contains("no phone secret"));
             Assert.Contains(errors, e => e.Contains("extension 11 is used by more than one line"));
@@ -108,7 +113,7 @@ namespace ghostline.Tests
         public void FreepbxModeIsNotGenerated()
         {
             var s = Sample();
-            s.pbx.mode = "freepbx";
+            s.ManagedGateway.pbx = "freepbx";
             Assert.Contains(PbxConfig.Validate(s), e => e.Contains("managed"));
         }
 
@@ -116,7 +121,7 @@ namespace ghostline.Tests
         public void NewSecretIsValid()
         {
             var s = Sample();
-            s.channels[0].phone.secret = PbxConfig.NewSecret();
+            s.lines[0].phone.secret = PbxConfig.NewSecret();
             Assert.Empty(PbxConfig.Validate(s));
             Assert.NotEqual(PbxConfig.NewSecret(), PbxConfig.NewSecret());
         }

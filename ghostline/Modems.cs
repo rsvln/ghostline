@@ -4,7 +4,7 @@ namespace ghostline
     // and keeps its design, so the two differ only in names: the AMI events and actions, the CLI
     // word and the channel technology.
     internal sealed record ModemFlavor(
-        string Type,        // gateways[].type
+        string Driver,      // gateways[].modems[].driver
         string Letter,      // gateway letter in the SMS history and the log ("q", "d")
         string Prefix,      // AMI names: <Prefix>NewSMS, <Prefix>ShowDevices, <Prefix>DeviceEntry
         string Cli,         // "<cli> sms <device> <number> <text>"
@@ -19,15 +19,13 @@ namespace ghostline
     {
         public static readonly ModemFlavor Quectel = new("quectel", "q", "Quectel", "quectel", "Quectel");
         public static readonly ModemFlavor Dongle = new("dongle", "d", "Dongle", "dongle", "Dongle");
-        private static readonly ModemFlavor[] All = { Quectel, Dongle };
+        internal static readonly ModemFlavor[] All = { Quectel, Dongle };
 
-        // null: not an Asterisk modem gateway (yeastar, goip).
-        public static ModemFlavor For(string type) => All.FirstOrDefault(f => f.Type == type);
+        // null: not a modem driver.
+        public static ModemFlavor For(string driver) => All.FirstOrDefault(f => f.Driver == driver);
 
-        public static bool IsModem(string type) => For(type) != null;
-
-        // Gateways with a permanent AMI connection: the modem drivers and Yeastar.
-        public static bool IsAmi(string type) => IsModem(type) || type == "yeastar";
+        // Gateways with a permanent AMI connection: Asterisk and Yeastar.
+        public static bool IsAmi(string type) => type is "asterisk" or "yeastar";
 
         // "Quectel/gsm1-0100000002" → "gsm1", "Dongle/hw1-0100000001" → "hw1"; null for any other channel.
         public static string Device(string channel)

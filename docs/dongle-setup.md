@@ -1,4 +1,4 @@
-# Asterisk/FreePBX setup for `type: dongle`
+# Asterisk/FreePBX setup for chan_dongle (`driver: dongle`)
 
 [chan_dongle](https://github.com/wdoekes/asterisk-chan-dongle) drives Huawei
 3G USB sticks (E1550, E173, E171, E352 and similar). chan_quectel is a fork of
@@ -73,22 +73,28 @@ data=/dev/serial/by-path/pci-0000:00:14.0-usb-0:7:1.1-port0
 ## 4. ghostline
 
 The AMI user is the one from quectel-setup.md (`write` with `command` and
-`reporting`). The gateway gets its own entry, even on the same PBX:
+`reporting`). A chan_dongle modem is one more modem of the same Asterisk
+gateway; one AMI connection serves both drivers:
 
 ```yaml
 gateways:
-  - id: dongle1
-    type: dongle
+  - id: pbx
+    type: asterisk
     ip: 10.0.0.10
     ami_port: 5038
     user: ghostline
     password: <password>
+    modems:
+      - name: gsm1
+        driver: quectel
+      - name: hw1        # device name from dongle.conf
+        driver: dongle
 
-channels:
+lines:
   - name: line3
-    gateway: dongle1
+    gateway: pbx
     pattern: hw1
-    line: hw1            # device name from dongle.conf
+    modem: hw1
 ```
 
 ## 5. Line monitoring

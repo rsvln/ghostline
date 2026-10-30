@@ -5,7 +5,7 @@ const t = (k, ...a) => (I18N[k] ?? k).replace(/\{(\d+)\}/g, (_, i) => a[i]);
 // Every view has its own address: /calls, /sms, /log, /status, /config, /config/yaml, /about,
 // with the filters in the query string. F5 shows the same view, links can be shared and
 // the browser's Back / Forward move between views. "/" opens the view seen last.
-const TABS = ['calls', 'sms', 'log', 'status', 'pbx', 'config', 'about'];
+const TABS = ['calls', 'sms', 'log', 'status', 'config', 'about'];
 const val = id => document.getElementById(id).value;
 const checked = id => document.getElementById(id).checked;
 
@@ -50,7 +50,6 @@ function parseRoute() {
   const q = Object.fromEntries(new URLSearchParams(location.search));
   let view = TABS.includes(parts[0]) ? parts[0] : defaultView();
   if (view === 'calls' && MODE.mode !== 'full') view = 'sms';
-  if (view === 'pbx' && MODE.pbx !== 'managed') view = defaultView();
   return { view, sub: parts[1], q };
 }
 
@@ -128,8 +127,6 @@ async function render() {
     loadLog();
   } else if (r.view === 'status') {
     loadStatus();
-  } else if (r.view === 'pbx') {
-    loadPbx();
   } else if (r.view === 'config') {
     // The open config view is not reloaded when another tree section is chosen, so edits are kept.
     const mode = r.sub === 'yaml' ? 'yaml' : 'form';
@@ -554,162 +551,194 @@ async function loadStatus() {
     ? `<caption>* ${esc(t('web.status.not_in_config'))}</caption>` : '';
   document.getElementById('status-lines').innerHTML = note + head + `<tbody>${rows ||
     `<tr><td colspan="12" style="color:var(--muted)">${esc(t('web.status.no_data'))}</td></tr>`}</tbody>`;
+  loadStatusPbx();
 }
 
-// ---- PBX (pbx.mode: managed) ----
-// ghostline writes the PJSIP and dialplan files of the plain Asterisk. On this tab: each modem line's
-// phone (extension, dial set, media encryption, secret) and the SIP transport. Apply saves the changes
-// into the config, writes the files and reloads Asterisk; Preview shows the files with the changes.
+// ---- PBX on the Status tab: Asterisk gateways, their modems, the phones, SIP security ----
+// Read only; modems and phones are set up in the settings (a gateway's Modems, a line's Phone).
 
-let pbxData = null;
-
-function pbxOptions(values, current) {
-  return values.map(v => `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`).join('');
+// A link to a section of the settings tree.
+function settingsLink(node, text) {
+  return `<a href="${esc(buildUrl('/config', { s: node }))}" onclick="event.preventDefault(); navigate(this.getAttribute('href'))">${esc(text)}</a>`;
 }
 
-async function loadPbx() {
+function modemStateCell(m, connected) {
+  if (!connected) return `<span class="muted">${esc(t('web.pbx.no_ami'))}</span>`;
+  if (!m.found) return `<span class="hdot err"></span>${esc(t('web.pbx.modem.not_seen'))}`;
+  const ok = /free|ring|dial|active|busy|incoming|outgoing|waiting/i.test(m.state || '');
+  return `<span class="hdot ${ok ? 'ok' : 'err'}"></span>${esc(m.state || '')}`
+    + (m.provider ? ` <span class="muted">${esc(m.provider)}</span>` : '');
+}
+
+function phoneRegCell(p) {
+  if (!p.contacts) return `<span class="muted">${esc(t('web.pbx.no_ami'))}</span>`;
+  const c = p.contacts[0];
+  if (!c) return `<span class="hdot err"></span>${esc(t('web.pbx.not_registered'))}`;
+  return `<span class="hdot ${/avail|reachable/i.test(c.status) ? 'ok' : 'err'}"></span>${esc(c.status)}`
+    + (c.rttMs != null ? ` <span class="muted">${esc(c.rttMs.toFixed(0))} ms</span>` : '');
+}
+
+async function loadStatusPbx() {
+  const host = document.getElementById('status-pbx');
   let d;
-  try { d = await (await fetch('/api/pbx')).json(); } catch { return; }
-  if (!d.managed) return;
-  pbxData = d;
-  renderPbxModems();
-  const errs = (d.error ? [d.error] : []).concat(d.errors || []);
-  document.getElementById('pbx-errors').innerHTML = errs.length
-    ? `<h3>${esc(t('web.pbx.problems'))}</h3>` + errs.map(e => `<div class="pbx-err">${esc(e)}</div>`).join('')
-    : '';
+  try { d = await (await fetch('/api/status/pbx')).json(); } catch { return; }
+  if (!d.gateways?.length) { host.innerHTML = ''; return; }
+  const th = keys => `<thead><tr>${keys.map(k => `<th>${esc(k.startsWith('web.') ? t(k) : k)}</th>`).join('')}</tr></thead>`;
+  let html = '';
 
-  const rows = (d.lines || []).map(l => {
-    const c = (l.contacts || [])[0];
-    const reg = !l.managedHere ? `<span class="muted">${esc(t('web.pbx.other_pbx', l.gatewayIp || l.gateway))}</span>`
-      : !l.hasPhone ? ''
-      : !d.asteriskConnected ? `<span class="muted">${esc(t('web.pbx.no_ami'))}</span>`
-      : c ? `<span class="hdot ${/avail|reachable/i.test(c.status) ? 'ok' : 'err'}"></span>${esc(c.status)}`
-            + (c.rttMs != null ? ` <span class="muted">${esc(c.rttMs.toFixed(0))} ms</span>` : '')
-      : `<span class="hdot err"></span>${esc(t('web.pbx.not_registered'))}`;
-    const secret = !l.hasPhone ? ''
-      : (l.hasSecret ? '' : `<span class="pbx-err">${esc(t('web.pbx.no_secret'))}</span> `)
-        + `<button class="btn" data-line="${esc(l.name)}" onclick="newSecret(this.dataset.line)">${esc(t('web.pbx.new_secret'))}</button>`;
-    const off = l.managedHere ? '' : ' disabled';
-    return `<tr data-line="${esc(l.name)}"><td>${esc(l.name)}</td><td>${esc(l.device)}</td>
-      <td><input class="pbx-in pbx-ext" data-k="extension" value="${esc(l.extension)}" data-orig="${esc(l.extension)}"
-        placeholder="${esc(t('web.pbx.no_phone'))}" inputmode="numeric" maxlength="6"${off}></td>
-      <td><select class="pbx-in" data-k="dial" data-orig="${esc(l.dial)}">${pbxOptions(['ru', 'ru+intl'], l.dial)}</select></td>
-      <td><select class="pbx-in" data-k="encryption" data-orig="${esc(l.encryption)}">${pbxOptions(['sdes', 'no'], l.encryption)}</select></td>
-      <td title="${esc(c ? c.uri : '')}">${reg}</td>
-      <td>${secret}</td>
-      <td class="muted">${l.hasPhone ? esc(l.modemContext) : ''}</td>
-      <td>${l.managedHere ? `<button class="btn" data-line="${esc(l.name)}" onclick="removePbxLine(this.dataset.line)"
-        title="${esc(t('web.pbx.remove_line'))}">✕</button>` : ''}</td></tr>`;
-  }).join('');
-  document.getElementById('pbx-lines').innerHTML = `<thead><tr><th>${esc(t('web.status.col.line'))}</th>`
-    + `<th>${esc(t('web.pbx.col.device'))}</th><th>${esc(t('web.pbx.col.ext'))}</th><th>${esc(t('web.pbx.col.dial'))}</th>`
-    + `<th>${esc(t('web.pbx.col.srtp'))}</th><th>${esc(t('web.pbx.col.reg'))}</th><th>${esc(t('web.pbx.col.secret'))}</th>`
-    + `<th>${esc(t('web.pbx.col.modem'))}</th><th></th></tr></thead>`
-    + `<tbody>${rows || `<tr><td colspan="9" class="muted">${esc(t('web.pbx.no_phones'))}</td></tr>`}</tbody>`;
+  for (const g of d.gateways) {
+    const title = t(g.managed ? 'web.pbx.status.managed' : 'web.pbx.status.freepbx', g.id);
+    const conn = `<span class="hdot ${g.connected ? 'ok' : 'err'}"></span>${esc(t(g.connected ? 'web.status.state.ok' : 'web.status.state.err'))}`;
+    const cert = g.cert ? ` <span class="muted">· ${esc(t('web.pbx.cert'))} ${esc(t('web.pbx.cert.until'))} ${esc(g.cert.notAfter)}, `
+      + `${esc(t('web.pbx.cert.days', g.cert.daysLeft))}</span>` : '';
+    const rows = g.modems.map(m => `<tr><td>${settingsLink('gw:' + g.id + '/modems', m.name)}</td><td>${esc(m.driver)}</td>
+        <td>${esc(m.model || '')}</td><td>${esc(m.usb || '')}</td><td>${modemStateCell(m, g.connected)}</td>
+        <td>${m.line ? settingsLink('ln:' + m.line, m.line) : `<span class="muted">${esc(t('web.pbx.modem.free'))}</span>`}</td></tr>`)
+      .concat((g.unknown || []).map(x => `<tr class="gone"><td>${esc(x.device)} *</td><td></td><td>${esc(x.model || '')}</td><td></td>
+        <td>${esc(x.state || '')} <span class="muted">${esc(x.provider || '')}</span></td><td class="muted">${esc(t('web.pbx.modem.unknown'))}</td></tr>`))
+      .join('');
+    const usb = (g.usb || []).map(u => `<div>USB ${esc(u.usb)} · ${esc(u.model || u.product || '')} · ${esc(u.vid + ':' + u.pid)} — `
+      + `<span class="muted">${esc(t(u.access ? 'web.pbx.usb.free' : 'web.pbx.modem.no_access'))}</span></div>`).join('');
+    const errs = (g.errors || []).map(e => `<div class="pbx-err">${esc(e)}</div>`).join('');
+    html += `<div class="section"><h3>${esc(title)} · ${conn}${cert}</h3>
+      <table class="stat-table">${th(['web.pbx.modem.name', 'web.pbx.modem.driver', 'web.pbx.modem.model', 'USB', 'web.pbx.modem.state', 'web.status.col.line'])}
+      <tbody>${rows || `<tr><td colspan="6" class="muted">${esc(t('web.pbx.modem.none'))}</td></tr>`}</tbody></table>
+      ${usb ? `<div class="pbx-usb"><b>${esc(t('web.pbx.usb.title'))}</b>${usb}</div>` : ''}
+      ${errs ? `<div class="pbx-usb"><b>${esc(t('web.pbx.problems'))}</b>${errs}</div>` : ''}</div>`;
+  }
 
-  renderPbxAdd(false);
+  if (d.phones?.length) {
+    const rows = d.phones.map(p => `<tr><td>${settingsLink('ln:' + p.line + '/phone', p.line)}</td><td>${esc(p.extension)}</td>
+      <td title="${esc(p.contacts?.[0]?.uri || d.contactsError || '')}">${phoneRegCell(p)}</td></tr>`).join('');
+    html += `<div class="section"><h3>${esc(t('web.pbx.phones'))}</h3>
+      <table class="stat-table">${th(['web.status.col.line', 'web.pbx.col.ext', 'web.pbx.col.reg'])}<tbody>${rows}</tbody></table></div>`;
+  }
 
-  const s = d.sip || {};
-  const field = (k, label, value, attrs = '') =>
-    `<label>${esc(label)}<input class="pbx-in" data-k="${k}" value="${esc(value ?? '')}" data-orig="${esc(value ?? '')}" ${attrs}></label>`;
-  document.getElementById('pbx-sip-form').innerHTML =
-    field('tlsPort', t('web.pbx.tls_port'), s.tlsPort, 'inputmode="numeric"')
-    + field('udpPort', t('web.pbx.udp_port'), s.udpPort || 0, `inputmode="numeric" title="${esc(t('web.pbx.udp_hint'))}"`)
-    + field('externalAddress', t('web.pbx.external'), s.externalAddress, 'placeholder="sip.example.org"')
-    + field('localNets', t('web.pbx.local_nets'), (s.localNets || []).join(', '), 'placeholder="192.168.0.0/16, 10.0.0.0/8"')
-    + field('cert', t('web.pbx.cert_path'), s.cert, 'placeholder="keys/sip.crt"')
-    + field('key', t('web.pbx.key_path'), s.key, 'placeholder="keys/sip.key"');
-
-  const cert = s.certInfo
-    ? [[t('web.pbx.cert.subject'), s.certInfo.subject], [t('web.pbx.cert.until'), `${s.certInfo.notAfter} (${t('web.pbx.cert.days', s.certInfo.daysLeft)})`]]
-    : [[t('web.pbx.cert.file'), s.cert || '-']];
-  document.getElementById('pbx-sip').innerHTML =
-    queueCard(t('web.pbx.cert'), cert)
-    + queueCard('Asterisk', [[t('web.pbx.gateway'), (d.asterisk || '-') + ' · ' + t(d.asteriskConnected ? 'web.status.state.ok' : 'web.status.state.err')],
-      [t('web.pbx.conf_dir'), d.confDir || '-'], [t('web.pbx.asterisk_dir'), d.asteriskDir || '-']]);
-
-  const sec = (d.security || []).map(e => `<tr><td>${esc(fmtTs(e.at.replace('T', ' ').slice(0, 19)))}</td><td>${esc(e.address)}</td>`
-    + `<td>${esc(e.account)}</td><td>${esc(e.kind)}</td></tr>`).join('');
-  document.getElementById('pbx-security').innerHTML = `<thead><tr><th>${esc(t('web.pbx.sec.time'))}</th><th>${esc(t('web.pbx.sec.address'))}</th>`
-    + `<th>${esc(t('web.pbx.sec.account'))}</th><th>${esc(t('web.pbx.sec.event'))}</th></tr></thead>`
-    + `<tbody>${sec || `<tr><td colspan="4" class="muted">${esc(t('web.pbx.sec.none'))}</td></tr>`}</tbody>`;
-
-  document.querySelectorAll('#panel-pbx .pbx-in').forEach(el => {
-    el.addEventListener('input', pbxMarkChanged);
-    el.addEventListener('change', pbxMarkChanged);
-  });
-  pbxMarkChanged();
+  if (d.security) {
+    const rows = d.security.map(e => `<tr><td>${esc(fmtTs(e.at.replace('T', ' ').slice(0, 19)))}</td><td>${esc(e.address)}</td>`
+      + `<td>${esc(e.account)}</td><td>${esc(e.kind)}</td></tr>`).join('');
+    html += `<div class="section"><h3>${esc(t('web.pbx.security'))}</h3>
+      <table class="stat-table">${th(['web.pbx.sec.time', 'web.pbx.sec.address', 'web.pbx.sec.account', 'web.pbx.sec.event'])}
+      <tbody>${rows || `<tr><td colspan="4" class="muted">${esc(t('web.pbx.sec.none'))}</td></tr>`}</tbody></table></div>`;
+  }
+  host.innerHTML = html;
 }
 
-// Modems of the managed Asterisk (pbx.modems): ghostline writes their sections into
-// quectel_ghostline.conf / dongle_ghostline.conf. The USB list comes from the Asterisk host
-// (gl-usb-inventory: sysfs only, nothing is sent to the modems).
-function renderPbxModems() {
-  const d = pbxData;
-  const rows = (d.pbxModems || []).map(m => {
-    const port = p => p ? esc(p.replace('/dev/serial/by-path/', '')) : '';
-    const audio = m.alsadev ? `UAC ${esc(m.alsadev)}` : port(m.audio);
-    const state = m.state ? `<span class="hdot ${/free|ring|dial|active|busy/i.test(m.state) ? 'ok' : 'err'}"></span>${esc(m.state)}`
-      : `<span class="hdot err"></span>${esc(t('web.pbx.modem.not_seen'))}`;
-    return `<tr><td>${esc(m.name)}</td><td>${esc(m.driver)}</td><td>${esc(m.model || '')}</td>
-      <td>${esc(m.usb || '')}</td><td>${state}${m.provider ? ` <span class="muted">${esc(m.provider)}</span>` : ''}</td>
-      <td class="muted pbx-port">${port(m.data)}</td><td class="muted pbx-port">${audio}${m.noqpcmv ? ' · noqpcmv' : ''}</td>
-      <td>${m.line ? esc(m.line) : `<span class="muted">${esc(t('web.pbx.modem.free'))}</span>`}</td>
-      <td>${m.line ? '' : `<button class="btn" data-name="${esc(m.name)}" onclick="removePbxModem(this.dataset.name)"
-        title="${esc(t('web.pbx.modem.remove'))}">✕</button>`}</td></tr>`;
-  }).join('');
-  document.getElementById('pbx-modems').innerHTML = `<thead><tr><th>${esc(t('web.pbx.modem.name'))}</th>`
-    + `<th>${esc(t('web.pbx.modem.driver'))}</th><th>${esc(t('web.pbx.modem.model'))}</th><th>USB</th>`
-    + `<th>${esc(t('web.pbx.modem.state'))}</th><th>${esc(t('web.pbx.modem.data'))}</th><th>${esc(t('web.pbx.modem.audio'))}</th>`
-    + `<th>${esc(t('web.status.col.line'))}</th><th></th></tr></thead>`
-    + `<tbody>${rows || `<tr><td colspan="9" class="muted">${esc(t('web.pbx.modem.none'))}</td></tr>`}</tbody>`;
-  renderPbxModemAdd(false);
+// ---- Modems of an Asterisk gateway, in the settings ----
+// Added and removed at once, not with Save: on the managed Asterisk the driver config is written and the
+// driver reloads gracefully. The USB list comes from its host (gl-usb-inventory: sysfs only, nothing is
+// sent to the modems).
+
+let modemUsb = null;   // /api/pbx/usb while the add form is open
+
+// The line (by the form's current values) that uses the modem, or null.
+function lineOfModem(gateway, modem) {
+  const lines = findNode('lines')?.children || [];
+  const v = (item, key) => item.fields.find(f => f.path.endsWith('].' + key))?.value;
+  return lines.find(l => v(l, 'gateway') === gateway && v(l, 'modem') === modem)?.key || null;
 }
 
-function renderPbxModemAdd(open) {
-  const host = document.getElementById('pbx-modem-add');
-  if (!open) {
-    host.innerHTML = `<button class="btn" onclick="renderPbxModemAdd(true)">${esc(t('web.pbx.modem.add'))}</button>`;
+function modemsPaneHtml(n) {
+  const g = n.modems;
+  const port = p => p ? esc(p.replace('/dev/serial/by-path/', '')) : '';
+  const rows = g.list.map(m => {
+    const line = lineOfModem(g.gateway, m.name);
+    return `<tr><td>${esc(m.name)}</td><td>${esc(m.driver)}</td>`
+      + (g.managed ? `<td class="muted pbx-port">${port(m.data)}</td>`
+        + `<td class="muted pbx-port">${m.alsadev ? 'UAC ' + esc(m.alsadev) : port(m.audio)}${m.noqpcmv ? ' · noqpcmv' : ''}</td>` : '')
+      + `<td>${line ? esc(line) : `<span class="muted">${esc(t('web.pbx.modem.free'))}</span>`}</td>`
+      + `<td>${line ? '' : `<button type="button" class="btn" data-modem-del="${esc(m.name)}" title="${esc(t('web.pbx.modem.remove'))}">✕</button>`}</td></tr>`;
+  }).join('');
+  const cols = ['web.pbx.modem.name', 'web.pbx.modem.driver'].concat(g.managed ? ['web.pbx.modem.data', 'web.pbx.modem.audio'] : [])
+    .concat(['web.status.col.line', '']);
+  return `<table class="stat-table"><thead><tr>${cols.map(k => `<th>${k ? esc(t(k)) : ''}</th>`).join('')}</tr></thead>
+    <tbody>${rows || `<tr><td colspan="${cols.length}" class="muted">${esc(t(g.managed ? 'web.pbx.modem.none' : 'web.pbx.modem.none_freepbx'))}</td></tr>`}</tbody></table>
+    <div class="pbx-add modem-add"><button type="button" class="btn" data-modem-open>${esc(t('web.pbx.modem.add'))}</button></div>`;
+}
+
+function bindModemPane(pane, n) {
+  pane.querySelectorAll('[data-modem-del]').forEach(b => b.onclick = () =>
+    modemRequest({ action: 'remove', gateway: n.modems.gateway, name: b.dataset.modemDel }, t('web.pbx.modem.remove_confirm', b.dataset.modemDel)));
+  pane.querySelectorAll('[data-modem-open]').forEach(b => b.onclick = () => openModemAdd(n));
+}
+
+function modemFreeName(n, driver) {
+  const prefix = driver === 'dongle' ? 'hw' : 'gsm';
+  const names = new Set(Object.values(gatewayInfo).flatMap(g => g.modems).concat(n.modems.list.map(m => m.name)));
+  let i = 1;
+  while (names.has(prefix + i)) i++;
+  return prefix + i;
+}
+
+// One add form at a time: the tree is drawn anew (edits are kept), then the form goes into this pane.
+async function openModemAdd(n) {
+  captureFields();
+  renderSettings(n.id);
+  const host = document.querySelector(`.tree-pane[data-pane="${CSS.escape(n.id)}"] .modem-add`);
+  const cancel = `<button type="button" class="btn" onclick="renderSettings(parseRoute().q.s)">${esc(t('web.cancel'))}</button>`;
+  const opts = (values, current) => values.map(v => `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`).join('');
+  if (!n.modems.managed) {
+    // FreePBX owns the driver config: the modem is only named here, as in its quectel.conf / dongle.conf.
+    host.innerHTML = `<div class="settings-grid pbx-add-form">
+      <label>${esc(t('web.pbx.modem.name'))}<input id="pbx-m-name" maxlength="32" spellcheck="false" value="${esc(modemFreeName(n, 'quectel'))}"></label>
+      <label>${esc(t('web.pbx.modem.driver'))}<select id="pbx-m-driver">${opts(['quectel', 'dongle'], 'quectel')}</select></label>
+    </div>
+    <div class="pbx-add-buttons"><button type="button" class="btn primary" id="pbx-m-submit">${esc(t('web.pbx.modem.submit'))}</button>${cancel}
+      <span class="config-hint">${esc(t('web.pbx.modem.hint_freepbx'))}</span></div>`;
+    document.getElementById('pbx-m-submit').onclick = () => {
+      const body = { action: 'add', gateway: n.modems.gateway, name: document.getElementById('pbx-m-name').value.trim(),
+        driver: document.getElementById('pbx-m-driver').value };
+      modemRequest(body, t('web.pbx.modem.add_confirm_freepbx', body.name, body.driver));
+    };
     return;
   }
-  const d = pbxData;
-  if (!d.usb) {
-    host.innerHTML = `<span class="muted">${esc(t('web.pbx.modem.no_usb'))}</span>
-      <button class="btn" onclick="renderPbxModemAdd(false)">${esc(t('web.cancel'))}</button>`;
+
+  try { modemUsb = await (await fetch('/api/pbx/usb')).json(); } catch { modemUsb = null; }
+  if (!modemUsb?.ok || !modemUsb.usb) {
+    host.innerHTML = `<span class="muted">${esc(modemUsb?.error || t('web.pbx.modem.no_usb'))}</span> ${cancel}`;
     return;
   }
   // USB devices not used by a modem yet; those Asterisk cannot open are listed but disabled.
-  const free = d.usb.filter(u => !u.configured);
+  const free = modemUsb.usb.filter(u => !u.configured);
   const label = u => [`USB ${u.usb}`, u.model || `${u.manufacturer} ${u.product}`.trim(), `${u.vid}:${u.pid}`].join(' · ')
     + (u.access ? '' : ' · ' + t('web.pbx.modem.no_access'));
-  const opts = free.map(u => `<option value="${esc(u.usb)}"${u.access ? '' : ' disabled'}>${esc(label(u))}</option>`).join('');
   if (!free.some(u => u.access)) {
     host.innerHTML = `<div class="muted">${esc(t('web.pbx.modem.no_free_usb'))}</div>
-      ${free.length ? `<div class="muted pbx-port">${free.map(u => esc(label(u))).join('<br>')}</div>` : ''}
-      <button class="btn" onclick="renderPbxModemAdd(false)">${esc(t('web.cancel'))}</button>`;
+      ${free.length ? `<div class="muted pbx-port">${free.map(u => esc(label(u))).join('<br>')}</div>` : ''}${cancel}`;
     return;
   }
   host.innerHTML = `<div class="settings-grid pbx-add-form">
-    <label>${esc(t('web.pbx.modem.usb'))}<select id="pbx-m-usb" onchange="pbxModemUsbChanged()">${opts}</select></label>
+    <label>${esc(t('web.pbx.modem.usb'))}<select id="pbx-m-usb">${free.map(u =>
+      `<option value="${esc(u.usb)}"${u.access ? '' : ' disabled'}>${esc(label(u))}</option>`).join('')}</select></label>
     <label>${esc(t('web.pbx.modem.name'))}<input id="pbx-m-name" maxlength="32" spellcheck="false"></label>
-    <label>${esc(t('web.pbx.modem.driver'))}<select id="pbx-m-driver" onchange="pbxModemDriverChanged()">${pbxOptions(['quectel', 'dongle'], 'quectel')}</select></label>
+    <label>${esc(t('web.pbx.modem.driver'))}<select id="pbx-m-driver">${opts(['quectel', 'dongle'], 'quectel')}</select></label>
     <label>${esc(t('web.pbx.modem.data'))}<select id="pbx-m-data"></select></label>
     <label>${esc(t('web.pbx.modem.audio'))}<select id="pbx-m-audio"></select></label>
     <label class="chk"><input type="checkbox" id="pbx-m-noqpcmv">noqpcmv (EC200A)</label>
   </div>
-  <div class="pbx-add-buttons">
-    <button class="btn primary" onclick="addPbxModem()">${esc(t('web.pbx.modem.submit'))}</button>
-    <button class="btn" onclick="renderPbxModemAdd(false)">${esc(t('web.cancel'))}</button>
-    <span class="config-hint">${esc(t('web.pbx.modem.hint'))}</span>
-  </div>`;
-  const first = free.find(u => u.access);
-  document.getElementById('pbx-m-usb').value = first.usb;
-  pbxModemUsbChanged();
+  <div class="pbx-add-buttons"><button type="button" class="btn primary" id="pbx-m-submit">${esc(t('web.pbx.modem.submit'))}</button>${cancel}
+    <span class="config-hint">${esc(t('web.pbx.modem.hint'))}</span></div>`;
+  document.getElementById('pbx-m-usb').value = free.find(u => u.access).usb;
+  document.getElementById('pbx-m-usb').onchange = () => modemUsbChanged(n);
+  document.getElementById('pbx-m-driver').onchange = modemDriverChanged;
+  document.getElementById('pbx-m-submit').onclick = () => {
+    const audio = document.getElementById('pbx-m-audio').value;
+    const body = {
+      action: 'add', gateway: n.modems.gateway, name: document.getElementById('pbx-m-name').value.trim(),
+      driver: document.getElementById('pbx-m-driver').value,
+      data: document.getElementById('pbx-m-data').value,
+      audio: audio.startsWith('uac:') ? '' : audio,
+      alsadev: audio.startsWith('uac:') ? audio.slice(4) : '',
+      noqpcmv: document.getElementById('pbx-m-noqpcmv').checked
+    };
+    modemRequest(body, t('web.pbx.modem.add_confirm', body.name, body.driver));
+  };
+  modemUsbChanged(n);
 }
 
 // A USB device was chosen: its ports in the combos, the suggestion for a known model, a free name.
-function pbxModemUsbChanged() {
-  const u = pbxData.usb.find(x => x.usb === document.getElementById('pbx-m-usb').value);
+function modemUsbChanged(n) {
+  const u = modemUsb.usb.find(x => x.usb === document.getElementById('pbx-m-usb').value);
   if (!u) return;
   const s = u.suggest || {};
   const driver = s.driver || 'quectel';
@@ -725,205 +754,51 @@ function pbxModemUsbChanged() {
   if (s.alsadev) document.getElementById('pbx-m-audio').value = 'uac:' + s.alsadev;
   else if (s.audio) document.getElementById('pbx-m-audio').value = s.audio;
   document.getElementById('pbx-m-noqpcmv').checked = !!s.noqpcmv;
-  const prefix = driver === 'dongle' ? 'hw' : 'gsm';
-  const names = new Set((pbxData.pbxModems || []).map(m => m.name).concat((pbxData.lines || []).map(l => l.device)));
-  let n = 1;
-  while (names.has(prefix + n)) n++;
-  document.getElementById('pbx-m-name').value = prefix + n;
-  pbxModemDriverChanged();
+  document.getElementById('pbx-m-name').value = modemFreeName(n, driver);
+  modemDriverChanged();
 }
 
-function pbxModemDriverChanged() {
+function modemDriverChanged() {
   const dongle = document.getElementById('pbx-m-driver').value === 'dongle';
   const box = document.getElementById('pbx-m-noqpcmv');
   box.disabled = dongle;
   if (dongle) box.checked = false;
 }
 
-async function addPbxModem() {
-  const audio = document.getElementById('pbx-m-audio').value;
-  const body = {
-    action: 'add', name: document.getElementById('pbx-m-name').value.trim(),
-    driver: document.getElementById('pbx-m-driver').value,
-    data: document.getElementById('pbx-m-data').value,
-    audio: audio.startsWith('uac:') ? '' : audio,
-    alsadev: audio.startsWith('uac:') ? audio.slice(4) : '',
-    noqpcmv: document.getElementById('pbx-m-noqpcmv').checked
-  };
-  await pbxModemRequest(body, t('web.pbx.modem.add_confirm', body.name, body.driver));
+// Unsaved edits in the form: they would be lost when the form reloads.
+function formHasEdits() {
+  return Object.keys(collectFields()).length > 0 || removedItems.length > 0 || addedSections.length > 0 || removedSections.length > 0;
 }
 
-async function removePbxModem(name) {
-  await pbxModemRequest({ action: 'remove', name }, t('web.pbx.modem.remove_confirm', name));
-}
-
-async function pbxModemRequest(body, question) {
-  if (pbxEdits() && !confirm(t('web.pbx.discard_edits'))) return;
+async function modemRequest(body, question) {
+  if (formHasEdits() && !confirm(t('web.pbx.discard_edits'))) return;
   if (!confirm(question)) return;
   setBusy(t('web.pbx.applying'));
   const r = await configRequest('/api/pbx/modem', body);
   setBusy(null);
   if (!r) return;
-  if (r.applyErrors?.length) alert(r.applyErrors.join('\n'));
-  if (r.restarting) { await waitForRestart(); return; }
-  showToast(t('web.pbx.modem.done'), 'ok');
-  document.getElementById('pbx-output').innerHTML = r.output ? `<h3>Asterisk</h3><pre class="pbx-file">${esc(r.output)}</pre>` : '';
-  loadPbx();
+  if (r.applyErrors?.length) alert(t('web.pbx.apply_failed') + '\n\n' + r.applyErrors.join('\n'));
+  else showToast(t('web.pbx.modem.done'), 'ok');
+  await loadConfigForm();
 }
 
-// "+ Line": the modem is chosen from those the managed Asterisk knows and no line uses yet.
-function renderPbxAdd(open) {
-  const host = document.getElementById('pbx-add');
-  if (!open) {
-    host.innerHTML = `<button class="btn" onclick="renderPbxAdd(true)">${esc(t('web.pbx.add_line'))}</button>`;
-    return;
-  }
-  const free = (pbxData.modems || []).filter(m => !m.used);
-  if (!free.length) {
-    host.innerHTML = `<span class="muted">${esc(t('web.pbx.no_free_modems'))}</span>
-      <button class="btn" onclick="renderPbxAdd(false)">${esc(t('web.cancel'))}</button>`;
-    return;
-  }
-  const opts = free.map(m => `<option value="${esc(m.gateway + '|' + m.device)}">${esc(
-    [m.device, m.model, m.provider, m.state].filter(Boolean).join(' · '))}</option>`).join('');
-  host.innerHTML = `<div class="settings-grid pbx-add-form">
-    <label>${esc(t('web.pbx.add.name'))}<input id="pbx-add-name" maxlength="64" spellcheck="false" placeholder="line4"></label>
-    <label>${esc(t('web.pbx.add.modem'))}<select id="pbx-add-modem">${opts}</select></label>
-    <label>${esc(t('web.pbx.col.ext'))}<input id="pbx-add-ext" inputmode="numeric" maxlength="6" placeholder="${esc(t('web.pbx.no_phone'))}"></label>
-    <label>${esc(t('web.pbx.col.dial'))}<select id="pbx-add-dial">${pbxOptions(['ru', 'ru+intl'], 'ru')}</select></label>
-    <label>${esc(t('web.pbx.col.srtp'))}<select id="pbx-add-enc">${pbxOptions(['sdes', 'no'], 'sdes')}</select></label>
-  </div>
-  <div class="pbx-add-buttons">
-    <button class="btn primary" onclick="addPbxLine()">${esc(t('web.pbx.add.submit'))}</button>
-    <button class="btn" onclick="renderPbxAdd(false)">${esc(t('web.cancel'))}</button>
-    <span class="config-hint">${esc(t('web.pbx.add.hint'))}</span>
-  </div>`;
-  document.getElementById('pbx-add-name').focus();
-}
+// ---- A line's phone, in the settings ----
 
-async function addPbxLine() {
-  const [gateway, device] = document.getElementById('pbx-add-modem').value.split('|');
-  const body = {
-    action: 'add', name: document.getElementById('pbx-add-name').value.trim(), gateway, device,
-    extension: document.getElementById('pbx-add-ext').value.trim(),
-    dial: document.getElementById('pbx-add-dial').value, encryption: document.getElementById('pbx-add-enc').value
-  };
-  await pbxLineRequest(body, t('web.pbx.add_confirm', body.name, device));
-}
-
-async function removePbxLine(line) {
-  await pbxLineRequest({ action: 'remove', name: line }, t('web.pbx.remove_line_confirm', line));
-}
-
-// The line is saved, the files applied, then the service restarts and the page reloads.
-async function pbxLineRequest(body, question) {
-  if (pbxEdits() && !confirm(t('web.pbx.discard_edits'))) return;
-  if (!confirm(question)) return;
-  setBusy(t('web.pbx.applying'));
-  const r = await configRequest('/api/pbx/line', body);
-  setBusy(null);
-  if (!r) return;
-  // A new phone's secret: shown once, afterwards it is only in the config.
-  if (r.secret) prompt(t('web.pbx.secret_shown', body.name), r.secret);
-  if (r.applyErrors?.length) alert(r.applyErrors.join('\n'));
-  await waitForRestart();
-}
-
-// Changed fields are outlined; a line without an extension has no phone, so its dial and media are off.
-function pbxMarkChanged() {
-  document.querySelectorAll('#panel-pbx .pbx-in').forEach(el => el.classList.toggle('changed', el.value !== el.dataset.orig));
-  document.querySelectorAll('#pbx-lines tr[data-line]').forEach(tr => {
-    const none = tr.querySelector('.pbx-ext').value.trim() === '' || tr.querySelector('.pbx-ext').disabled;
-    tr.querySelectorAll('select.pbx-in').forEach(el => { el.disabled = none; });
-  });
-  document.getElementById('pbx-dirty').textContent =
-    document.querySelector('#panel-pbx .pbx-in.changed') ? t('web.pbx.unsaved') : '';
-}
-
-// The changes on the tab, or null when there are none.
-function pbxEdits() {
-  if (!document.querySelector('#panel-pbx .pbx-in.changed')) return null;
-  const lines = [...document.querySelectorAll('#pbx-lines tr[data-line]')]
-    .filter(tr => tr.querySelector('.pbx-in.changed'))
-    .map(tr => {
-      const v = k => tr.querySelector(`[data-k="${k}"]`).value;
-      return { line: tr.dataset.line, extension: v('extension').trim(), dial: v('dial'), encryption: v('encryption') };
-    });
-  const f = k => document.querySelector(`#pbx-sip-form [data-k="${k}"]`);
-  const changed = k => f(k).classList.contains('changed');
-  const port = k => changed(k) ? parseInt(f(k).value || '0', 10) : null;
-  const text = k => changed(k) ? f(k).value : null;
-  const sip = { tlsPort: port('tlsPort'), udpPort: port('udpPort'), externalAddress: text('externalAddress'),
-    localNets: text('localNets'), cert: text('cert'), key: text('key') };
-  return { sip, lines };
-}
-
-// A phone that is removed: confirm, its secret is gone with it.
-function pbxConfirmRemovals(edits) {
-  const removed = edits.lines.filter(l => l.extension === '' && pbxData.lines.find(x => x.name === l.line)?.hasPhone);
-  return !removed.length || confirm(t('web.pbx.remove_confirm', removed.map(l => l.line).join(', ')));
-}
-
-function pbxShowErrors(errors) {
-  document.getElementById('pbx-output').innerHTML =
-    `<h3>${esc(t('web.pbx.problems'))}</h3>` + (errors || []).map(e => `<div class="pbx-err">${esc(e)}</div>`).join('');
+function phonePaneHtml(n) {
+  if (n.phone.isNew || !n.phone.hasSecret)
+    return `<p class="tree-hint">${esc(t('web.pbx.secret_on_save'))}</p>`;
+  return `<div class="pbx-add-buttons"><button type="button" class="btn" data-new-secret="${esc(n.phone.line)}">${esc(t('web.pbx.new_secret'))}</button></div>`;
 }
 
 async function newSecret(line) {
+  if (formHasEdits() && !confirm(t('web.pbx.discard_edits'))) return;
   if (!confirm(t('web.pbx.new_secret_confirm', line))) return;
   const r = await configRequest('/api/pbx/secret', { line });
   if (!r) return;
   // Shown once: afterwards it is only in the config.
   prompt(t('web.pbx.secret_shown', line), r.secret);
-  loadPbx();
-}
-
-async function previewPbx() {
-  const edits = pbxEdits();
-  let d;
-  try {
-    d = edits
-      ? await (await fetch('/api/pbx/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...edits, dryRun: true }) })).json()
-      : await (await fetch('/api/pbx/preview')).json();
-  } catch { return; }
-  const errs = (d.errors || []).map(e => `<div class="pbx-err">${esc(e)}</div>`).join('');
-  const files = Object.entries(d.files || {}).map(([name, text]) =>
-    `<h3>${esc(name)}</h3><pre class="pbx-file">${esc(text)}</pre>`).join('');
-  document.getElementById('pbx-output').innerHTML = errs + (files || `<div class="muted">${esc(t('web.pbx.nothing'))}</div>`);
-}
-
-// Saves the changes (if any) into the config, then writes the files and reloads Asterisk.
-async function applyPbx() {
-  const edits = pbxEdits();
-  if (edits && !pbxConfirmRemovals(edits)) return;
-  setBusy(t('web.pbx.applying'));
-  let d;
-  try {
-    if (edits) {
-      const r = await (await fetch('/api/pbx/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(edits) })).json();
-      if (!r.ok) {
-        setBusy();
-        showToast(t('web.pbx.apply_failed'), 'err');
-        pbxShowErrors(r.errors);
-        return;
-      }
-      // A new phone's secret: shown once, afterwards it is only in the config.
-      for (const [line, secret] of Object.entries(r.secrets || {})) prompt(t('web.pbx.secret_shown', line), secret);
-    }
-    d = await (await fetch('/api/pbx/apply', { method: 'POST' })).json();
-  } catch (e) { setBusy(); showToast(t('web.network_error', e.message), 'err'); return; }
-  setBusy();
-  if (!d.ok) {
-    showToast(t('web.pbx.apply_failed'), 'err');
-    pbxShowErrors(d.errors);
-    loadPbx();
-    return;
-  }
-  showToast(d.changed.length ? t('web.pbx.applied', d.changed.join(', ')) : t('web.pbx.unchanged'), 'ok');
-  document.getElementById('pbx-output').innerHTML = d.output ? `<h3>Asterisk</h3><pre class="pbx-file">${esc(d.output)}</pre>` : '';
-  loadPbx();
+  if (r.applyErrors?.length) alert(t('web.pbx.apply_failed') + '\n\n' + r.applyErrors.join('\n'));
+  await loadConfigForm();
 }
 
 // ---- About ----
@@ -980,50 +855,112 @@ async function loadConfigYaml() {
 // Lists in the tree: gateways and lines. A list item is the node "<prefix><key>", its fields use a path with a selector.
 const LISTS = {
   gateways: { prefix: 'gw:', sel: 'id', add: 'web.config.add_gateway', remove: 'web.config.remove_gateway_confirm', hint: 'web.config.gateways_hint' },
-  channels: { prefix: 'ch:', sel: 'name', add: 'web.config.add_channel', remove: 'web.config.remove_channel_confirm', hint: 'web.config.channels_hint' },
+  lines: { prefix: 'ln:', sel: 'name', add: 'web.config.add_line', remove: 'web.config.remove_line_confirm', hint: 'web.config.lines_hint' },
 };
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
 let formTree = [];
 let templates = {};
 let removedItems = [];
+// Saved gateways: type, PBX mode, modem names (the lines choose a modem from these).
+let gatewayInfo = {};
+let phoneSecrets = [];
 
-// The tree follows the YAML: clients -> telegram, ntfy; calls -> cdr_db, transcribe;
-// a line -> clients (telegram, ntfy) and calls.
+// The tree follows the hardware: a gateway -> its PBX settings and modems; a line -> its phone,
+// clients (telegram, ntfy) and calls.
 function settingsTree(data) {
   const byId = Object.fromEntries((data.groups || []).map(g => [g.id, g]));
   const node = id => ({ id, title: byId[id].title, fields: byId[id].fields || [] });
   const list = id => ({
     id, title: byId[id].title, fields: [], list: id,
-    children: (data[id] || []).map(it => itemNode(id, it.key, it.fields, false, it.clients))
+    children: (data[id] || []).map(it => itemNode(id, it.key, it.fields, false, it.clients, it))
   });
   const clientFields = { telegram: byId.telegram.fields, ntfy: byId.ntfy.fields };
   const tree = [node('general'), clientsNode('clients', '', data.clients || [], clientFields),
-                node('web'), node('logger'), list('gateways'), list('channels')];
+                node('web'), node('logger'), node('monitor'), list('gateways'), list('lines')];
   tree.push(Object.assign(node('calls'), { children: [node('cdr_db'), node('transcribe')] }));
   tree.push(node('goip'));
   return tree;
 }
 
-// A gateway or a line; a line's fields under "clients.telegram.", "clients.ntfy." and "calls."
-// become subsections, as in the YAML. clients: the line's client sections, null: no "clients" section.
-function itemNode(listId, key, fields, isNew, clients) {
+// A gateway or a line. A gateway's managed.* fields and its modems, a line's phone, clients and calls
+// are subsections, shown when they apply. clients: the line's client sections, null: no "clients"
+// section. saved: the gateway as saved (its type and modems), none for a new one.
+function itemNode(listId, key, fields, isNew, clients, saved) {
   const id = LISTS[listId].prefix + key;
   const item = { id, title: key, key, fields, isNew };
-  if (listId !== 'channels') return item;
+  if (listId === 'gateways') {
+    const managed = fields.filter(f => f.path.includes('].managed.'));
+    item.fields = fields.filter(f => !managed.includes(f));
+    item.children = [
+      { id: id + '/managed', title: t('web.config.group.managed'), fields: managed, hintKey: 'web.config.hint.managed',
+        visible: () => gatewayState(key)?.managed },
+      { id: id + '/modems', title: t('web.config.group.modems'), fields: [],
+        hintKey: saved?.managed ? 'web.config.hint.modems_managed' : 'web.config.hint.modems',
+        modems: { gateway: key, managed: !!saved?.managed, list: saved?.modems || [] },
+        visible: () => saved?.type === 'asterisk' && gatewayState(key)?.type === 'asterisk' }
+    ];
+    return item;
+  }
   const sub = (part) => fields.filter(f => f.path.includes(']' + '.' + part + '.'));
-  const telegram = sub('clients.telegram'), ntfy = sub('clients.ntfy'), calls = sub('calls');
-  item.fields = fields.filter(f => !telegram.includes(f) && !ntfy.includes(f) && !calls.includes(f));
-  const base = `channels[name=${key}].`;
+  const telegram = sub('clients.telegram'), ntfy = sub('clients.ntfy'), calls = sub('calls'), phone = sub('phone');
+  item.fields = fields.filter(f => ![telegram, ntfy, calls, phone].some(x => x.includes(f)));
+  const base = `lines[name=${key}].`;
   item.children = [
+    { id: id + '/phone', title: t('web.config.group.phone'), fields: phone, hintKey: 'web.config.hint.phone',
+      phone: { line: key, isNew, hasSecret: phoneSecrets.includes(key) },
+      visible: () => gatewayState(lineGateway(item))?.managed },
     clientsNode(id + '/clients', base, clients || [], { telegram, ntfy }, clients == null),
     { id: id + '/calls', title: t('web.config.group.calls'), fields: calls, hintKey: 'web.config.hint.line_calls' }
   ];
   return item;
 }
 
+// A gateway by the form's current values (an unsaved change of the type or the PBX mode counts).
+function gatewayState(id) {
+  const item = findNode('gateways')?.children.find(c => c.key === id);
+  if (!item) return null;
+  const v = key => item.fields.find(f => f.path.endsWith('].' + key))?.value;
+  return { type: v('type'), managed: v('type') === 'asterisk' && v('pbx') === 'managed' };
+}
+
+const lineGateway = item => item.fields.find(f => f.path.endsWith('].gateway'))?.value;
+
+// The fields a gateway's type has; a line has a modem on Asterisk, a port on yeastar / goip.
+const GATEWAY_FIELDS = { ami_port: ['asterisk', 'yeastar'], http_port: ['yeastar', 'goip'], monitor: ['asterisk'], pbx: ['asterisk'] };
+
+function fieldVisible(f, n) {
+  const g = f.path.match(/^gateways\[[^\]]*\]\.(\w+)$/);
+  if (g && GATEWAY_FIELDS[g[1]]) return GATEWAY_FIELDS[g[1]].includes(n.fields.find(x => x.path.endsWith('].type'))?.value);
+  const l = f.path.match(/^lines\[[^\]]*\]\.(modem|port)$/);
+  if (l) {
+    const type = gatewayState(lineGateway(n))?.type;
+    return l[1] === 'modem' ? type === 'asterisk' : type !== 'asterisk';
+  }
+  return true;
+}
+
+// A line's modem: one of its gateway's saved modems.
+function refreshModemOptions() {
+  for (const item of findNode('lines')?.children || []) {
+    const f = item.fields.find(x => x.path.endsWith('].modem'));
+    if (!f) continue;
+    const names = gatewayInfo[lineGateway(item)]?.modems || [];
+    f.options = [''].concat(names, f.value && !names.includes(f.value) ? [f.value] : []);
+  }
+}
+
+// Nodes that apply (and whose parents do), with their parent.
+function walkShown(fn, nodes = formTree, parent = null) {
+  for (const n of nodes) {
+    if (n.visible && !n.visible()) continue;
+    fn(n, parent);
+    if (n.children) walkShown(fn, n.children, n);
+  }
+}
+
 // "Clients": Telegram and ntfy as optional subsections, added and removed like list items.
-// base: '' at the top, 'channels[name=…].' in a line. unset: a line without a "clients" section,
+// base: '' at the top, 'lines[name=…].' in a line. unset: a line without a "clients" section,
 // which goes to every client that is on.
 const CLIENTS = ['telegram', 'ntfy'];
 const CLIENT_TITLES = { telegram: 'Telegram', ntfy: 'ntfy' };
@@ -1077,7 +1014,7 @@ function fieldInput(f) {
 }
 
 function renderTreeNav(nodes, selected, depth) {
-  return nodes.map(n => {
+  return nodes.filter(n => !n.visible || n.visible()).map(n => {
     const missing = n.clientsBase !== undefined ? CLIENTS.filter(c => !n.children.some(x => x.client === c)) : [];
     const add = n.list
       ? `<button type="button" class="tree-item tree-add" style="--d:${depth + 1}" data-add="${n.list}">${esc(t(LISTS[n.list].add))}</button>`
@@ -1091,7 +1028,7 @@ function renderTreeNav(nodes, selected, depth) {
 
 function renderTreePanes() {
   let html = '';
-  walkTree((n, parent) => {
+  walkShown((n, parent) => {
     const del = parent?.list
       ? `<button type="button" class="btn tree-del" data-del="${esc(n.id)}">${esc(t('web.config.remove'))}</button>`
       : n.section
@@ -1099,8 +1036,11 @@ function renderTreePanes() {
       : '';
     const hintKey = n.hintKey || (n.list ? LISTS[n.list].hint : 'web.config.hint.' + n.id);
     const hint = I18N[hintKey] ? `<p class="tree-hint">${esc(t(hintKey))}</p>` : '';
+    const fields = n.fields.filter(f => fieldVisible(f, n));
     html += `<div class="tree-pane" data-pane="${esc(n.id)}"><div class="tree-pane-head"><h3>${esc(n.title)}</h3>${del}</div>${hint}`
-      + (n.fields.length ? `<div class="settings-grid">${n.fields.map(fieldInput).join('')}</div>` : '')
+      + (fields.length ? `<div class="settings-grid">${fields.map(fieldInput).join('')}</div>` : '')
+      + (n.modems ? modemsPaneHtml(n) : '')
+      + (n.phone ? phonePaneHtml(n) : '')
       + `</div>`;
   });
   return html;
@@ -1116,8 +1056,11 @@ function captureFields() {
 
 function renderSettings(selected) {
   const host = document.getElementById('config-form');
+  refreshModemOptions();
   selected = selected || parseRoute().q.s || 'general';
-  if (!findNode(selected)) selected = 'general';
+  let shown = false;
+  walkShown(n => { if (n.id === selected) shown = true; });
+  if (!shown) selected = 'general';
   host.innerHTML = `<nav class="tree-nav">${renderTreeNav(formTree, selected, 0)}</nav><div class="tree-main">${renderTreePanes()}</div>`;
   host.querySelectorAll('.tree-item[data-node]').forEach(btn => btn.onclick = () => showConfigNode(btn.dataset.node));
   host.querySelectorAll('[data-add]').forEach(btn => btn.onclick = startAdd);
@@ -1126,6 +1069,16 @@ function renderSettings(selected) {
   host.querySelectorAll('[data-del-client]').forEach(btn => btn.onclick = () => removeClient(btn.dataset.delClient));
   host.querySelectorAll('[data-path]').forEach(el => el.addEventListener('input', markChanged));
   host.querySelectorAll('[data-path]').forEach(el => el.addEventListener('change', markChanged));
+  // The type, the PBX mode and a line's gateway decide which fields and sections are shown.
+  host.querySelectorAll('select[data-path]').forEach(el => {
+    if (/\]\.(type|pbx|gateway)$/.test(el.dataset.path))
+      el.addEventListener('change', () => { captureFields(); renderSettings(parseRoute().q.s); });
+  });
+  walkShown(n => {
+    const pane = host.querySelector(`.tree-pane[data-pane="${CSS.escape(n.id)}"]`);
+    if (n.modems && pane) bindModemPane(pane, n);
+  });
+  host.querySelectorAll('[data-new-secret]').forEach(b => b.onclick = () => newSecret(b.dataset.newSecret));
   showConfigNode(selected, true);
 }
 
@@ -1256,7 +1209,9 @@ async function loadConfigForm() {
     host.innerHTML = `<div class="empty">${esc(t('web.error', data.error || res.status))}</div>`;
     return;
   }
-  templates = { gateways: data.gatewayTemplate || [], channels: data.channelTemplate || [] };
+  templates = { gateways: data.gatewayTemplate || [], lines: data.lineTemplate || [] };
+  gatewayInfo = data.gatewayInfo || {};
+  phoneSecrets = data.phoneSecrets || [];
   removedItems = [];
   addedSections = [];
   removedSections = [];
@@ -1268,10 +1223,12 @@ async function loadConfigForm() {
 }
 
 // Only changed fields (and all non-empty fields of new items) go to the YAML; the rest of the file is untouched.
+// Fields and sections that do not apply (another gateway type, no managed PBX) are left out.
 function collectFields() {
   captureFields();
   const fields = {};
-  walkTree(n => n.fields.forEach(f => {
+  walkShown(n => n.fields.forEach(f => {
+    if (!fieldVisible(f, n)) return;
     if (f.orig === undefined ? f.value !== '' : f.value !== f.orig) fields[f.path] = f.value;
   }));
   return fields;
@@ -1296,8 +1253,12 @@ async function saveConfig(restart) {
       ? await configRequest('/api/settings', { fields: collectFields(), remove: removedItems.concat(removedSections), add: addedSections, restart })
       : await configRequest('/api/config', { content: (await getConfigEditor()).getValue(), restart });
     if (!ok) return;
+    // A new phone's secret: shown once, afterwards it is only in the config.
+    for (const [line, secret] of Object.entries(ok.secrets || {})) prompt(t('web.pbx.secret_shown', line), secret);
+    // The managed Asterisk: its files were written and reloaded, or why not.
+    if (ok.pbx && !ok.pbx.ok) alert(t('web.pbx.apply_failed') + '\n\n' + (ok.pbx.errors || []).join('\n'));
     if (restart) { await waitForRestart(); return; }
-    showToast(t('web.config.saved'), 'ok');
+    showToast(ok.pbx?.ok && ok.pbx.changed?.length ? t('web.pbx.applied', ok.pbx.changed.join(', ')) : t('web.config.saved'), 'ok');
     if (configMode === 'form') await loadConfigForm();
   } finally {
     setBusy(null);
@@ -1340,7 +1301,6 @@ async function waitForRestart() {
   try { MODE = await (await fetch('/api/mode')).json(); } catch { }
   const full = MODE.mode === 'full';
   document.getElementById('tab-calls').hidden = !full;
-  document.getElementById('tab-pbx').hidden = MODE.pbx !== 'managed';
   document.getElementById('footer-mode').textContent = t('web.mode.' + MODE.mode);
   await loadChannels();
 

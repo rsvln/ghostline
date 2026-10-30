@@ -39,7 +39,7 @@ namespace ghostline
                 return canonical;
 
             // chan_quectel and chan_dongle expect E.164 with "+", which is already the case.
-            if (Modems.IsModem(gatewayType))
+            if (gatewayType == "asterisk")
                 return canonical;
 
             // goip / yeastar: Russian dial plan, "8" for domestic numbers, "810" plus the
@@ -59,7 +59,7 @@ namespace ghostline
             if (gw.type == "yeastar")
             {
                 string dest = FormatForGateway(rawNumber, gw.type);
-                string payload = "http://" + gw.ip + ":" + gw.httpPort.ToString() + "/cgi/WebCGI?1500101=account=" + gw.user + "&password=" + gw.password + "&port=" + chanOut.line + "&destination=" + dest + "&content=" + Uri.EscapeDataString(mcontent);
+                string payload = "http://" + gw.ip + ":" + gw.httpPort.ToString() + "/cgi/WebCGI?1500101=account=" + gw.user + "&password=" + gw.password + "&port=" + chanOut.port + "&destination=" + dest + "&content=" + Uri.EscapeDataString(mcontent);
                 await _yeastarClient.GetAsync(payload);
                 RecordOutgoing("y", chanOut, rawNumber, mcontent, sourceLabel);
                 HealthStatus.MarkActivity(gw.id);
@@ -74,7 +74,7 @@ namespace ghostline
                 var baseUrl = "http://" + gw.ip + ":" + gw.httpPort.ToString() + "/default/en_US/sms_info.html?type=sms";
                 var formContent = new FormUrlEncodedContent(new[]
                 {
-                    new KeyValuePair<string, string>("line", chanOut.line),
+                    new KeyValuePair<string, string>("line", chanOut.port),
                     new KeyValuePair<string, string>("smskey", smskey),
                     new KeyValuePair<string, string>("action", "SMS"),
                     new KeyValuePair<string, string>("telnum", dest),
@@ -85,13 +85,13 @@ namespace ghostline
                 RecordOutgoing("g", chanOut, rawNumber, mcontent, sourceLabel);
                 HealthStatus.MarkActivity(gw.id);
             }
-            else if (Modems.For(gw.type) is { } modem)
+            else if (gw.IsAsterisk && LineFlavor(settings, chanOut) is { } modem)
             {
                 if (!_amiClients.TryGetValue(gw.id, out var amiClient))
                     throw new InvalidOperationException("AMI client for gateway '" + gw.id + "' is not initialized");
 
                 string dest = FormatForGateway(rawNumber, gw.type);
-                string command = "Action: Command\r\nCommand: " + modem.Cli + " sms " + chanOut.line + " " + dest + " " + mcontent + "\r\n\r\n";
+                string command = "Action: Command\r\nCommand: " + modem.Cli + " sms " + chanOut.modem + " " + dest + " " + mcontent + "\r\n\r\n";
                 amiClient.Client.Send(System.Text.Encoding.UTF8.GetBytes(command));
                 RecordOutgoing(modem.Letter, chanOut, rawNumber, mcontent, sourceLabel);
                 HealthStatus.MarkActivity(gw.id);

@@ -1,60 +1,60 @@
-# Managed PBX (`pbx.mode: managed`)
+# Managed PBX (`pbx: managed`)
 
-By default (`pbx.mode: freepbx`) FreePBX owns the PBX and ghostline only
-connects to it. In `managed` mode ghostline writes the PBX part of a plain
-Asterisk itself, from its own lines:
+An Asterisk gateway (`type: asterisk`) is by default run by FreePBX
+(`pbx: freepbx`): ghostline only connects to it. With `pbx: managed` ghostline
+writes the PBX part of a plain Asterisk itself, from its own lines:
 
 - every line with a `phone` gets a SIP phone (PJSIP endpoint);
 - the SIM rings that phone;
 - the phone calls out through that SIM;
 - calls are recorded and land in the call journal as with FreePBX.
 
-The PBX tab is where this is set up:
+Everything is set up on the Settings tab, under the gateway and its lines:
 
-- modems: "+ Modem" picks a USB device of the Asterisk host from a list (model,
-  USB port, VID:PID) and its AT and audio ports from combo boxes. Known models
-  (Huawei E1550, Quectel EC200A and EC25, SIMCom SIM7600) are filled in.
-  Only ports Asterisk may open and no other modem uses are offered. "✕"
-  removes a modem that no line uses. The driver reloads gracefully, after the
-  calls on it end;
-- per modem line: the phone's extension (empty: no phone), dial set and media
-  encryption, its registration and a "New secret" button. A new phone gets a
-  secret on Apply; it is shown once;
-- the SIP transport: TLS and UDP ports, external address, local networks,
-  certificate and key;
-- "+ Line": a new line on a modem the managed Asterisk already knows (chosen
-  from a list that shows the model, operator and state; modems taken by a line
-  are not offered), optionally with its phone. "✕" removes a line with its
-  phone. Both save the config, apply the files and restart ghostline;
-- failed SIP attempts and the TLS certificate's expiry.
+- **Gateways → gateway → Managed PBX** (`managed.*`): the shared directory,
+  the SIP transport (TLS and UDP ports, external address, local networks,
+  certificate and key), the recordings directory;
+- **Gateways → gateway → Modems**: "+ Modem" picks a USB device of the
+  Asterisk host from a list (model, USB port, VID:PID) and its AT and audio
+  ports from combo boxes. Known models (Huawei E1550, Quectel EC200A and EC25,
+  SIMCom SIM7600) are filled in. Only ports Asterisk may open and no other
+  modem uses are offered. "✕" removes a modem that no line uses. Both take
+  effect at once; the driver reloads gracefully, after the calls on it end;
+- **Lines → line**: the gateway and one of its modems (a combo box);
+- **Lines → line → Phone**: the extension (empty: no phone), dial set and
+  media encryption, and a "New secret" button. A new phone gets a secret on
+  save; it is shown once.
 
-Apply saves the changes into ghostline.yaml (the previous copy goes to `.bak`),
-writes the files and reloads Asterisk; no restart is needed. Preview shows the
-files with the unsaved changes. A line whose modem is on another PBX (its
-gateway's address differs from `pbx.asterisk`) cannot get a phone; this is the
-case for lines still on FreePBX during a move.
+Save writes ghostline.yaml (the previous copy goes to `.bak`), then the
+Asterisk files, and reloads Asterisk. Only one gateway can be managed; a line
+on another gateway (for example still on FreePBX during a move) cannot have a
+phone.
+
+The live state is on the Status tab: per gateway AMI and the certificate's
+expiry, per modem the driver state, model, USB port and line, the host's USB
+modems not used yet, the phones' registration, and failed SIP attempts.
 
 Everything else (SMS, Telegram, ntfy, the call journal, transcription,
-monitoring) works the same in both modes. To go back, set `pbx.mode: freepbx`.
+monitoring) works the same in both modes. To go back, set `pbx: freepbx`.
 
 ## What ghostline writes, and what it does not
 
-ghostline writes its files into `pbx.conf_dir`, a directory shared with the
-Asterisk host. Asterisk sees it as `pbx.asterisk_dir`.
+ghostline writes its files into `managed.conf_dir`, a directory shared with
+the Asterisk host. Asterisk sees it as `managed.asterisk_dir`.
 
 | File | Contents |
 |---|---|
 | `pjsip_ghostline.conf` | TLS transport (and UDP if `udp_port` is set), NAT settings, one endpoint/auth/aor per phone |
 | `extensions_ghostline.conf` | `gl-in-<device>`: calls from the SIM; `gl-out-<device>`: what the phone may dial; recording. A modem without a phone gets only the SMS/USSD stubs; calls to it are not answered |
-| `quectel_ghostline.conf`, `dongle_ghostline.conf` | one section per modem of `pbx.modems`: ports by path, `context=gl-in-<device>` |
+| `quectel_ghostline.conf`, `dongle_ghostline.conf` | one section per modem of the gateway's `modems`: ports by path, `context=gl-in-<device>` |
 
 The Asterisk host writes `usb.json` there (`gl-usb-inventory`, every 30 s):
 its USB devices with serial ports and sound cards, and whether Asterisk may
 open them. It reads sysfs only and sends nothing to the modems.
 
-On Apply ghostline:
+On save ghostline:
 1. writes the files that changed; the previous copies go to `.bak`;
-2. over the AMI of the gateway `pbx.asterisk`, for what changed:
+2. over the gateway's AMI, for what changed:
    `module reload res_pjsip.so`, `dialplan reload`,
    `quectel reload gracefully`, `dongle reload gracefully`.
 
@@ -85,10 +85,6 @@ see [asterisk-setup.md](asterisk-setup.md)):
   chan_dongle), then `#include /etc/asterisk/ghostline/quectel_ghostline.conf`
   (`dongle_ghostline.conf`). No device sections by hand.
 
-A modem needs a gateway of its driver (`type: quectel` / `dongle`) on the
-managed Asterisk: ghostline handles that driver's SMS and monitoring through
-it. "+ Modem" adds a missing one with the AMI login of `pbx.asterisk`
-(`<id>-quectel`, `<id>-dongle`) and restarts ghostline.
 - `manager.conf`: the AMI user of ghostline needs `command` and `reporting`
   in `write`, and `security` in `read` (for the failed attempts).
 - CDR: [cdr-sqlite.md](cdr-sqlite.md).
@@ -96,36 +92,50 @@ it. "+ Modem" adds a missing one with the AMI login of `pbx.asterisk`
 ## Settings
 
 ```yaml
-pbx:
-  mode: managed
-  asterisk: pbx                       # gateway id: its AMI reloads Asterisk
-  conf_dir: /srv/asterisk-conf        # as ghostline sees the shared directory
-  asterisk_dir: /etc/asterisk/ghostline   # as Asterisk sees it
-  tls:
-    cert: keys/sip.crt                # relative: inside conf_dir
-    key: keys/sip.key
-    port: 5061
-  udp_port: 0                         # 0: no plain UDP (LAN phones without TLS)
-  external_address: sip.example.org   # public name or IP for NAT
-  local_nets: [192.168.0.0/16]
-  recordings_path: /var/spool/asterisk/monitor   # on the Asterisk side
+gateways:
+  - id: pbx
+    type: asterisk
+    ip: 10.0.0.12
+    ami_port: 5038
+    user: ghostline
+    password: <AMI secret>
+    pbx: managed
+    managed:
+      conf_dir: /srv/asterisk-conf        # as ghostline sees the shared directory
+      asterisk_dir: /etc/asterisk/ghostline   # as Asterisk sees it
+      recordings_path: /var/spool/asterisk/monitor   # on the Asterisk side
+      sip:
+        tls:
+          cert: keys/sip.crt              # relative: inside conf_dir
+          key: keys/sip.key
+          port: 5061
+        udp_port: 0                       # 0: no plain UDP (LAN phones without TLS)
+        external_address: sip.example.org # public name or IP for NAT
+        local_nets: [192.168.0.0/16]
+    modems:
+      - name: gsm1
+        driver: quectel                   # quectel | dongle
+        data: /dev/serial/by-path/...     # the AT port
+        audio: /dev/serial/by-path/...    # or alsadev: for a UAC modem
+        noqpcmv: false
 
-channels:
+lines:
   - name: home
     gateway: pbx
     pattern: gsm1
-    line: gsm1
+    modem: gsm1
     phone:
       extension: "11"                 # also the SIP user name
       dial: ru                        # ru | ru+intl
       encryption: sdes                # sdes (SRTP) | no
-      # secret: written by the PBX tab ("New secret")
+      # secret: generated on save
 ```
 
 - **Certificate:** a relative path is inside `conf_dir`. ghostline can then
   read it, show its expiry and warn 14 days ahead. An absolute path is used
   as is on the Asterisk side and is not checked.
-- **Secret:** 24 letters and digits, generated on the PBX tab and shown once.
+- **Secret:** 24 letters and digits, generated on save (or by "New secret")
+  and shown once.
   It is not in the form, and the preview masks it.
 - **`dial: ru`:**
   - `+7…`, `8…`, `7…` (11 digits) and `9…` (10 digits) go out as +7…;
@@ -139,18 +149,18 @@ channels:
 - **Phones:** only TLS by default. With `encryption: sdes` the voice is SRTP;
   the keys go inside the TLS signalling.
 - **Brute force:** fail2ban on the Asterisk host bans by the Asterisk security
-  log. ghostline lists the failed attempts on the PBX tab. When one address
+  log. ghostline lists the failed attempts on the Status tab. When one address
   fails 5 times in 10 minutes, it sends a message to the common Telegram
   chats and ntfy topic (once a day per address).
 - **Values:** the generated files contain only validated values (digits for
   extensions, letters and digits for secrets, plain paths, host names and
-  networks). Apply refuses anything else.
+  networks). Save refuses anything else.
 
 ## CDR and recordings
 
 - Incoming calls run on the modem channel and end on the phone's extension.
 - Outgoing calls keep the number as dialed.
-- Recordings go to `recordings_path/YYYY/MM/DD/` with the `-r`/`-t` legs and
+- Recordings go to `managed.recordings_path/YYYY/MM/DD/` with the `-r`/`-t` legs and
   the name in `CDR(recordingfile)`.
 
 This is the layout the call journal reads from FreePBX too, so the journal,

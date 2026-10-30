@@ -74,19 +74,19 @@ namespace ghostline
         private const string RadioActionId = "gl-radio";
         private const int RadioPollSeconds = 60;
 
-        // Key: "<gateway id>|<device>" (channels[].line).
+        // Key: "<gateway id>|<device>" (lines[].modem).
         private static readonly ConcurrentDictionary<string, RadioState> _radio = new();
         // Gateways whose AMI user may not run the show-devices action: polling stops until a restart.
         private static readonly ConcurrentDictionary<string, bool> _radioDenied = new();
 
-        internal static bool RadioMonitored(Gateway gw) => gw != null && Modems.IsModem(gw.type) && gw.monitor;
+        internal static bool RadioMonitored(Gateway gw) => gw != null && gw.IsAsterisk && gw.monitor;
 
         // Data of the line, or null: not monitored, the gateway is down, or nothing came for 3 polls.
         internal static RadioState LineRadio(Channel ch)
         {
             var gw = getGatewayById(ch?.gateway);
             if (!RadioMonitored(gw) || HealthStatus.Find(gw.id)?.Connected != true) return null;
-            return _radio.TryGetValue(gw.id + "|" + ch.line, out var r)
+            return _radio.TryGetValue(gw.id + "|" + ch.Device, out var r)
                    && DateTime.Now - r.UpdatedAt < TimeSpan.FromSeconds(RadioPollSeconds * 3) ? r : null;
         }
 
@@ -94,16 +94,20 @@ namespace ghostline
         internal static string LineNumber(Channel ch) =>
             ch == null ? null : LineRadio(ch)?.Number ?? (string.IsNullOrWhiteSpace(ch.number) ? null : ch.number);
 
+        // Polls the drivers of the gateway's modems. They are read from the file every time: a modem added
+        // in the settings is polled without a restart.
         private static async Task RadioPollLoop(Gateway gw)
         {
-            string action = Modems.For(gw.type).ShowDevicesAction;
             await Task.Delay(10000);   // after the AMI login
             while (!_radioDenied.ContainsKey(gw.id))
             {
                 try
                 {
-                    if (_amiClients.TryGetValue(gw.id, out var client) && client.Connected)
-                        client.GetStream().Write(Encoding.UTF8.GetBytes($"Action: {action}\r\nActionID: {RadioActionId}\r\n\r\n"));
+                    var modems = (TryReadSettingsFile() ?? settings).gateways?.FirstOrDefault(g => g.id == gw.id)?.modems ?? gw.modems ?? new();
+                    foreach (var flavor in modems.Select(m => Modems.For(m.driver)).Where(f => f != null).Distinct())
+                        if (_amiClients.TryGetValue(gw.id, out var client) && client.Connected)
+                            lock (client)
+                                client.GetStream().Write(Encoding.UTF8.GetBytes($"Action: {flavor.ShowDevicesAction}\r\nActionID: {RadioActionId}\r\n\r\n"));
                 }
                 catch { }
                 await Task.Delay(RadioPollSeconds * 1000);
@@ -117,11 +121,11 @@ namespace ghostline
             if (evt.GetValueOrDefault("Response") == "Error")
             {
                 if (_radioDenied.TryAdd(gw.id, true))
-                    Console.WriteLine($"AMI ({gw.id}): {Modems.For(gw.type)?.ShowDevicesAction} refused ({evt.GetValueOrDefault("Message", "")}); " +
+                    Console.WriteLine($"AMI ({gw.id}): ShowDevices refused ({evt.GetValueOrDefault("Message", "")}); " +
                                       "line monitoring is off until a restart. The AMI user needs 'reporting' in 'write'.");
                 return true;
             }
-            if (evt.GetValueOrDefault("Event") != Modems.For(gw.type)?.DeviceEntryEvent) return true;
+            if (!Modems.All.Any(f => evt.GetValueOrDefault("Event") == f.DeviceEntryEvent)) return true;
 
             string device = evt.GetValueOrDefault("Device", "");
             var ch = getChannelByLine(gw.id, device);

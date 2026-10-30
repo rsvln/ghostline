@@ -3,8 +3,8 @@ using Xunit;
 
 namespace ghostline.Tests
 {
-    // Saving the PBX tab into the config file: values change in place, comments stay, a new phone
-    // gets a secret, an empty extension removes the phone, a dry run writes nothing.
+    // Phone secrets of the managed Asterisk: a phone saved with an extension gets one, a new one replaces
+    // it; comments in the config stay.
     [Collection("config file")]   // Program.ConfigPath is static: one test at a time
     public class PbxSaveTests : IDisposable
     {
@@ -12,31 +12,49 @@ namespace ghostline.Tests
             mode: full
             gateways:
               - id: pbx
-                type: quectel
+                type: asterisk
                 ip: 10.0.0.10
                 ami_port: 5038
                 user: ghostline
                 password: secret
-            channels:
+                pbx: managed
+                managed:
+                  conf_dir: /srv/asterisk-conf
+                  sip:
+                    tls:
+                      cert: keys/sip.crt
+                      key: keys/sip.key
+                modems:
+                  - name: gsm1
+                    driver: quectel
+                  - name: gsm2
+                    driver: quectel
+              - id: old
+                type: asterisk
+                ip: 10.0.0.99
+                modems:
+                  - name: gsm9
+                    driver: quectel
+            lines:
               - name: home          # line 1
                 gateway: pbx
                 pattern: gsm1
-                line: gsm1
+                modem: gsm1
                 phone:
                   extension: "11"
                   secret: Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8
               - name: work          # line 2
                 gateway: pbx
                 pattern: gsm2
-                line: gsm2
-            pbx:
-              mode: managed
-              asterisk: pbx
-              conf_dir: /srv/asterisk-conf
-              tls:
-                cert: keys/sip.crt
-                key: keys/sip.key
-                port: 5061
+                modem: gsm2
+                phone:
+                  extension: "12"
+              - name: other         # FreePBX
+                gateway: old
+                pattern: gsm9
+                modem: gsm9
+                phone:
+                  extension: "19"
             """;
 
         readonly string _path = Path.Combine(Path.GetTempPath(), "gl-pbxsave-" + Guid.NewGuid().ToString("N") + ".yaml");
@@ -53,88 +71,39 @@ namespace ghostline.Tests
             File.Delete(_path + ".bak");
         }
 
-        static Program.PbxEdit Edit(bool dryRun = false, Program.PbxSipEdit sip = null, params Program.PbxLineEdit[] lines) =>
-            new(sip, lines.ToList(), dryRun);
-
         [Fact]
-        public void AddsPhoneWithSecretAndKeepsComments()
+        public void NewPhoneGetsSecret()
         {
-            var r = Program.SavePbx(Edit(lines: new Program.PbxLineEdit("work", "12", "ru+intl", "sdes")));
-            Assert.True(r.ok, string.Join("; ", r.errors));
-            Assert.Matches("^[A-Za-z0-9]{24}$", r.secrets["work"]);
+            var secrets = Program.AddMissingPhoneSecrets();
+            // Only the phone on the managed Asterisk that has none.
+            Assert.Equal(new[] { "work" }, secrets.Keys);
+            Assert.Matches("^[A-Za-z0-9]{24}$", secrets["work"]);
 
             string text = File.ReadAllText(_path);
             Assert.Contains("# line 2", text);
-            var work = SettingsFile.Parse(text).channels.Single(c => c.name == "work");
-            Assert.Equal("12", work.phone.extension);
-            Assert.Equal("ru+intl", work.phone.dial);
-            Assert.Equal(r.secrets["work"], work.phone.secret);
+            var s = SettingsFile.Parse(text);
+            Assert.Equal(secrets["work"], s.lines.Single(c => c.name == "work").phone.secret);
+            Assert.Equal("Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8", s.lines.Single(c => c.name == "home").phone.secret);
+            Assert.Null(s.lines.Single(c => c.name == "other").phone.secret);
+
+            Assert.Empty(Program.AddMissingPhoneSecrets());
         }
 
         [Fact]
-        public void EmptyExtensionRemovesPhone()
+        public void NewSecretReplacesTheOld()
         {
-            var r = Program.SavePbx(Edit(lines: new Program.PbxLineEdit("home", "", null, null)));
-            // No line has a phone then: refused, nothing written.
-            Assert.False(r.ok);
-            Assert.Equal(Yaml, File.ReadAllText(_path));
-
-            Program.SavePbx(Edit(lines: new Program.PbxLineEdit("work", "12", "ru", "sdes")));
-            r = Program.SavePbx(Edit(lines: new Program.PbxLineEdit("home", "", null, null)));
-            Assert.True(r.ok, string.Join("; ", r.errors));
-            Assert.Null(SettingsFile.Parse(File.ReadAllText(_path)).channels.Single(c => c.name == "home").phone);
+            string secret = Program.NewPhoneSecret("home");
+            Assert.Matches("^[A-Za-z0-9]{24}$", secret);
+            Assert.Equal(secret, SettingsFile.Parse(File.ReadAllText(_path)).lines.Single(c => c.name == "home").phone.secret);
+            Assert.Null(Program.NewPhoneSecret("nosuchline"));
         }
 
         [Fact]
-        public void SipFieldsAndDryRun()
+        public void LineOnAnotherPbxIsAnError()
         {
-            var sip = new Program.PbxSipEdit(5062, null, "sip.example.org", "10.0.0.0/8, 192.0.2.0/24", null, null);
-            var r = Program.SavePbx(Edit(dryRun: true, sip: sip));
-            Assert.True(r.ok, string.Join("; ", r.errors));
-            Assert.Contains("bind=0.0.0.0:5062", r.files[PbxConfig.PjsipFile]);
-            Assert.Equal(Yaml, File.ReadAllText(_path));
-
-            r = Program.SavePbx(Edit(sip: sip));
-            Assert.True(r.ok);
-            var p = SettingsFile.Parse(File.ReadAllText(_path)).pbx;
-            Assert.Equal(5062, p.tls.port);
-            Assert.Equal(new[] { "10.0.0.0/8", "192.0.2.0/24" }, p.localNets);
-        }
-
-        [Fact]
-        public void LineOnAnotherPbxGetsNoPhone()
-        {
-            File.WriteAllText(_path, Yaml.Replace("    password: secret\n", """
-                    password: secret
-                  - id: old
-                    type: quectel
-                    ip: 10.0.0.99
-                    ami_port: 5038
-                    user: ghostline
-                    password: secret
-
-                """).Replace("    gateway: pbx\n    pattern: gsm2", "    gateway: old\n    pattern: gsm2"));
-            var r = Program.SavePbx(Edit(lines: new Program.PbxLineEdit("work", "12", "ru", "sdes")));
-            Assert.False(r.ok);
-            Assert.Contains(r.errors, e => e.Contains("another PBX"));
-        }
-
-        [Fact]
-        public void AddsAndRemovesLine()
-        {
-            var r = Program.AddLine(new("line4", "pbx", "gsm4", "14", "ru", "sdes"));
-            Assert.True(r.ok, r.error);
-            Assert.Matches("^[A-Za-z0-9]{24}$", r.secret);
-            var ch = SettingsFile.Parse(File.ReadAllText(_path)).channels.Single(c => c.name == "line4");
-            Assert.Equal(("pbx", "gsm4", "gsm4", "14"), (ch.gateway, ch.pattern, ch.line, ch.phone.extension));
-
-            Assert.False(Program.AddLine(new("line5", "pbx", "gsm4", "", null, null)).ok);   // device taken
-            Assert.False(Program.AddLine(new("line4", "pbx", "gsm5", "", null, null)).ok);   // name taken
-            Assert.False(Program.AddLine(new("line6", "pbx", "gsm6", "11", null, null)).ok); // extension taken
-
-            Assert.True(Program.RemoveLine("line4").ok);
-            Assert.DoesNotContain(SettingsFile.Parse(File.ReadAllText(_path)).channels, c => c.name == "line4");
-            Assert.Contains("# line 2", File.ReadAllText(_path));
+            Program.AddMissingPhoneSecrets();
+            var errors = PbxConfig.Validate(SettingsFile.Parse(File.ReadAllText(_path)));
+            Assert.Contains(errors, e => e.Contains("line other") && e.Contains("another PBX"));
         }
 
         [Fact]
@@ -149,14 +118,6 @@ namespace ghostline.Tests
             Assert.Equal(2, rows.Count);
             Assert.Equal(("hw1", "Free", "t2 rus", "E1550"), rows[0]);
             Assert.Equal(("gsm1", "Ring", "MTS 5G", "EC200A"), rows[1]);
-        }
-
-        [Fact]
-        public void BadValuesAreRefused()
-        {
-            var r = Program.SavePbx(Edit(lines: new Program.PbxLineEdit("home", "1x", "ru", "sdes")));
-            Assert.False(r.ok);
-            Assert.Equal(Yaml, File.ReadAllText(_path));
         }
     }
 }

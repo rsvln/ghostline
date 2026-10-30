@@ -9,13 +9,13 @@ namespace ghostline
     // so comments and the order of keys are kept. As in lookout.
     public static class ConfigYaml
     {
-        // Name of a gateway or a line: path selectors refer to it (gateways[id=...], channels[name=...]).
+        // Name of a gateway or a line: path selectors refer to it (gateways[id=...], lines[name=...]).
         public static readonly Regex NameOk = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.CultureInvariant);
 
         // List keys: a comma-separated value in the form, [a, b] in the YAML.
         static readonly HashSet<string> ListKeys = new(StringComparer.OrdinalIgnoreCase) { "chat_ids", "local_nets" };
 
-        // Value at a path: "web.password", "gateways[id=pbx].ami_port", "channels[name=home].calls.voice".
+        // Value at a path: "web.password", "gateways[id=pbx].ami_port", "lines[name=home].calls.voice".
         // A missing key is added (with any missing intermediate sections); a missing list item with
         // this selector is added. An empty value for a missing key is not written.
         public static string Set(string yaml, string path, string value)
@@ -91,7 +91,7 @@ namespace ghostline
             catch (YamlDotNet.Core.YamlException) { return yaml; }
         }
 
-        // Removes a section, for example "clients.ntfy" or "channels[name=home].clients.telegram".
+        // Removes a section, for example "clients.ntfy" or "lines[name=home].clients.telegram".
         // When it is the last key of its parent, the parent becomes {} (an empty section, not a
         // missing one: "clients: {}" on a line means "send nowhere").
         public static string RemoveSection(string yaml, string path)
@@ -201,6 +201,95 @@ namespace ghostline
                 lines.InsertRange(clients + 1, block);
             }
             return string.Join(nl, lines);
+        }
+
+        // Renames a key in place, for example "channels" -> "lines" or "lines[name=home].line" -> "modem":
+        // its value and comments stay.
+        public static string RenameKey(string yaml, string path, string newKey)
+        {
+            var parts = ParsePath(path);
+            if (parts.Count == 0 || parts[^1].selector != null) return yaml;
+            try
+            {
+                var root = Root(yaml);
+                var parent = parts.Count == 1 ? root as YamlMappingNode
+                    : Navigate(root, parts.Take(parts.Count - 1).ToList(), out _) as YamlMappingNode;
+                if (parent == null) return yaml;
+                var key = parent.Children.Keys.OfType<YamlScalarNode>().FirstOrDefault(k => k.Value == parts[^1].key);
+                if (key == null || parent.Children.Keys.OfType<YamlScalarNode>().Any(k => k.Value == newKey)) return yaml;
+                int start = (int)key.Start.Index, end = (int)key.End.Index;
+                return yaml.Substring(0, start) + newKey + yaml.Substring(end);
+            }
+            catch (YamlDotNet.Core.YamlException) { return yaml; }
+        }
+
+        // Removes a top-level section with its lines (and comments inside it).
+        public static string RemoveTopSection(string yaml, string key)
+        {
+            string nl = yaml.Contains("\r\n") ? "\r\n" : "\n";
+            var lines = yaml.Replace("\r\n", "\n").Split('\n').ToList();
+            int start = lines.FindIndex(l => Regex.IsMatch(l, "^" + Regex.Escape(key) + @":(\s.*)?$"));
+            if (start < 0) return yaml;
+            int end = start + 1;
+            while (end < lines.Count && (lines[end].Length == 0 || lines[end][0] is ' ' or '#')) end++;
+            while (end > start + 1 && lines[end - 1].Trim().Length == 0) end--;   // trailing blank lines stay
+            if (end < lines.Count && start > 0 && lines[start - 1].Trim().Length == 0 && lines[end].Trim().Length == 0)
+                end++;                                                          // no double blank line
+            lines.RemoveRange(start, end - start);
+            return string.Join(nl, lines);
+        }
+
+        // Rewrites a file of the format before 2026-10-30 the way SettingsFile.Normalize read it: keys are
+        // renamed and values set in place, so the comments stay. s: the file as parsed (normalized).
+        internal static string Migrate(string yaml, Settings s)
+        {
+            var m = s.Migration;
+            if (m == null) return yaml;
+            foreach (var id in m.Merged.Keys)
+                yaml = Remove(yaml, $"gateways[id={id}]");
+            foreach (var id in m.Retyped)
+                yaml = Set(yaml, $"gateways[id={id}].type", "asterisk");
+            if (m.ChannelsRenamed)
+                yaml = RenameKey(yaml, "channels", "lines");
+            foreach (var ch in s.lines)
+            {
+                if (m.LineKeys.TryGetValue(ch.name ?? "", out var key))
+                    yaml = RenameKey(yaml, $"lines[name={ch.name}].line", key);
+                if (m.Regatewayed.Contains(ch.name))
+                    yaml = Set(yaml, $"lines[name={ch.name}].gateway", ch.gateway);
+            }
+            foreach (var g in s.gateways.Where(g => g.IsAsterisk))
+            {
+                if (g.Managed && g.id == m.ManagedGateway)
+                {
+                    string at = $"gateways[id={g.id}]";
+                    var p = g.managed;
+                    yaml = Set(yaml, at + ".pbx", "managed");
+                    yaml = Set(yaml, at + ".managed.conf_dir", p.confDir ?? "");
+                    yaml = Set(yaml, at + ".managed.asterisk_dir", p.asteriskDir ?? "");
+                    yaml = Set(yaml, at + ".managed.recordings_path", p.recordingsPath ?? "");
+                    yaml = Set(yaml, at + ".managed.sip.tls.cert", p.sip.tls?.cert ?? "");
+                    yaml = Set(yaml, at + ".managed.sip.tls.key", p.sip.tls?.key ?? "");
+                    yaml = Set(yaml, at + ".managed.sip.tls.port", (p.sip.tls?.port ?? 5061).ToString(CultureInfo.InvariantCulture));
+                    if (p.sip.udpPort != 0)
+                        yaml = Set(yaml, at + ".managed.sip.udp_port", p.sip.udpPort.ToString(CultureInfo.InvariantCulture));
+                    yaml = Set(yaml, at + ".managed.sip.external_address", p.sip.externalAddress ?? "");
+                    if (p.sip.localNets?.Count > 0)
+                        yaml = Set(yaml, at + ".managed.sip.local_nets", string.Join(", ", p.sip.localNets));
+                }
+                foreach (var modem in g.modems ?? new())
+                {
+                    string at = $"gateways[id={g.id}].modems[name={modem.name}]";
+                    yaml = Set(yaml, at + ".driver", modem.driver ?? "");
+                    yaml = Set(yaml, at + ".data", modem.data ?? "");
+                    yaml = Set(yaml, at + ".audio", modem.audio ?? "");
+                    yaml = Set(yaml, at + ".alsadev", modem.alsadev ?? "");
+                    if (modem.noqpcmv) yaml = Set(yaml, at + ".noqpcmv", "true");
+                }
+            }
+            if (m.PbxRemoved)
+                yaml = RemoveTopSection(yaml, "pbx");
+            return yaml;
         }
 
         static int LineStart(string yaml, int pos)
@@ -513,6 +602,8 @@ namespace ghostline
         public record Group(string id, string title, List<Field> fields);
         // clients: the client sections of a line, null when the line has no "clients" section at all.
         public record Item(string key, List<Field> fields, string[] clients = null);
+        // An Asterisk gateway: its modems (edited with their own form), whether ghostline writes its config.
+        public record GatewayItem(string key, List<Field> fields, string type, bool managed, List<PbxModem> modems);
 
         static readonly string[] Locales = { "", "en", "ru" };
 
@@ -543,20 +634,11 @@ namespace ghostline
                     F("web.password", "text", s.web?.password)),
                 G("logger", F("logger.file", "checkbox", b(s.logger?.file ?? false))),
                 G("monitor", F("monitor.alert_minutes", "number", (s.monitor?.alertMinutes ?? 2).ToString(CultureInfo.InvariantCulture))),
-                G("pbx",
-                    F("pbx.mode", "select", s.pbx?.mode ?? "freepbx", "freepbx", "managed"),
-                    F("pbx.asterisk", "select", s.pbx?.asterisk ?? "", new[] { "" }.Concat(gatewayIds).ToArray()),
-                    F("pbx.conf_dir", "text", s.pbx?.confDir),
-                    F("pbx.asterisk_dir", "text", s.pbx?.asteriskDir),
-                    F("pbx.tls.cert", "text", s.pbx?.tls?.cert),
-                    F("pbx.tls.key", "text", s.pbx?.tls?.key),
-                    F("pbx.tls.port", "number", n(s.pbx?.tls?.port)),
-                    F("pbx.udp_port", "number", n(s.pbx?.udpPort)),
-                    F("pbx.external_address", "text", s.pbx?.externalAddress),
-                    F("pbx.local_nets", "text", Csv(s.pbx?.localNets)),
-                    F("pbx.recordings_path", "text", s.pbx?.recordingsPath)),
                 G("gateways"),
-                G("channels"),
+                G("lines"),
+                G("managed"),
+                G("modems"),
+                G("phone"),
                 G("calls",
                     F("calls.recordings_url", "text", c?.recordingsUrl),
                     F("calls.recordings_dir", "text", c?.recordingsDir),
@@ -583,43 +665,79 @@ namespace ghostline
                 groups,
                 // Client sections present at the top; the form shows only these and offers to add the rest.
                 clients = Present(s.clients?.telegram != null, s.clients?.ntfy != null),
-                gateways = (s.gateways ?? new()).Where(g => !string.IsNullOrEmpty(g.id)).Select(g => new Item(g.id, GatewayFields(g.id, g))).ToList(),
-                channels = (s.channels ?? new()).Where(ch => !string.IsNullOrEmpty(ch.name)).Select(ch => new Item(ch.name, ChannelFields(ch.name, ch, gatewayIds),
+                gateways = (s.gateways ?? new()).Where(g => !string.IsNullOrEmpty(g.id))
+                    .Select(g => new GatewayItem(g.id, GatewayFields(g.id, g), g.type, g.Managed, g.modems ?? new())).ToList(),
+                lines = (s.lines ?? new()).Where(ch => !string.IsNullOrEmpty(ch.name)).Select(ch => new Item(ch.name, LineFields(ch.name, ch, s),
                     ch.clients == null ? null : Present(ch.clients.telegram != null, ch.clients.ntfy != null))).ToList(),
+                // For a line: what its gateway is, and the modems to choose from.
+                gatewayInfo = (s.gateways ?? new()).Where(g => !string.IsNullOrEmpty(g.id)).ToDictionary(g => g.id, g => new
+                {
+                    g.type, managed = g.Managed, modems = (g.modems ?? new()).Select(m => m.name).ToList()
+                }),
+                // Lines whose phone has a secret (the secret itself is not sent).
+                phoneSecrets = (s.lines ?? new()).Where(ch => !string.IsNullOrEmpty(ch.phone?.secret)).Select(ch => ch.name).ToList(),
                 gatewayTemplate = GatewayFields("{key}"),
-                channelTemplate = ChannelFields("{key}", null, gatewayIds),
+                lineTemplate = LineFields("{key}", null, s),
             };
         }
 
+        static readonly string[] GatewayTypes = { "asterisk", "yeastar", "goip" };
+
+        // All fields of every type: the form shows the ones the type has (and managed.* with pbx: managed),
+        // so a changed type or PBX mode shows its fields at once.
         static List<Field> GatewayFields(string id, Gateway g = null)
         {
-            g ??= new Gateway { id = id, type = "quectel", amiPort = 5038 };
+            g ??= new Gateway { id = id, type = "asterisk", amiPort = 5038 };
             string p = $"gateways[id={id}]";
-            return new()
+            string type = g.type ?? "asterisk";
+            var list = new List<Field>
             {
                 F($"{p}.id", "text", g.id),
-                F($"{p}.type", "select", g.type ?? "quectel", "quectel", "dongle", "yeastar", "goip"),
+                F($"{p}.type", "select", type, GatewayTypes.Contains(type) ? GatewayTypes : GatewayTypes.Append(type).ToArray()),
                 F($"{p}.ip", "text", g.ip),
                 F($"{p}.ami_port", "number", n(g.amiPort)),
                 F($"{p}.http_port", "number", n(g.httpPort)),
                 F($"{p}.user", "text", g.user),
                 F($"{p}.password", "text", g.password),
                 F($"{p}.monitor", "checkbox", b(g.monitor)),
+                F($"{p}.pbx", "select", g.Managed ? "managed" : "freepbx", "freepbx", "managed"),
             };
+            var m = g.managed ?? new ManagedPbx();
+            var sip = m.sip ?? new PbxSip();
+            list.AddRange(new[]
+            {
+                F($"{p}.managed.conf_dir", "text", m.confDir),
+                F($"{p}.managed.asterisk_dir", "text", m.asteriskDir),
+                F($"{p}.managed.recordings_path", "text", m.recordingsPath),
+                F($"{p}.managed.sip.tls.cert", "text", sip.tls?.cert),
+                F($"{p}.managed.sip.tls.key", "text", sip.tls?.key),
+                F($"{p}.managed.sip.tls.port", "number", n(sip.tls?.port)),
+                F($"{p}.managed.sip.udp_port", "number", n(sip.udpPort)),
+                F($"{p}.managed.sip.external_address", "text", sip.externalAddress),
+                F($"{p}.managed.sip.local_nets", "text", Csv(sip.localNets)),
+            });
+            return list;
         }
 
-        static List<Field> ChannelFields(string name, Channel ch, string[] gatewayIds)
+        // A line on an Asterisk gateway chooses one of its modems; on yeastar / goip it has a port. Both are
+        // here, and the phone; the form shows what the line's gateway needs.
+        static List<Field> LineFields(string name, Channel ch, Settings s)
         {
+            var gatewayIds = (s.gateways ?? new()).Select(g => g.id).Where(x => !string.IsNullOrEmpty(x)).ToArray();
             ch ??= new Channel { name = name, gateway = gatewayIds.FirstOrDefault() };
+            var gw = s.gateways?.FirstOrDefault(g => g.id == ch.gateway);
             var calls = ch.calls ?? new ChannelCalls();
-            string p = $"channels[name={name}]";
+            string p = $"lines[name={name}]";
             var gws = gatewayIds.Contains(ch.gateway ?? "") || string.IsNullOrEmpty(ch.gateway) ? gatewayIds : gatewayIds.Append(ch.gateway).ToArray();
-            return new()
+            var modems = new[] { "" }.Concat((gw?.modems ?? new()).Select(m => m.name)).ToList();
+            if (!string.IsNullOrEmpty(ch.modem) && !modems.Contains(ch.modem)) modems.Add(ch.modem);
+            return new List<Field>
             {
                 F($"{p}.name", "text", ch.name),
                 F($"{p}.gateway", "select", ch.gateway, gws),
+                F($"{p}.modem", "select", ch.modem, modems.ToArray()),
+                F($"{p}.port", "text", ch.port),
                 F($"{p}.pattern", "text", ch.pattern),
-                F($"{p}.line", "text", ch.line),
                 F($"{p}.number", "text", ch.number),
                 F($"{p}.clients.telegram.chat_ids", "text", Csv(ch.clients?.telegram?.chatIds)),
                 F($"{p}.clients.ntfy.topic", "text", ch.clients?.ntfy?.topic),
@@ -627,7 +745,7 @@ namespace ghostline
                 F($"{p}.calls.transcript", "checkbox", b(calls.transcript)),
                 F($"{p}.calls.missed", "checkbox", b(calls.missed)),
                 F($"{p}.calls.chat_ids", "text", Csv(calls.chatIds)),
-                // pbx.mode: managed. The secret is not a form field: the PBX tab generates it.
+                // The phone (gateway with pbx: managed). The secret is not a form field: it is generated on save.
                 F($"{p}.phone.extension", "text", ch.phone?.extension),
                 // Empty for a line without a phone, so saving the form does not add a phone section to it.
                 F($"{p}.phone.dial", "select", ch.phone == null ? "" : ch.phone.dial ?? "ru", new[] { "" }.Concat(PbxConfig.DialSets).ToArray()),
