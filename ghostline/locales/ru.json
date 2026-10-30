@@ -257,6 +257,7 @@
   "web.pbx.modem.no_usb": "Нет списка USB с хоста Asterisk (usb.json в conf_dir, его пишет gl-usb-inventory).",
   "web.pbx.modem.no_free_usb": "Нет свободного USB-модема, который Asterisk может открыть. Модемы, не проброшенные в его контейнер:",
   "web.pbx.modem.no_access": "не проброшен в Asterisk",
+  "web.pbx.modem.no_access_hint": "Asterisk не может открыть порты этих модемов: на хосте нет udev-правила, которое отдаёт USB-модемы контейнеру Asterisk (docs/asterisk-setup.md, раздел 4). После него модем появится здесь через 30 с.",
   "web.pbx.modem.submit": "Добавить",
   "web.pbx.modem.hint": "Для известных моделей всё заполняется само. Драйвер перезагрузится, когда закончатся звонки на нём.",
   "web.pbx.modem.add_confirm": "Добавить модем {0} ({1})? Драйвер перезагрузится после текущих звонков.",

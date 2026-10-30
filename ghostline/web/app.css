@@ -283,6 +283,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .tree-pane-head h3 { font-size: 15px; font-weight: 500; }
 .tree-del { margin-left: auto; }
 .tree-hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; line-height: 1.45; }
+.pbx-hint { margin: 8px 0 10px; max-width: 760px; }
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 18px; }
 .settings-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .settings-grid label:has(textarea) { grid-column: 1 / -1; }

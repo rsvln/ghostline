@@ -604,7 +604,8 @@ async function loadStatusPbx() {
     html += `<div class="section"><h3>${esc(title)}${addr} · ${conn}${cert}</h3>
       <table class="stat-table">${th(['web.pbx.modem.name', 'web.pbx.modem.driver', 'web.pbx.modem.model', 'USB', 'web.pbx.modem.state', 'web.status.col.line'])}
       <tbody>${rows || `<tr><td colspan="6" class="muted">${esc(t('web.pbx.modem.none'))}</td></tr>`}</tbody></table>
-      ${usb ? `<div class="pbx-usb"><b>${esc(t('web.pbx.usb.title'))}</b>${usb}</div>` : ''}
+      ${usb ? `<div class="pbx-usb"><b>${esc(t('web.pbx.usb.title'))}</b>${usb}${(g.usb || []).some(u => !u.access)
+        ? `<div class="tree-hint pbx-hint">${esc(t('web.pbx.modem.no_access_hint'))}</div>` : ''}</div>` : ''}
       ${errs ? `<div class="pbx-usb"><b>${esc(t('web.pbx.problems'))}</b>${errs}</div>` : ''}</div>`;
   }
 
@@ -705,7 +706,8 @@ async function openModemAdd(n) {
     + (u.access ? '' : ' · ' + t('web.pbx.modem.no_access'));
   if (!free.some(u => u.access)) {
     host.innerHTML = `<div class="muted">${esc(t('web.pbx.modem.no_free_usb'))}</div>
-      ${free.length ? `<div class="muted pbx-port">${free.map(u => esc(label(u))).join('<br>')}</div>` : ''}${cancel}`;
+      ${free.length ? `<div class="muted pbx-port">${free.map(u => esc(label(u))).join('<br>')}</div>
+      <div class="tree-hint pbx-hint">${esc(t('web.pbx.modem.no_access_hint'))}</div>` : ''}${cancel}`;
     return;
   }
   host.innerHTML = `<div class="settings-grid pbx-add-form">

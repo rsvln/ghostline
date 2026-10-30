@@ -71,10 +71,10 @@ others). These errors are expected.
 ## 3. Modems
 
 The modems are added in ghostline's settings (Gateways → gateway → Modems,
-"+ Modem"): the USB device and
-its ports are chosen from lists, known models are filled in. In a container
-the USB devices must be passed through first (below); a modem Asterisk cannot
-open is listed as "not passed to Asterisk" and cannot be chosen.
+"+ Modem"): the USB device and its ports are chosen from lists, known models
+are filled in. In a container the host gives all its USB modems to Asterisk
+once (below); until then a modem is listed as "not passed to Asterisk" and
+cannot be chosen.
 
 ## 4. Shared directories (Proxmox example)
 
@@ -106,31 +106,35 @@ Mount the directories **before** running the script, or copy the
 placeholders and `keys/` into the mounted directory afterwards. The script
 writes into whatever is mounted at `--conf-dir`.
 
-USB modems in an unprivileged LXC container (Proxmox example). Inside the
-container `/dev` nodes cannot be created, so the host's nodes are bind-mounted,
-and a udev rule on the host gives the chosen modems to the container's
-`dialout` group (gid 20, on the host 100020). Ports of other modems stay
-`root:dialout` on the host and closed to the container, so a modem used by
-another PBX cannot be taken by mistake.
+USB modems in an unprivileged LXC container (Proxmox example). Every USB
+modem on the host belongs to ghostline: the host gives all of them to the
+Asterisk container once, and a modem plugged in later shows up in "+ Modem"
+without touching the host again. Inside the container `/dev` nodes cannot be
+created, so the host's nodes are bind-mounted, and one udev rule gives every
+USB serial port to the container's `dialout` group (gid 20, on the host
+100020) and every USB sound card (UAC modems such as the Quectel EC200A) to
+its `audio` group (gid 29, on the host 100029). The host's own sound card is
+not touched.
 
 ```
-# on the host: one line per modem, by its USB path (udevadm info -q property -n /dev/ttyUSBn | grep ID_PATH)
+# on the host
 cat > /etc/udev/rules.d/99-gl-modems.rules <<'EOF'
-SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ENV{ID_PATH}=="pci-0000:00:14.0-usb-0:7:*", GROUP="100020", MODE="0660"
+SUBSYSTEM=="tty", KERNEL=="ttyUSB*", GROUP="100020", MODE="0660"
+SUBSYSTEM=="sound", SUBSYSTEMS=="usb", GROUP="100029", MODE="0660"
 EOF
-udevadm control --reload && udevadm trigger --action=change --subsystem-match=tty
+udevadm control --reload && udevadm trigger --action=change --subsystem-match=tty --subsystem-match=sound
 
 # /etc/pve/lxc/<asterisk ct>.conf
 lxc.cgroup2.devices.allow: c 188:* rwm
+lxc.cgroup2.devices.allow: c 116:* rwm
 lxc.mount.entry: /dev/serial dev/serial none bind,optional,create=dir
+lxc.mount.entry: /dev/snd dev/snd none bind,optional,create=dir
 lxc.mount.entry: /dev/ttyUSB0 dev/ttyUSB0 none bind,optional,create=file
 # ... the same for ttyUSB1 to ttyUSB15
 ```
 
-A UAC sound card (Quectel EC200A) is passed the same way: `c 116:* rwm`, a
-bind mount of `/dev/snd`, and a rule with `SUBSYSTEM=="sound"` and
-`GROUP="100029"` (`audio`). Restart the container. Within 30 s the Status
-tab lists the modem as a free USB modem, and "+ Modem" offers it.
+Restart the container. Within 30 s the Status tab lists the modems as free
+USB modems, and "+ Modem" offers them.
 
 ## 5. ghostline
 

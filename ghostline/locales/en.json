@@ -257,6 +257,7 @@
   "web.pbx.modem.no_usb": "No USB list from the Asterisk host yet (usb.json in conf_dir, written by gl-usb-inventory).",
   "web.pbx.modem.no_free_usb": "No free USB modem that Asterisk may open. Modems not passed to its container:",
   "web.pbx.modem.no_access": "not passed to Asterisk",
+  "web.pbx.modem.no_access_hint": "Asterisk cannot open the ports of these modems: the host has no udev rule giving USB modems to the Asterisk container (docs/asterisk-setup.md, section 4). Once it is there, the modem shows up here within 30 s.",
   "web.pbx.modem.submit": "Add",
   "web.pbx.modem.hint": "Known models are filled in. The driver reloads after the calls on it end.",
   "web.pbx.modem.add_confirm": "Add modem {0} ({1})? Its driver reloads after the current calls.",
