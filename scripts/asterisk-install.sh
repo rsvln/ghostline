@@ -468,11 +468,13 @@ systemctl enable --now gl-usb-inventory.timer >/dev/null 2>&1
 systemctl restart asterisk
 
 log "fail2ban"
-cat >/etc/fail2ban/jail.d/asterisk-ghostline.local <<'EOF'
+cat >/etc/fail2ban/jail.d/asterisk-ghostline.local <<EOF
 # Bans addresses that fail SIP authentication, from the Asterisk security log.
-# The ban covers all ports: TLS, UDP (pbx.udp_port) and RTP.
+# The ban covers all ports: TLS, UDP (managed.sip.udp_port) and RTP. ghostline's own address is
+# never banned: a wrong AMI password (say, after a config mix-up) would otherwise lock it out.
 [asterisk]
 enabled = true
+ignoreip = 127.0.0.1/8 ::1 $AMI_PERMIT
 backend = polling
 logpath = /var/log/asterisk/security
 banaction = %(banaction_allports)s
