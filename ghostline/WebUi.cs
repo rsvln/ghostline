@@ -87,7 +87,7 @@ namespace ghostline
                         var s = Program.settings;
                         bool full = s?.FullMode == true;
                         var components = (s?.gateways ?? new List<Gateway>())
-                            .Select(g => Component(g.id, g.id, g.type, g.ip, Modems.IsAmi(g.type)))
+                            .Select(g => Component(g.id, g.id, g.type, GatewayAddress(g), Modems.IsAmi(g.type)))
                             .ToList();
                         // Notification channels: only the ones switched on in the config.
                         if (Program.TelegramEnabled)
@@ -209,7 +209,7 @@ namespace ghostline
                         {
                             gateways = asterisks.Select(g => new
                             {
-                                g.id, managed = g.Managed,
+                                g.id, managed = g.Managed, address = GatewayAddress(g),
                                 connected = HealthStatus.Find(g.id)?.Connected == true,
                                 cert = g.Managed && cert != null ? new { cert.subject, notAfter = cert.notAfter.ToString("yyyy-MM-dd"), cert.daysLeft } : null,
                                 modems = (g.modems ?? new()).Select(m =>
@@ -477,6 +477,13 @@ namespace ghostline
         }
 
         // One card of the Status tab and one dot in the header.
+        // host:port ghostline connects to: AMI for asterisk / yeastar, HTTP for goip.
+        private static string GatewayAddress(Gateway g)
+        {
+            int? port = Modems.IsAmi(g.type) ? g.amiPort : g.httpPort;
+            return port is > 0 ? $"{g.ip}:{port}" : g.ip;
+        }
+
         private static object Component(string id, string title, string kind, string detail, bool connectionBased)
         {
             var h = HealthStatus.Find(id);

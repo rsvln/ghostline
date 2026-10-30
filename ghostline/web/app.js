@@ -588,6 +588,7 @@ async function loadStatusPbx() {
 
   for (const g of d.gateways) {
     const title = t(g.managed ? 'web.pbx.status.managed' : 'web.pbx.status.freepbx', g.id);
+    const addr = g.address ? ` <span class="muted">· AMI ${esc(g.address)}</span>` : '';
     const conn = `<span class="hdot ${g.connected ? 'ok' : 'err'}"></span>${esc(t(g.connected ? 'web.status.state.ok' : 'web.status.state.err'))}`;
     const cert = g.cert ? ` <span class="muted">· ${esc(t('web.pbx.cert'))} ${esc(t('web.pbx.cert.until'))} ${esc(g.cert.notAfter)}, `
       + `${esc(t('web.pbx.cert.days', g.cert.daysLeft))}</span>` : '';
@@ -600,7 +601,7 @@ async function loadStatusPbx() {
     const usb = (g.usb || []).map(u => `<div>USB ${esc(u.usb)} · ${esc(u.model || u.product || '')} · ${esc(u.vid + ':' + u.pid)} — `
       + `<span class="muted">${esc(t(u.access ? 'web.pbx.usb.free' : 'web.pbx.modem.no_access'))}</span></div>`).join('');
     const errs = (g.errors || []).map(e => `<div class="pbx-err">${esc(e)}</div>`).join('');
-    html += `<div class="section"><h3>${esc(title)} · ${conn}${cert}</h3>
+    html += `<div class="section"><h3>${esc(title)}${addr} · ${conn}${cert}</h3>
       <table class="stat-table">${th(['web.pbx.modem.name', 'web.pbx.modem.driver', 'web.pbx.modem.model', 'USB', 'web.pbx.modem.state', 'web.status.col.line'])}
       <tbody>${rows || `<tr><td colspan="6" class="muted">${esc(t('web.pbx.modem.none'))}</td></tr>`}</tbody></table>
       ${usb ? `<div class="pbx-usb"><b>${esc(t('web.pbx.usb.title'))}</b>${usb}</div>` : ''}
