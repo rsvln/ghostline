@@ -379,11 +379,18 @@ the phone app) and how ghostline uses it is described in
 authentication: it gives access to messages, recordings and to the
 configuration, which contains credentials.
 
-Every tab has its own address (`/calls`, `/sms`, `/log`, `/status`,
+Every tab has its own address (`/pbx`, `/calls`, `/sms`, `/system`, `/status`,
 `/config`, `/about`) with the filters in the query string, so a view can be
 reloaded, bookmarked or shared, and the browser's Back and Forward buttons
-work. `/` opens the tab used last.
+work. `/` opens the tab used last, the first time PBX.
 
+The PBX, Calls and SMS lists share the toolbar and the row look, load the newest
+500 matching rows and can refresh themselves (off / 5 / 10 / 30 s). A copy button
+puts an SMS (with a header: kind, date, sender or recipient, line) or a call
+transcript (as in the .txt download) into the clipboard.
+
+- **PBX** — SMS and calls of all lines in time order, newest first (from the database),
+  with the same filters plus the kind (SMS / calls); recordings and transcripts open here too.
 - **Calls** (`mode: full`) — journal with filters (line, direction,
   recorded, missed, dates) and search by name, number or words from the
   conversation. A click on a row opens the transcript. Buttons: play, download
@@ -392,11 +399,7 @@ work. `/` opens the tab used last.
   changing `transcribe.prompt`.
 - **SMS** — history with the same filters (line, direction, search by number,
   contact or text, dates); a click on a row shows the whole text. Export, sending.
-- **PBX** — SMS and calls of all lines in time order, newest first (from the database),
-  with the same filters plus the kind (SMS / calls); recordings and transcripts open here too.
 
-All three lists share the toolbar and the row look, load the newest 500 matching rows
-and can refresh themselves (off / 5 / 10 / 30 s).
 - **System** — what ghostline itself does: start, connections, lines losing network, PBX changes,
   failures. Filters by level (errors / warnings / info / debug) and area.
 - **Status** — state of gateways, Telegram and queues.

@@ -5,7 +5,7 @@ const t = (k, ...a) => (I18N[k] ?? k).replace(/\{(\d+)\}/g, (_, i) => a[i]);
 // Every view has its own address: /calls, /sms, /pbx, /system, /status, /config, /config/yaml, /about,
 // with the filters in the query string. F5 shows the same view, links can be shared and
 // the browser's Back / Forward move between views. "/" opens the view seen last.
-const TABS = ['calls', 'sms', 'pbx', 'system', 'status', 'config', 'about'];
+const TABS = ['pbx', 'calls', 'sms', 'system', 'status', 'config', 'about'];
 const LISTS_VIEWS = ['calls', 'sms', 'pbx'];
 const val = id => document.getElementById(id).value;
 const checked = id => document.getElementById(id).checked;
@@ -44,7 +44,7 @@ function buildUrl(path, query) {
 }
 
 let MODE = { mode: 'sms', transcribe: false };
-const defaultView = () => MODE.mode === 'full' ? 'calls' : 'sms';
+const defaultView = () => 'pbx';   // the first tab: SMS and calls together
 
 function parseRoute() {
   const parts = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
