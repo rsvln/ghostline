@@ -112,6 +112,37 @@ namespace ghostline
             }
         }
 
+        // Without calls the transcription service would show no state at all, so it is checked once a
+        // minute: GET /health of its host (speaches), else /v1/models (any OpenAI-compatible service).
+        private static async Task TranscribeHealthLoop()
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            while (true)
+            {
+                try
+                {
+                    var origin = new Uri(new Uri(settings.calls.transcribe.url), "/");
+                    using var resp = await http.GetAsync(new Uri(origin, "health"));
+                    using var check = resp.StatusCode == System.Net.HttpStatusCode.NotFound
+                        ? await http.GetAsync(new Uri(origin, "v1/models")) : null;
+                    var r = check ?? resp;
+                    if (r.IsSuccessStatusCode)
+                        HealthStatus.MarkReachable("transcribe");
+                    else
+                    {
+                        HealthStatus.MarkDisconnected("transcribe");
+                        HealthStatus.MarkError("transcribe", $"health check: HTTP {(int)r.StatusCode}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    HealthStatus.MarkDisconnected("transcribe");
+                    HealthStatus.MarkError("transcribe", "health check: " + DescribeException(ex));
+                }
+                await Task.Delay(TimeSpan.FromMinutes(1));
+            }
+        }
+
         // 2026/09/27/external-11-...wav → 2026/09/27/external-11-...-r.wav
         internal static string LegPath(string recPath, string leg) =>
             Path.ChangeExtension(recPath, null) + "-" + leg + Path.GetExtension(recPath);

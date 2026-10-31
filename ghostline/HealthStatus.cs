@@ -37,6 +37,16 @@ namespace ghostline
             h.LastErrorAt = null;
         }
 
+        // A health check passed: the service is up, but nothing was done, so the last activity stays.
+        public static void MarkReachable(string kind)
+        {
+            var h = Get(kind);
+            h.Configured = true;
+            h.Connected = true;
+            h.LastError = null;
+            h.LastErrorAt = null;
+        }
+
         public static void MarkDisconnected(string kind)
         {
             Get(kind).Connected = false;

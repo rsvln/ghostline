@@ -167,6 +167,7 @@ namespace ghostline
                     {
                         Task.Run(() => TranscribeWorker(requested: false));
                         Task.Run(() => TranscribeWorker(requested: true));
+                        Task.Run(() => TranscribeHealthLoop());
                     }
                 }
             }
