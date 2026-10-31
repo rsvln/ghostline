@@ -366,5 +366,8 @@
   "web.copy": "Copy",
   "web.copied": "Copied",
   "web.copy_failed": "Could not copy",
-  "web.calls.copy_transcript": "Copy the transcript"
+  "web.calls.copy_transcript": "Copy the transcript",
+  "web.sms.copy.from": "From",
+  "web.sms.copy.to": "To",
+  "web.sms.copy.line": "Line"
 }

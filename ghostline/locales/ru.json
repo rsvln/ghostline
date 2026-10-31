@@ -366,5 +366,8 @@
   "web.copy": "Копировать",
   "web.copied": "Скопировано",
   "web.copy_failed": "Не удалось скопировать",
-  "web.calls.copy_transcript": "Копировать расшифровку"
+  "web.calls.copy_transcript": "Копировать расшифровку",
+  "web.sms.copy.from": "От",
+  "web.sms.copy.to": "Кому",
+  "web.sms.copy.line": "Линия"
 }

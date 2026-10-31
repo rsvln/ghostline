@@ -245,8 +245,20 @@ async function copyTranscript(id) {
   copyText((await res.text()).replace(/^\uFEFF/, ''));
 }
 
+// An SMS as plain text with a header, like the transcript: kind, date, who, line, then the text.
 function copySms(id) {
-  if (smsCache[id]) copyText(smsCache[id].text || '');
+  const r = smsCache[id];
+  if (!r) return;
+  const [d, time] = r.ts.split(' ');
+  const who = r.peerName ? `${r.peerName} (${r.peer})` : r.peer;
+  const head = [
+    t('web.sms.kind.' + r.direction),
+    `${t('web.pdf.date')}: ${d.split('-').reverse().join('.')} ${time}`,
+    `${t(r.direction === 'in' ? 'web.sms.copy.from' : 'web.sms.copy.to')}: ${who}`,
+    `${t('web.sms.copy.line')}: ${r.channel}`,
+  ];
+  if (r.origin) head.push(`${t('web.sms.origin')}: ${r.origin}`);
+  copyText(head.join('\n') + '\n\n' + (r.text || '') + '\n');
 }
 
 // ---- Calls, SMS and PBX: one toolbar, one row look ----
