@@ -149,9 +149,32 @@ lines:
 - **Phones:** only TLS by default. With `encryption: sdes` the voice is SRTP;
   the keys go inside the TLS signalling.
 - **Brute force:** fail2ban on the Asterisk host bans by the Asterisk security
-  log. ghostline lists the failed attempts on the Status tab. When one address
-  fails 5 times in 10 minutes, it sends a message to the common Telegram
-  chats and ntfy topic (once a day per address).
+  log, on all ports. The rule is in `gateways[].managed.fail2ban`
+  (form: the gateway → Managed PBX → fail2ban):
+
+  ```yaml
+  fail2ban:
+    max_retry: 5          # failures ...
+    find_minutes: 10      # ... within this time
+    ban_minutes: 60
+    ban_growth: true      # the same address again: x24, then x168 (1 h, 1 day, 1 week)
+    ignore_ip: []         # addresses or networks never banned
+  ```
+
+  - ghostline writes these values to `<conf_dir>/fail2ban_ghostline.json`.
+    `gl-fail2ban` on the Asterisk host (installed by `asterisk-install.sh`)
+    builds the jail from them. It accepts only numbers and addresses, so
+    ghostline cannot put raw fail2ban config there. ghostline's own address
+    (`--ami-permit`) is never banned. The ban history is kept for 30 days,
+    which is what makes the growing ban work.
+  - The Status tab shows the failed attempts, the rule and the banned
+    addresses with "Unban". Unban writes `<conf_dir>/fail2ban_request.json`;
+    the host handles it within seconds. The host reports back in
+    `<conf_dir>/fail2ban.json` every 30 s.
+  - When one address fails 5 times in 10 minutes, ghostline sends a message to
+    the common Telegram chats and ntfy topic (once a day per address). It says
+    whether the accounts tried are yours (a wrong password) or do not exist
+    (a scanner guessing names), and until when fail2ban banned the address.
 - **Values:** the generated files contain only validated values (digits for
   extensions, letters and digits for secrets, plain paths, host names and
   networks). Save refuses anything else.

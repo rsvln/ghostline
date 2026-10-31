@@ -14,7 +14,9 @@ What it installs:
   [chan_quectel-line-monitoring.patch](chan_quectel-line-monitoring.patch).
 - `chan_dongle` with [chan_dongle-sysinfo.patch](chan_dongle-sysinfo.patch).
 - fail2ban: the stock `asterisk` filter on the Asterisk security log. It bans
-  after 5 failures in 10 minutes, for 1 hour, on all ports.
+  after 5 failures in 10 minutes, for 1 hour, on all ports. Once ghostline
+  has saved its settings, `gl-fail2ban` replaces this jail with the rule from
+  `gateways[].managed.fail2ban` ([managed-pbx.md](managed-pbx.md#security)).
 - The base configs (see below) and a systemd unit. Asterisk runs as the user
   `asterisk`, in the groups `dialout` and `audio` (modem ports and UAC sound
   cards).
@@ -58,6 +60,7 @@ is shown only when `manager.conf` is created.
 | `modules.conf` | autoload without the CSV/manager CDR and unused drivers |
 | `rtp.conf` | RTP ports 10000–20000 |
 | `quectel.conf`, `dongle.conf` | `[general]` / `[defaults]` and `#include` of the files ghostline writes; the modems are added in ghostline's settings |
+| `gl-fail2ban` (root; timer every 30 s, path unit on the request files) | builds the fail2ban jail from `<conf-dir>/fail2ban_ghostline.json`, handles unban requests (`fail2ban_request.json`), writes the bans to `<conf-dir>/fail2ban.json` |
 | `gl-usb-inventory` (timer, every 30 s) | writes `<conf-dir>/usb.json`, the USB modems ghostline offers; reads sysfs only |
 | `<conf-dir>/keys/sip.crt`, `sip.key` | self-signed certificate, so TLS starts |
 
@@ -193,4 +196,6 @@ Check fail2ban:
 ```
 fail2ban-client status asterisk
 tail /var/log/asterisk/security
+systemctl status gl-fail2ban.timer gl-fail2ban.path
+cat /etc/fail2ban/jail.d/asterisk-ghostline.local
 ```

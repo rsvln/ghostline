@@ -247,7 +247,8 @@ namespace ghostline
                                     contacts = contacts?.Where(x => x.extension == c.phone.extension).ToList()
                                 }),
                             contactsError,
-                            security = managed == null ? null : Program.RecentSecurityEvents.Take(50)
+                            security = managed == null ? null : Program.RecentSecurityEvents.Take(50),
+                            fail2ban = managed == null ? null : Program.ReadFail2ban(s),
                         });
                     });
 
@@ -316,6 +317,13 @@ namespace ghostline
                         if (s?.ManagedGateway?.id != data.gateway) return Results.Ok(new { ok = true });
                         var applied = await Program.ApplyPbx();
                         return Results.Ok(new { ok = true, applyErrors = applied.errors, applied.output });
+                    });
+
+                    app.MapPost("/api/pbx/fail2ban/unban", async (HttpRequest req) =>
+                    {
+                        var data = await ReadJson<UnbanPayload>(req);
+                        string error = Program.RequestUnban(data?.ip);
+                        return Results.Ok(new { ok = error == null, error });
                     });
 
                     app.MapPost("/api/pbx/secret", async (HttpRequest req) =>
@@ -597,5 +605,6 @@ namespace ghostline
         record SettingsPayload(Dictionary<string, string> fields, string[] remove, bool restart = false, string[] add = null);
         record SendPayload(string channel, string number, string text);
         record SecretPayload(string line);
+        record UnbanPayload(string ip);
     }
 }

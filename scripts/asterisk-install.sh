@@ -487,6 +487,47 @@ chown asterisk:asterisk /var/log/asterisk/security
 systemctl enable fail2ban >/dev/null 2>&1
 systemctl restart fail2ban
 
+# gl-fail2ban: the jail from ghostline's settings (<conf-dir>/fail2ban_ghostline.json, numbers and
+# addresses only), unban requests, and the bans reported back (<conf-dir>/fail2ban.json). Root: it
+# talks to fail2ban. It replaces the jail above once ghostline has written its settings.
+install -m 755 "$(script_file gl-fail2ban.py)" /usr/local/bin/gl-fail2ban
+cat >/etc/systemd/system/gl-fail2ban.service <<EOF
+[Unit]
+Description=fail2ban settings and status for ghostline
+After=fail2ban.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gl-fail2ban $CONF_DIR --keep $AMI_PERMIT
+EOF
+cat >/etc/systemd/system/gl-fail2ban.timer <<'EOF'
+[Unit]
+Description=fail2ban status for ghostline, every 30 s
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=30
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target
+EOF
+# A saved setting or an unban request is handled at once, not at the next timer run.
+cat >/etc/systemd/system/gl-fail2ban.path <<EOF
+[Unit]
+Description=ghostline fail2ban requests
+
+[Path]
+PathChanged=$CONF_DIR/fail2ban_ghostline.json
+PathChanged=$CONF_DIR/fail2ban_request.json
+Unit=gl-fail2ban.service
+
+[Install]
+WantedBy=paths.target
+EOF
+systemctl daemon-reload
+systemctl enable --now gl-fail2ban.timer gl-fail2ban.path >/dev/null 2>&1
+
 log "Check"
 for i in $(seq 1 20); do
   asterisk -rx "core show version" >/dev/null 2>&1 && break

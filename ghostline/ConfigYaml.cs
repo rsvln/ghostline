@@ -13,7 +13,7 @@ namespace ghostline
         public static readonly Regex NameOk = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.CultureInvariant);
 
         // List keys: a comma-separated value in the form, [a, b] in the YAML.
-        static readonly HashSet<string> ListKeys = new(StringComparer.OrdinalIgnoreCase) { "chat_ids", "local_nets" };
+        static readonly HashSet<string> ListKeys = new(StringComparer.OrdinalIgnoreCase) { "chat_ids", "local_nets", "ignore_ip" };
 
         // Value at a path: "web.password", "gateways[id=pbx].ami_port", "lines[name=home].calls.voice".
         // A missing key is added (with any missing intermediate sections); a missing list item with
@@ -759,6 +759,7 @@ namespace ghostline
             };
             var m = g.managed ?? new ManagedPbx();
             var sip = m.sip ?? new PbxSip();
+            var f2b = m.fail2ban ?? new PbxFail2ban();
             list.AddRange(new[]
             {
                 F($"{p}.managed.conf_dir", "text", m.confDir),
@@ -770,6 +771,11 @@ namespace ghostline
                 F($"{p}.managed.sip.udp_port", "number", n(sip.udpPort)),
                 F($"{p}.managed.sip.external_address", "text", sip.externalAddress),
                 F($"{p}.managed.sip.local_nets", "text", Csv(sip.localNets)),
+                F($"{p}.managed.fail2ban.max_retry", "number", n(f2b.maxRetry)),
+                F($"{p}.managed.fail2ban.find_minutes", "number", n(f2b.findMinutes)),
+                F($"{p}.managed.fail2ban.ban_minutes", "number", n(f2b.banMinutes)),
+                F($"{p}.managed.fail2ban.ban_growth", "checkbox", b(f2b.banGrowth)),
+                F($"{p}.managed.fail2ban.ignore_ip", "text", Csv(f2b.ignoreIp)),
             });
             return list;
         }

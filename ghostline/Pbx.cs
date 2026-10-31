@@ -376,9 +376,104 @@ namespace ghostline
             {
                 _securityAlerted[address] = DateTime.Now;
                 SysLog.Warn("pbx", $"{recent} failed SIP attempts from {address} in {SecurityWindow.TotalMinutes} min");
-                EnqueueAdminAlert(L10n.Tg.T("tg.pbx.attack.title"), L10n.Tg.T("tg.pbx.attack.text", address, recent, e.account));
+                _ = Task.Run(() => AttackAlert(address));
             }
             return true;
+        }
+
+        // The message waits a little, so it can say whether fail2ban (it polls the same log) banned the address.
+        private static async Task AttackAlert(string address)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(45));
+            try
+            {
+                var events = _securityEvents.Where(x => x.address == address && DateTime.Now - x.at < SecurityWindow).ToList();
+                var l = L10n.Tg;
+                var text = new List<string> { l.T("tg.pbx.attack.count", address, events.Count, (int)SecurityWindow.TotalMinutes) };
+
+                // Accounts of the managed Asterisk: a wrong password on one of them is a real attempt,
+                // an account that does not exist is a scanner guessing.
+                var ext = PbxConfig.Lines(settings).ToDictionary(x => x.Phone.extension ?? "", x => x.Name);
+                var hit = events.Where(x => ext.ContainsKey(x.account)).Select(x => x.account).Distinct().ToList();
+                var other = events.Select(x => x.account).Where(a => !ext.ContainsKey(a) && !string.IsNullOrEmpty(a) && !a.StartsWith("<"))
+                    .Distinct().ToList();
+                foreach (var a in hit)
+                    text.Add(l.T("tg.pbx.attack.own", a, ext[a]));
+                if (other.Count > 0)
+                    text.Add(l.T("tg.pbx.attack.scan", other.Count, string.Join(", ", other.Take(3)) + (other.Count > 3 ? ", …" : "")));
+
+                var f2b = ReadFail2ban(settings);
+                var ban = f2b?.banned?.FirstOrDefault(b => b.ip == address);
+                text.Add(ban != null
+                    ? l.T("tg.pbx.attack.banned", ban.until == null ? l.T("tg.pbx.attack.forever") : ban.until.Value.ToLocalTime().ToString("dd.MM HH:mm"),
+                          ban.count ?? 1)
+                    : l.T(f2b == null ? "tg.pbx.attack.no_f2b" : "tg.pbx.attack.not_banned"));
+                EnqueueAdminAlert(l.T("tg.pbx.attack.title"), string.Join("\n", text));
+            }
+            catch (Exception ex) { SysLog.Error("pbx", "attack alert: " + ex.Message); }
+        }
+
+        // ---- fail2ban on the Asterisk host (fail2ban.json from scripts/gl-fail2ban.py) -------------------
+
+        internal record Fail2banBan(string ip, DateTime? since, DateTime? until, int? count);
+        internal record Fail2banStatus(DateTime at, List<string> errors, int? failed_now, int? total_failed, int? total_banned,
+                                       int? max_retry, int? find_seconds, int? ban_seconds, bool? ban_growth, List<Fail2banBan> banned);
+
+        // On start: the fail2ban settings reach the host without waiting for a save (Asterisk is not
+        // involved, so this needs no AMI and touches no other file).
+        internal static void SyncFail2banFile(Settings s)
+        {
+            try
+            {
+                var gw = s.ManagedGateway;
+                if (gw == null || PbxConfig.Validate(s).Any(e => e.Contains("fail2ban"))) return;
+                string path = Path.Combine(gw.managed.confDir ?? "", PbxConfig.Fail2banFile);
+                if (!Directory.Exists(gw.managed.confDir)) return;
+                string text = PbxConfig.Generate(s)[PbxConfig.Fail2banFile];
+                if (File.Exists(path) && File.ReadAllText(path) == text) return;
+                File.WriteAllText(path + ".tmp", text);
+                File.Move(path + ".tmp", path, overwrite: true);
+                SysLog.Info("pbx", "wrote " + PbxConfig.Fail2banFile);
+            }
+            catch (Exception ex) { SysLog.Warn("pbx", "fail2ban settings not written: " + ex.Message); }
+        }
+
+        // null: no report from the host (gl-fail2ban not installed, or the shared directory is not there).
+        internal static Fail2banStatus ReadFail2ban(Settings s)
+        {
+            string confDir = s?.ManagedGateway?.managed?.confDir;
+            if (string.IsNullOrEmpty(confDir)) return null;
+            try
+            {
+                string path = Path.Combine(confDir, "fail2ban.json");
+                return File.Exists(path) ? System.Text.Json.JsonSerializer.Deserialize<Fail2banStatus>(File.ReadAllText(path)) : null;
+            }
+            catch { return null; }
+        }
+
+        // Unban: a request file the host handles within seconds (a path unit) or at the next timer run.
+        internal static string RequestUnban(string ip)
+        {
+            if (!System.Net.IPAddress.TryParse(ip ?? "", out var addr)) return "not an IP address";
+            string confDir = settings?.ManagedGateway?.managed?.confDir;
+            if (string.IsNullOrEmpty(confDir) || !Directory.Exists(confDir)) return "no managed.conf_dir";
+            string path = Path.Combine(confDir, "fail2ban_request.json");
+            lock (_securityAlerted)
+            {
+                var list = new List<string>();
+                try
+                {
+                    if (File.Exists(path))
+                        list = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path)).RootElement.GetProperty("unban")
+                            .EnumerateArray().Select(x => x.GetString()).ToList();
+                }
+                catch { }
+                if (!list.Contains(addr.ToString())) list.Add(addr.ToString());
+                File.WriteAllText(path + ".tmp", System.Text.Json.JsonSerializer.Serialize(new { unban = list }));
+                File.Move(path + ".tmp", path, overwrite: true);
+            }
+            SysLog.Info("pbx", $"fail2ban: unban {addr} requested");
+            return null;
         }
 
         // To the common Telegram chats and the common ntfy topic (not a line's): PBX-wide events.

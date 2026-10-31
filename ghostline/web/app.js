@@ -803,8 +803,46 @@ async function loadStatusPbx() {
     html += `<div class="section"><h3>${esc(t('web.pbx.security'))}</h3>
       <table class="stat-table">${th(['web.pbx.sec.time', 'web.pbx.sec.address', 'web.pbx.sec.account', 'web.pbx.sec.event'])}
       <tbody>${rows || `<tr><td colspan="4" class="muted">${esc(t('web.pbx.sec.none'))}</td></tr>`}</tbody></table></div>`;
+    html += fail2banSection(d.fail2ban);
   }
   host.innerHTML = html;
+}
+
+// fail2ban on the Asterisk host, as gl-fail2ban there reports it (every 30 s).
+function fmtSpan(sec) {
+  if (sec < 0) return t('web.f2b.forever');
+  return sec < 3600 ? t('web.f2b.min', Math.round(sec / 60)) : sec < 86400 ? t('web.f2b.h', Math.round(sec / 3600)) : t('web.f2b.d', Math.round(sec / 86400));
+}
+
+function fmtIso(iso) {
+  if (!iso) return '';
+  const d = new Date(iso), p = n => String(n).padStart(2, '0');
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function fail2banSection(f) {
+  const head = `<div class="section"><h3>${esc(t('web.f2b.title'))}</h3>`;
+  if (!f) return head + `<p class="muted">${esc(t('web.f2b.no_report'))}</p></div>`;
+  const rule = f.max_retry ? t('web.f2b.rule', f.max_retry, fmtSpan(f.find_seconds), fmtSpan(f.ban_seconds))
+    + (f.ban_growth ? ' ' + t('web.f2b.growth', fmtSpan(f.ban_seconds * 24), fmtSpan(f.ban_seconds * 168)) : '') : '';
+  const meta = `<p class="muted">${esc(rule)} · ${esc(t('web.f2b.totals', f.total_banned ?? 0, f.total_failed ?? 0))}`
+    + ` · ${esc(t('web.f2b.reported', ago(f.at)))}</p>`;
+  const errors = (f.errors || []).map(e => `<p class="pbx-err">${esc(e)}</p>`).join('');
+  const rows = (f.banned || []).map(b => `<tr><td>${esc(b.ip)}</td><td>${esc(fmtIso(b.since))}</td>`
+    + `<td>${b.until ? esc(fmtIso(b.until)) : esc(t('web.f2b.forever'))}</td><td>${b.count ?? ''}</td>`
+    + `<td><button class="btn" onclick="unbanIp('${esc(b.ip)}')">${esc(t('web.f2b.unban'))}</button></td></tr>`).join('');
+  return head + meta + errors + `<table class="stat-table">${['web.f2b.col.ip', 'web.f2b.col.since', 'web.f2b.col.until', 'web.f2b.col.count', '']
+      .map(k => `<th>${k ? esc(t(k)) : ''}</th>`).join('').replace(/^/, '<thead><tr>') + '</tr></thead>'}`
+    + `<tbody>${rows || `<tr><td colspan="5" class="muted">${esc(t('web.f2b.none'))}</td></tr>`}</tbody></table></div>`;
+}
+
+async function unbanIp(ip) {
+  if (!confirm(t('web.f2b.unban_confirm', ip))) return;
+  const d = await (await fetch('/api/pbx/fail2ban/unban', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip })
+  })).json();
+  showToast(d.ok ? t('web.f2b.unban_sent', ip) : t('web.error', d.error), d.ok ? 'ok' : 'err');
+  if (d.ok) setTimeout(loadStatus, 5000);
 }
 
 // ---- Modems of an Asterisk gateway, in the settings ----
@@ -1077,10 +1115,12 @@ function itemNode(listId, key, fields, isNew, clients, saved) {
   const item = { id, title: key, key, fields, isNew };
   if (listId === 'gateways') {
     const managed = fields.filter(f => f.path.includes('].managed.'));
+    const fail2ban = managed.filter(f => f.path.includes('].managed.fail2ban.'));
     item.fields = fields.filter(f => !managed.includes(f));
     item.children = [
-      { id: id + '/managed', title: t('web.config.group.managed'), fields: managed, hintKey: 'web.config.hint.managed',
-        visible: () => gatewayState(key)?.managed },
+      { id: id + '/managed', title: t('web.config.group.managed'), fields: managed.filter(f => !fail2ban.includes(f)),
+        hintKey: 'web.config.hint.managed', visible: () => gatewayState(key)?.managed,
+        children: [{ id: id + '/fail2ban', title: t('web.config.group.fail2ban'), fields: fail2ban, hintKey: 'web.config.hint.fail2ban' }] },
       { id: id + '/modems', title: t('web.config.group.modems'), fields: [],
         hintKey: saved?.managed ? 'web.config.hint.modems_managed' : 'web.config.hint.modems',
         modems: { gateway: key, managed: !!saved?.managed, list: saved?.modems || [] },

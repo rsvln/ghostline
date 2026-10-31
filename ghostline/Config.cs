@@ -90,6 +90,18 @@ namespace ghostline
         public string asteriskDir { get; set; } = "/etc/asterisk/ghostline";
         public string recordingsPath { get; set; } = "/var/spool/asterisk/monitor";   // on the Asterisk side
         public PbxSip sip { get; set; } = new();
+        public PbxFail2ban fail2ban { get; set; } = new();
+    }
+
+    // fail2ban on the Asterisk host: gl-fail2ban there renders the jail from these values
+    // (<conf_dir>/fail2ban_ghostline.json) and reports the bans back (fail2ban.json).
+    public class PbxFail2ban
+    {
+        public int maxRetry { get; set; } = 5;              // failures from one address...
+        public int findMinutes { get; set; } = 10;          // ...within this time: a ban
+        public int banMinutes { get; set; } = 60;
+        public bool banGrowth { get; set; } = true;         // the same address again: x24, then x168
+        public List<string> ignoreIp { get; set; } = new(); // never banned (ghostline's own address always)
     }
 
     // Where the phones connect.
