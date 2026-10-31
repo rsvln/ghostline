@@ -362,5 +362,9 @@
   "web.sms.count": "SMS: {0}",
   "web.sms.kind.in": "Incoming SMS",
   "web.sms.kind.out": "Outgoing SMS",
-  "web.sms.origin": "Sent from"
+  "web.sms.origin": "Sent from",
+  "web.copy": "Copy",
+  "web.copied": "Copied",
+  "web.copy_failed": "Could not copy",
+  "web.calls.copy_transcript": "Copy the transcript"
 }

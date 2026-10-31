@@ -362,5 +362,9 @@
   "web.sms.count": "SMS: {0}",
   "web.sms.kind.in": "Входящее SMS",
   "web.sms.kind.out": "Исходящее SMS",
-  "web.sms.origin": "Откуда отправлено"
+  "web.sms.origin": "Откуда отправлено",
+  "web.copy": "Копировать",
+  "web.copied": "Скопировано",
+  "web.copy_failed": "Не удалось скопировать",
+  "web.calls.copy_transcript": "Копировать расшифровку"
 }

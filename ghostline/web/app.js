@@ -216,6 +216,38 @@ const ICON_DOWNLOAD = svg('<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d=
 const ICON_TEXT = svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/>');
 const ICON_PENDING = svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>');
 const ICON_ERROR = svg('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.5h.01"/>');
+const ICON_COPY = svg('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>');
+
+// The web interface usually runs over plain http, where navigator.clipboard is missing:
+// then a hidden textarea and execCommand('copy'), which works within the click.
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
+    else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (!ok) throw new Error('copy');
+    }
+    showToast(t('web.copied'), 'ok');
+  } catch { showToast(t('web.copy_failed'), 'err'); }
+}
+
+// The transcript as plain text, the same as "Download .txt": header (date, duration, who) and the dialog.
+async function copyTranscript(id) {
+  const res = await fetch(`/api/calls/${id}/transcript`);
+  if (!res.ok) { showToast(t('web.copy_failed'), 'err'); return; }
+  copyText((await res.text()).replace(/^\uFEFF/, ''));
+}
+
+function copySms(id) {
+  if (smsCache[id]) copyText(smsCache[id].text || '');
+}
 
 // ---- Calls, SMS and PBX: one toolbar, one row look ----
 
@@ -331,14 +363,15 @@ function formatSms(r) {
     ? `<b>${esc(r.peerName)}</b><span class="num">${esc(r.peer)}</span>`
     : `<b class="num" style="margin:0">${esc(r.peer)}</b>`;
   const origin = r.origin ? `<span class="sms-origin" title="${esc(t('web.sms.origin'))}">${esc(r.origin)}</span>` : '';
+  const copy = `<button class="icon-btn" title="${esc(t('web.copy'))}" onclick="copySms(${r.id})">${ICON_COPY}</button>`;
   return `<div class="call sms" data-sid="${r.id}">
-    <div class="call-main sms-main" onclick="toggleSms(${r.id})">
+    <div class="call-main sms-main" onclick="if (!event.target.closest('.call-actions')) toggleSms(${r.id})">
       <span class="call-ts" data-line="${esc(r.channel)}">${esc(fmtTs(r.ts))}</span>
       <span class="call-dir ${esc(r.direction)}" title="${esc(t('web.sms.kind.' + r.direction))}">${r.direction === 'in' ? '↙' : '↗'}</span>
       <span class="call-line">${esc(r.channel)}</span>
       <span class="call-who" title="${esc(r.peerName || '')} ${esc(r.peer)}">${who}</span>
       <span class="sms-preview">${highlight((r.text || '').replace(/\s+/g, ' '), q)}</span>
-      ${origin}
+      <span class="call-actions">${origin}${copy}</span>
     </div>
     <div class="call-text" hidden></div>
   </div>`;
@@ -380,6 +413,7 @@ function formatCall(r) {
         <button class="icon-btn ${rec ? '' : 'off'}" title="${esc(t('web.calls.play'))}" onclick="playCall(${r.id})">${ICON_PLAY}</button>
         <a class="icon-btn ${rec ? '' : 'off'}" title="${esc(t('web.calls.download'))}" href="/api/calls/${r.id}/audio?download=true" download>${ICON_DOWNLOAD}</a>
         ${trBtn}
+        <button class="icon-btn ${r.trState === 'done' ? '' : 'off'}" title="${esc(t('web.calls.copy_transcript'))}" onclick="copyTranscript(${r.id})">${ICON_COPY}</button>
       </span>
     </div>
     <div class="call-player"></div>
@@ -437,7 +471,8 @@ function toggleText(id, forceOpen) {
     else el.innerHTML = r.trText ? highlight(r.trText, q) : `<span style="color:var(--muted)">${esc(t('web.calls.no_speech'))}</span>`;
     el.insertAdjacentHTML('beforeend', `<div class="meta tr-actions">
       <button class="btn" onclick="retranscribe(${id})">↻ ${esc(t('web.calls.retranscribe'))}</button>
-      <a class="btn" href="/api/calls/${id}/transcript" download>${esc(t('web.calls.download_txt'))}</a></div>`);
+      <a class="btn" href="/api/calls/${id}/transcript" download>${esc(t('web.calls.download_txt'))}</a>
+      <button class="btn" onclick="copyTranscript(${id})">${esc(t('web.copy'))}</button></div>`);
   }
   else if (r.trState === 'pending')
     el.innerHTML = `<span style="color:var(--muted)">⏳ ${esc(t('web.calls.tr_pending'))}</span>`;
