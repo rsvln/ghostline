@@ -952,8 +952,9 @@ function settingsTree(data) {
     children: (data[id] || []).map(it => itemNode(id, it.key, it.fields, false, it.clients, it))
   });
   const clientFields = { telegram: byId.telegram.fields, ntfy: byId.ntfy.fields };
-  const tree = [node('general'), clientsNode('clients', '', data.clients || [], clientFields),
-                node('web'), node('logger'), node('monitor'), list('gateways'), list('lines')];
+  // System: mode and languages, with the settings of ghostline itself under it.
+  const tree = [Object.assign(node('general'), { children: [node('web'), node('logger'), node('monitor')] }),
+                clientsNode('clients', '', data.clients || [], clientFields), list('gateways'), list('lines')];
   tree.push(Object.assign(node('calls'), { children: [node('cdr_db'), node('transcribe')] }));
   tree.push(node('goip'));
   return tree;
