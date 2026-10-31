@@ -349,5 +349,6 @@
   "web.pbx.modem.add_confirm_freepbx": "Добавить модем {0} ({1})?",
   "web.pbx.usb.title": "USB-модемы хоста, которые ещё не заняты",
   "web.pbx.usb.free": "свободен",
-  "web.pbx.secret_on_save": "SIP-пароль сгенерируется при сохранении и покажется один раз."
+  "web.pbx.secret": "SIP-пароль",
+  "web.pbx.secret_on_save_short": "сгенерируется при сохранении"
 }

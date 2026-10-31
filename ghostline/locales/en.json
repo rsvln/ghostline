@@ -349,5 +349,6 @@
   "web.pbx.modem.add_confirm_freepbx": "Add modem {0} ({1})?",
   "web.pbx.usb.title": "USB modems on the host not used yet",
   "web.pbx.usb.free": "free",
-  "web.pbx.secret_on_save": "The SIP password is generated on save and shown once."
+  "web.pbx.secret": "SIP password",
+  "web.pbx.secret_on_save_short": "generated on save"
 }

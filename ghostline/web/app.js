@@ -787,10 +787,12 @@ async function modemRequest(body, question) {
 
 // ---- A line's phone, in the settings ----
 
-function phonePaneHtml(n) {
-  if (n.phone.isNew || !n.phone.hasSecret)
-    return `<p class="tree-hint">${esc(t('web.pbx.secret_on_save'))}</p>`;
-  return `<div class="pbx-add-buttons"><button type="button" class="btn" data-new-secret="${esc(n.phone.line)}">${esc(t('web.pbx.new_secret'))}</button></div>`;
+// The secret is not a form field: one more grid cell shows whether it is set, with "New secret" beside it.
+function phoneSecretCell(n) {
+  const set = !n.phone.isNew && n.phone.hasSecret;
+  const button = set ? `<button type="button" class="btn" data-new-secret="${esc(n.phone.line)}">${esc(t('web.pbx.new_secret'))}</button>` : '';
+  return `<label>${esc(t('web.pbx.secret'))}<span class="input-row"><input type="text" readonly tabindex="-1"
+    value="${esc(set ? '••••••••••••' : t('web.pbx.secret_on_save_short'))}">${button}</span></label>`;
 }
 
 async function newSecret(line) {
@@ -1041,9 +1043,8 @@ function renderTreePanes() {
     const hint = I18N[hintKey] ? `<p class="tree-hint">${esc(t(hintKey))}</p>` : '';
     const fields = n.fields.filter(f => fieldVisible(f, n));
     html += `<div class="tree-pane" data-pane="${esc(n.id)}"><div class="tree-pane-head"><h3>${esc(n.title)}</h3>${del}</div>${hint}`
-      + (fields.length ? `<div class="settings-grid">${fields.map(fieldInput).join('')}</div>` : '')
+      + (fields.length ? `<div class="settings-grid">${fields.map(fieldInput).join('')}${n.phone ? phoneSecretCell(n) : ''}</div>` : '')
       + (n.modems ? modemsPaneHtml(n) : '')
-      + (n.phone ? phonePaneHtml(n) : '')
       + `</div>`;
   });
   return html;

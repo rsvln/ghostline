@@ -292,6 +292,9 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   padding: 6px 8px; border-radius: 6px; font-size: 13px; font-family: inherit;
 }
 .settings-grid textarea { resize: vertical; line-height: 1.45; }
+.settings-grid .input-row { display: flex; gap: 8px; }
+.settings-grid .input-row input { flex: 1; min-width: 0; color: var(--muted); }
+.settings-grid .input-row .btn { white-space: nowrap; }
 .settings-grid input.changed, .settings-grid select.changed, .settings-grid textarea.changed { border-color: var(--yellow); }
 .settings-grid .chk { flex-direction: row; align-items: center; gap: 8px; color: var(--text); }
 .settings-grid .chk input { accent-color: var(--accent); }
