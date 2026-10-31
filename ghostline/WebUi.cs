@@ -51,7 +51,7 @@ namespace ghostline
                     });
 
                     // The page, at the address of every view (the script picks the view from the address).
-                    foreach (var path in new[] { "/", "/calls", "/sms", "/log", "/system", "/status", "/config", "/config/yaml", "/about" })
+                    foreach (var path in new[] { "/", "/calls", "/sms", "/pbx", "/log", "/system", "/status", "/config", "/config/yaml", "/about" })
                         app.MapGet(path, () => Results.Content(Localize(Asset("index.html")), "text/html; charset=utf-8"));
                     app.MapGet("/js/app.js", () => Results.Content(Localize(Asset("app.js")), "text/javascript; charset=utf-8"));
                     app.MapGet("/css/app.css", () => Results.Content(Asset("app.css"), "text/css; charset=utf-8"));
@@ -135,15 +135,18 @@ namespace ghostline
                         });
                     });
 
-                    app.MapGet("/api/sms/list", (int? limit, string? direction, string? channel, string? text) =>
-                    {
-                        var rows = Store.Query(limit ?? 200, direction, channel, text);
-                        return Results.Ok(rows);
-                    });
+                    app.MapGet("/api/sms/list", (int? limit, string? direction, string? channel, string? q, string? from, string? to) =>
+                        Results.Ok(Program.SmsList(Math.Clamp(limit ?? 500, 1, 5000), direction, channel, q, from, to)));
 
-                    app.MapGet("/api/sms/export", (int? limit, string? direction, string? channel, string? text) =>
+                    // SMS and calls together (the PBX tab), with the same filters as the two lists.
+                    app.MapGet("/api/pbx/list", (int? limit, string? kind, string? direction, string? channel, string? q,
+                                                 string? from, string? to, bool? missed, bool? rec) =>
+                        Results.Ok(Program.PbxList(Math.Clamp(limit ?? 500, 1, 5000), kind, direction, channel, q, from, to,
+                                                   missed == true, rec == true)));
+
+                    app.MapGet("/api/sms/export", (int? limit, string? direction, string? channel, string? q, string? from, string? to) =>
                     {
-                        var rows = Store.Query(limit ?? 100000, direction, channel, text);
+                        var rows = Store.Query(limit ?? 100000, direction, channel, q, from, to);
                         var sb = new System.Text.StringBuilder();
                         sb.AppendLine("ts\tdirection\tgateway\tchannel\tpeer\tnote\tcontent");
                         foreach (var r in rows)
@@ -377,10 +380,6 @@ namespace ghostline
 
                     app.MapPost("/api/calls/{id:long}/retranscribe", (long id) =>
                         Results.Ok(new { ok = Store.RequeueTranscription(id) }));
-
-                    // SMS and calls in time order, from the DB.
-                    app.MapGet("/api/journal", (int? lines) =>
-                        Results.Ok(new { entries = Program.Journal(Math.Clamp(lines ?? 200, 1, 5000)) }));
 
                     // The system log: entries of this level and more severe, newest first.
                     app.MapGet("/api/system-log", (string? level, string? area, int? lines) =>

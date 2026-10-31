@@ -225,16 +225,26 @@ namespace ghostline
             Log("q", c.Direction, c.Ts, c.Channel, who, CallText(c));
         }
 
-        internal record JournalEntry(string ts, string kind, string gateway, string direction, string line, string peer, string name, string text);
+        // An SMS as the web lists show it, next to calls: the contact name for both directions, and for
+        // an outgoing SMS where it was sent from (web-ui, telegram, ntfy).
+        internal record SmsItem(string kind, long id, string ts, string direction, string channel, string peer,
+                                string peerName, string text, string origin);
 
-        // SMS and calls in one list, newest first. Both tables keep ts as "yyyy-MM-dd HH:mm:ss".
-        internal static List<JournalEntry> Journal(int limit)
+        internal static List<SmsItem> SmsList(int limit, string direction, string channel, string q, string from, string to) =>
+            Store.Query(limit, direction, channel, q, from, to).Select(m => new SmsItem("sms", m.Id, m.Ts, m.Direction, m.Channel, m.Peer,
+                m.Direction == "in" ? m.Note : ContactName(m.Peer), m.Content, m.Direction == "out" ? m.Note : null)).ToList();
+
+        // The PBX tab: SMS and calls in one list, newest first (both tables keep ts as "yyyy-MM-dd HH:mm:ss").
+        // kind: "sms", "calls" or empty for both; missed / rec filter the calls only.
+        internal static List<object> PbxList(int limit, string kind, string direction, string channel, string q,
+                                             string from, string to, bool missed, bool rec)
         {
-            var sms = Store.Query(limit, null, null, null)
-                .Select(m => new JournalEntry(m.Ts, "sms", m.Gateway, m.Direction, m.Channel, m.Peer, m.Note, m.Content));
-            var calls = Store.QueryCalls(limit, null, null, false, false, null, null, null)
-                .Select(c => new JournalEntry(c.Ts, "call", "q", c.Direction, c.Channel, c.Peer, c.PeerName, CallText(c)));
-            return sms.Concat(calls).OrderByDescending(e => e.ts, StringComparer.Ordinal).Take(limit).ToList();
+            var items = new List<(string ts, object item)>();
+            if (kind != "calls")
+                items.AddRange(SmsList(limit, direction, channel, q, from, to).Select(s => (s.ts, (object)s)));
+            if (kind != "sms" && settings?.FullMode == true)
+                items.AddRange(Store.QueryCalls(limit, channel, direction, missed, rec, q, from, to).Select(c => (c.Ts, (object)c)));
+            return items.OrderByDescending(x => x.ts, StringComparer.Ordinal).Take(limit).Select(x => x.item).ToList();
         }
 
         internal static string ContactName(string number)

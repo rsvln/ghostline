@@ -2,10 +2,11 @@
 const I18N = /*I18N*/{};
 const t = (k, ...a) => (I18N[k] ?? k).replace(/\{(\d+)\}/g, (_, i) => a[i]);
 
-// Every view has its own address: /calls, /sms, /log, /status, /config, /config/yaml, /about,
+// Every view has its own address: /calls, /sms, /pbx, /system, /status, /config, /config/yaml, /about,
 // with the filters in the query string. F5 shows the same view, links can be shared and
 // the browser's Back / Forward move between views. "/" opens the view seen last.
-const TABS = ['calls', 'sms', 'log', 'system', 'status', 'config', 'about'];
+const TABS = ['calls', 'sms', 'pbx', 'system', 'status', 'config', 'about'];
+const LISTS_VIEWS = ['calls', 'sms', 'pbx'];
 const val = id => document.getElementById(id).value;
 const checked = id => document.getElementById(id).checked;
 
@@ -15,7 +16,7 @@ function esc(s) {
 
 // Settings of this browser (lines, auto-refresh) and the last address of every tab stay in localStorage.
 const PREFS_KEY = 'ghostline.prefs';
-const PREFS = ['sms-limit', 'sms-refresh', 'log-lines', 'log-refresh', 'sys-level', 'sys-lines', 'sys-refresh'];
+const PREFS = ['calls-refresh', 'sms-refresh', 'pbx-refresh', 'sys-level', 'sys-lines', 'sys-refresh'];
 
 function readPrefs() {
   try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; }
@@ -48,22 +49,26 @@ const defaultView = () => MODE.mode === 'full' ? 'calls' : 'sms';
 function parseRoute() {
   const parts = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
   const q = Object.fromEntries(new URLSearchParams(location.search));
+  if (parts[0] === 'log') parts[0] = 'pbx';   // the PBX tab was called Log
   let view = TABS.includes(parts[0]) ? parts[0] : defaultView();
   if (view === 'calls' && MODE.mode !== 'full') view = 'sms';
   return { view, sub: parts[1], q };
 }
 
-// Addresses built from the toolbar values. Defaults are left out.
-function callsUrl() {
-  return buildUrl('/calls', {
-    line: val('calls-line'), dir: val('calls-dir'),
-    rec: checked('calls-rec') ? '' : '0', missed: checked('calls-missed') ? '1' : '',
-    q: val('calls-q').trim(), from: readDate('calls-from') || '', to: readDate('calls-to') || ''
-  });
+// What a list shows: 'calls', 'sms' or '' (both, the PBX tab). Without calls (mode: sms) the PBX tab is SMS only.
+function listKind(v, q) {
+  return v === 'pbx' ? (MODE.mode === 'full' ? q.kind || '' : 'sms') : v;
 }
 
-function smsUrl() {
-  return buildUrl('/sms', { line: val('sms-line'), dir: val('sms-dir'), q: val('sms-q').trim() });
+// Address built from the toolbar values. Defaults are left out.
+function listUrl(v) {
+  const kind = v === 'pbx' && MODE.mode === 'full' ? val('pbx-kind') : undefined;
+  const calls = listKind(v, { kind }) === 'calls';
+  return buildUrl('/' + v, {
+    kind, line: val(v + '-line'), dir: val(v + '-dir'),
+    rec: calls && !checked(v + '-rec') ? '0' : '', missed: calls && checked(v + '-missed') ? '1' : '',
+    q: val(v + '-q').trim(), from: readDate(v + '-from') || '', to: readDate(v + '-to') || ''
+  });
 }
 
 // history.state.n counts the views opened in this browser tab.
@@ -97,6 +102,7 @@ let renderedView = null;
 
 async function render() {
   const r = parseRoute();
+  if (location.pathname === '/log') history.replaceState(history.state, '', '/pbx' + location.search);
   const url = location.pathname + location.search;
   const urls = readPrefs().urls || {};
   urls[r.view] = url;
@@ -109,22 +115,9 @@ async function render() {
   renderedView = r.view;
   const q = r.q;
 
-  if (r.view === 'calls') {
-    setSelect('calls-line', q.line || '');
-    setSelect('calls-dir', q.dir || '');
-    document.getElementById('calls-rec').checked = q.rec !== '0' && q.missed !== '1';
-    document.getElementById('calls-missed').checked = q.missed === '1';
-    if (document.activeElement?.id !== 'calls-q') document.getElementById('calls-q').value = q.q || '';
-    document.getElementById('calls-from').value = q.from || '';
-    document.getElementById('calls-to').value = q.to || '';
-    loadCalls();
-  } else if (r.view === 'sms') {
-    setSelect('sms-line', q.line || '');
-    setSelect('sms-dir', q.dir || '');
-    if (document.activeElement?.id !== 'sms-q') document.getElementById('sms-q').value = q.q || '';
-    loadSms();
-  } else if (r.view === 'log') {
-    loadLog();
+  if (LISTS_VIEWS.includes(r.view)) {
+    fillToolbar(r.view, q);
+    loadList(r.view);
   } else if (r.view === 'system') {
     loadSystemLog();
   } else if (r.view === 'status') {
@@ -167,8 +160,8 @@ async function loadChannels() {
     channelsCache = await (await fetch('/api/channels')).json();
   } catch { channelsCache = []; }
   const opts = channelsCache.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
-  document.getElementById('calls-line').innerHTML = `<option value="">${esc(t('web.calls.all_lines'))}</option>` + opts;
-  document.getElementById('sms-line').innerHTML = `<option value="">${esc(t('web.all'))}</option>` + opts;
+  LISTS_VIEWS.forEach(v => document.getElementById(v + '-line').innerHTML =
+    `<option value="">${esc(t('web.calls.all_lines'))}</option>` + opts);
   document.getElementById('send-channel').innerHTML =
     channelsCache.map(c => `<option value="${esc(c.name)}">${esc(c.name)} (${esc(c.type)})</option>`).join('');
 }
@@ -224,31 +217,140 @@ const ICON_TEXT = svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 
 const ICON_PENDING = svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>');
 const ICON_ERROR = svg('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.5h.01"/>');
 
-let callsCache = {};
+// ---- Calls, SMS and PBX: one toolbar, one row look ----
 
-async function loadCalls(keepOpen) {
+const LIST_API = { calls: '/api/calls/list', sms: '/api/sms/list', pbx: '/api/pbx/list' };
+const LIST_COUNT = { calls: 'web.calls.count', sms: 'web.sms.count', pbx: 'web.list.count' };
+
+function listToolbar(v) {
+  const go = `onchange="navigate(listUrl('${v}'))"`;
+  const kind = v === 'pbx' && MODE.mode === 'full'
+    ? `<select id="pbx-kind" ${go}>${['', 'sms', 'calls'].map(k =>
+        `<option value="${k}">${esc(t('web.list.kind.' + (k || 'all')))}</option>`).join('')}</select>` : '';
+  const refresh = [0, 5000, 10000, 30000].map(ms =>
+    `<option value="${ms}"${v === 'pbx' && ms === 5000 ? ' selected' : ''}>${ms ? ms / 1000 + 's' : esc(t('web.off'))}</option>`).join('');
+  return `<select id="${v}-line" ${go}><option value="">${esc(t('web.calls.all_lines'))}</option></select>
+    <select id="${v}-dir" ${go}>
+      <option value="">${esc(t('web.all'))}</option>
+      <option value="in">${esc(t('web.calls.dir.in'))}</option>
+      <option value="out">${esc(t('web.calls.dir.out'))}</option>
+    </select>
+    ${kind}
+    <span class="only-calls">
+      <label><input type="checkbox" id="${v}-rec" ${go}> ${esc(t('web.calls.with_recording'))}</label>
+      <label><input type="checkbox" id="${v}-missed" onchange="if (this.checked) document.getElementById('${v}-rec').checked = false; navigate(listUrl('${v}'))"> ${esc(t('web.calls.missed_only'))}</label>
+    </span>
+    <input type="text" id="${v}-q" placeholder="${esc(t(v === 'sms' ? 'web.sms.search' : 'web.calls.search'))}" oninput="debounced(() => navigate(listUrl('${v}'), true))" style="width:220px">
+    <!-- Dates as text: with <input type="date"> the browser forces its own format. -->
+    <label>${esc(t('web.calls.date_from'))}</label>
+    <input type="text" id="${v}-from" class="date" placeholder="${esc(t('web.calls.date_format'))}" ${go}>
+    <label>${esc(t('web.calls.date_to'))}</label>
+    <input type="text" id="${v}-to" class="date" placeholder="${esc(t('web.calls.date_format'))}" ${go}>
+    <button class="btn" onclick="loadList('${v}')">${esc(t('web.refresh'))}</button>
+    <a class="btn" href="/${v}">${esc(t('web.clear'))}</a>
+    <span class="count" id="${v}-count"></span>
+    <span class="only-sms">
+      <button class="btn" onclick="exportSms()">${esc(t('web.sms.export'))}</button>
+      <button class="btn primary" onclick="openSendModal()">${esc(t('web.sms.send'))}</button>
+    </span>
+    <div class="autoscroll-toggle">
+      <label>${esc(t('web.autorefresh'))}</label>
+      <select id="${v}-refresh" onchange="setListRefresh('${v}')">${refresh}</select>
+    </div>`;
+}
+
+// The toolbar shows the address; the controls of one kind only where that kind is listed.
+function fillToolbar(v, q) {
+  if (v === 'pbx' && MODE.mode === 'full') setSelect('pbx-kind', q.kind || '');
+  setSelect(v + '-line', q.line || '');
+  setSelect(v + '-dir', q.dir || '');
+  document.getElementById(v + '-rec').checked = q.rec !== '0' && q.missed !== '1';
+  document.getElementById(v + '-missed').checked = q.missed === '1';
+  if (document.activeElement?.id !== v + '-q') document.getElementById(v + '-q').value = q.q || '';
+  document.getElementById(v + '-from').value = q.from || '';
+  document.getElementById(v + '-to').value = q.to || '';
+  const kind = listKind(v, q);
+  const bar = document.getElementById(v + '-toolbar');
+  bar.querySelector('.only-calls').style.display = kind === 'calls' ? 'contents' : 'none';
+  bar.querySelector('.only-sms').style.display = kind === 'sms' ? 'contents' : 'none';
+}
+
+function listParams(v, forExport) {
   const q = parseRoute().q;
-  const params = new URLSearchParams({ limit: 500 });
+  const kind = listKind(v, q);
+  const params = new URLSearchParams();
+  if (!forExport) params.set('limit', 500);
+  if (v === 'pbx' && kind) params.set('kind', kind);
   if (q.line) params.set('channel', q.line);
   if (q.dir) params.set('direction', q.dir);
-  if (q.missed === '1') params.set('missed', 'true');
-  else if (q.rec !== '0') params.set('rec', 'true');
   if (q.q) params.set('q', q.q);
   if (q.from) params.set('from', q.from);
   if (q.to) params.set('to', q.to);
+  if (kind === 'calls') {
+    if (q.missed === '1') params.set('missed', 'true');
+    else if (q.rec !== '0') params.set('rec', 'true');
+  }
+  return params;
+}
 
-  if (keepOpen && document.querySelector('.call audio')) return;   // do not interrupt playback
+const listTimers = {};
+function setListRefresh(v) {
+  clearInterval(listTimers[v]);
+  const ms = parseInt(val(v + '-refresh'));
+  if (ms > 0) listTimers[v] = setInterval(() => { if (parseRoute().view === v) loadList(v, true); }, ms);
+}
+
+// A row of the open list: a call by data-id, an SMS by data-sid (the PBX tab has both).
+const rowOf = (attr, id) => document.querySelector(`.panel.active .call[data-${attr}="${id}"]`);
+
+let callsCache = {};
+let smsCache = {};
+
+async function loadList(v, keepOpen) {
+  const panel = document.getElementById('panel-' + v);
+  if (keepOpen && panel.querySelector('.call audio')) return;   // do not interrupt playback
   const open = keepOpen
-    ? [...document.querySelectorAll('.call-text:not([hidden])')].map(e => e.closest('.call').dataset.id)
-    : [];
+    ? [...panel.querySelectorAll('.call-text:not([hidden])')].map(e => e.closest('.call').dataset) : [];
 
-  const rows = await (await fetch('/api/calls/list?' + params)).json();
-  callsCache = Object.fromEntries(rows.map(r => [r.id, r]));
-  document.getElementById('calls-count').textContent = t('web.calls.count', rows.length);
-  document.getElementById('calls-container').innerHTML =
-    rows.map(formatCall).join('') || `<div class="empty">${esc(t('web.calls.nothing'))}</div>`;
-  if (q.q) rows.filter(r => r.trState === 'done').forEach(r => toggleText(r.id, true));
-  open.forEach(id => toggleText(id, true));
+  const rows = await (await fetch(LIST_API[v] + '?' + listParams(v))).json();
+  callsCache = {}; smsCache = {};
+  rows.forEach(r => { if (r.kind === 'sms') smsCache[r.id] = r; else callsCache[r.id] = r; });
+  document.getElementById(v + '-count').textContent = t(LIST_COUNT[v], rows.length);
+  document.getElementById(v + '-container').innerHTML =
+    rows.map(r => r.kind === 'sms' ? formatSms(r) : formatCall(r)).join('')
+    || `<div class="empty">${esc(t('web.calls.nothing'))}</div>`;
+  if (parseRoute().q.q) rows.filter(r => r.kind !== 'sms' && r.trState === 'done').forEach(r => toggleText(r.id, true));
+  open.forEach(d => d.sid ? toggleSms(d.sid, true) : toggleText(d.id, true));
+}
+
+// An SMS in the same grid as a call: time, direction, line, contact; the text in one line,
+// all of it with a click on the row.
+function formatSms(r) {
+  const q = parseRoute().q.q;
+  const who = r.peerName
+    ? `<b>${esc(r.peerName)}</b><span class="num">${esc(r.peer)}</span>`
+    : `<b class="num" style="margin:0">${esc(r.peer)}</b>`;
+  const origin = r.origin ? `<span class="sms-origin" title="${esc(t('web.sms.origin'))}">${esc(r.origin)}</span>` : '';
+  return `<div class="call sms" data-sid="${r.id}">
+    <div class="call-main sms-main" onclick="toggleSms(${r.id})">
+      <span class="call-ts" data-line="${esc(r.channel)}">${esc(fmtTs(r.ts))}</span>
+      <span class="call-dir ${esc(r.direction)}" title="${esc(t('web.sms.kind.' + r.direction))}">${r.direction === 'in' ? '↙' : '↗'}</span>
+      <span class="call-line">${esc(r.channel)}</span>
+      <span class="call-who" title="${esc(r.peerName || '')} ${esc(r.peer)}">${who}</span>
+      <span class="sms-preview">${highlight((r.text || '').replace(/\s+/g, ' '), q)}</span>
+      ${origin}
+    </div>
+    <div class="call-text" hidden></div>
+  </div>`;
+}
+
+function toggleSms(id, forceOpen) {
+  const r = smsCache[id];
+  const el = rowOf('sid', id)?.querySelector('.call-text');
+  if (!r || !el) return;
+  if (!el.hidden && !forceOpen) { el.hidden = true; return; }
+  el.innerHTML = highlight(r.text || '', parseRoute().q.q);
+  el.hidden = false;
 }
 
 function formatCall(r) {
@@ -292,7 +394,7 @@ function rowClick(e, id) {
 }
 
 function playCall(id, at) {
-  const box = document.querySelector(`.call[data-id="${id}"] .call-player`);
+  const box = rowOf('id', id).querySelector('.call-player');
   let a = box.querySelector('audio');
   if (!a) {
     document.querySelectorAll('.call audio').forEach(x => { x.pause(); x.remove(); });
@@ -324,7 +426,7 @@ function renderDialog(r, q) {
 
 function toggleText(id, forceOpen) {
   const r = callsCache[id];
-  const el = document.querySelector(`.call[data-id="${id}"] .call-text`);
+  const el = rowOf('id', id)?.querySelector('.call-text');
   if (!r || !el) return;
   if (!el.hidden && !forceOpen) { el.hidden = true; return; }
   const q = parseRoute().q.q;
@@ -348,45 +450,13 @@ function toggleText(id, forceOpen) {
 async function retranscribe(id) {
   const d = await (await fetch(`/api/calls/${id}/retranscribe`, { method: 'POST' })).json();
   showToast(t(d.ok ? 'web.calls.requeued' : 'web.calls.no_recording'), d.ok ? 'ok' : 'err');
-  loadCalls(true);
+  loadList(parseRoute().view, true);
 }
 
-// ---- SMS ----
-
-let smsTimer = null;
-function setSmsRefresh() {
-  clearInterval(smsTimer);
-  const ms = parseInt(val('sms-refresh'));
-  if (ms > 0) smsTimer = setInterval(() => { if (parseRoute().view === 'sms') loadSms(); }, ms);
-}
-
-function smsParams(limit) {
-  const q = parseRoute().q;
-  const params = new URLSearchParams();
-  if (limit) params.set('limit', limit);
-  if (q.dir) params.set('direction', q.dir);
-  if (q.line) params.set('channel', q.line);
-  if (q.q) params.set('text', q.q);
-  return params;
-}
-
-async function loadSms() {
-  const rows = await (await fetch('/api/sms/list?' + smsParams(val('sms-limit')))).json();
-  const header = `<div class="sms-line hdr">${['time', 'dir', 'gw', 'channel', 'peer', 'note', 'content']
-    .map(c => `<span>${esc(t('web.sms.col.' + c))}</span>`).join('')}</div>`;
-  document.getElementById('sms-container').innerHTML = header + rows.map(r => `<div class="sms-line">
-      <span class="sms-ts">${esc(r.ts)}</span>
-      <span class="dir-${esc(r.direction)}">${esc(r.direction)}</span>
-      <span>${esc(r.gateway)}</span>
-      <span>${esc(r.channel)}</span>
-      <span class="sms-peer" title="${esc(r.peer)}">${esc(r.peer)}</span>
-      <span class="sms-note" title="${esc(r.note)}">${esc(r.note)}</span>
-      <span class="sms-content">${esc(r.content)}</span>
-    </div>`).join('');
-}
+// ---- SMS: export and send ----
 
 function exportSms() {
-  location.href = '/api/sms/export?' + smsParams();
+  location.href = '/api/sms/export?' + listParams(parseRoute().view, true);
 }
 
 function openSendModal() {
@@ -410,32 +480,8 @@ async function submitSend() {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ channel, number, text })
   })).json();
-  if (data.ok) { showToast(t('web.sms.queued'), 'ok'); closeSendModal(); loadSms(); }
+  if (data.ok) { showToast(t('web.sms.queued'), 'ok'); closeSendModal(); loadList(parseRoute().view); }
   else showToast(t('web.error', data.error || 'unknown'), 'err');
-}
-
-// ---- Log ----
-
-let logTimer = null;
-function setLogRefresh() {
-  clearInterval(logTimer);
-  const ms = parseInt(val('log-refresh'));
-  if (ms > 0) logTimer = setInterval(() => { if (parseRoute().view === 'log') loadLog(); }, ms);
-}
-
-// The journal: SMS and calls from the DB, newest first, as on the Calls and SMS tabs.
-async function loadLog() {
-  const data = await (await fetch('/api/journal?lines=' + val('log-lines'))).json();
-  document.getElementById('log-container').innerHTML = data.entries.map(e => {
-    const [date, time] = (e.ts || '').split(' ');
-    const peer = e.name ? `${e.peer} ${e.name}` : e.peer;
-    return `<div class="log-line">
-      <span class="log-ts">${esc(date)}</span><span class="log-ts">${esc(time || '')}</span>
-      <span class="log-gw">${esc(e.gateway)}</span><span class="dir-${esc(e.direction)}">${esc(e.direction)}</span>
-      <span title="${esc(e.line)}">${esc(e.line)}</span><span class="log-peer" title="${esc(peer)}">${esc(peer)}</span>
-      <span class="log-msg">${esc((e.text || '').replace(/\n/g, ' ⏎ '))}</span>
-    </div>`;
-  }).join('');
 }
 
 // ---- System log ----
@@ -1325,10 +1371,11 @@ async function waitForRestart() {
 // ---- start ----
 
 (async () => {
-  const fields = readPrefs().fields || {};
-  PREFS.forEach(id => { if (id in fields) document.getElementById(id).value = fields[id]; });
   try { MODE = await (await fetch('/api/mode')).json(); } catch { }
   const full = MODE.mode === 'full';
+  LISTS_VIEWS.forEach(v => document.getElementById(v + '-toolbar').innerHTML = listToolbar(v));
+  const fields = readPrefs().fields || {};
+  PREFS.forEach(id => { if (id in fields) document.getElementById(id).value = fields[id]; });
   document.getElementById('tab-calls').hidden = !full;
   document.getElementById('footer-mode').textContent = t('web.mode.' + MODE.mode);
   await loadChannels();
@@ -1337,14 +1384,14 @@ async function waitForRestart() {
   history.replaceState({ n: navIndex }, '', start);
   await render();
 
-  setSmsRefresh();
-  setLogRefresh();
+  LISTS_VIEWS.forEach(setListRefresh);
   setSystemRefresh();
   loadStatus();
   setInterval(loadStatus, 15000);
   // While calls are queued for transcription, refresh so the clock turns into text.
   if (full) setInterval(() => {
-    if (parseRoute().view === 'calls' && document.querySelector('.call [data-tr="pending"]')) loadCalls(true);
+    const v = parseRoute().view;
+    if (LISTS_VIEWS.includes(v) && document.querySelector('.panel.active .call [data-tr="pending"]')) loadList(v, true);
   }, 15000);
 
   try {

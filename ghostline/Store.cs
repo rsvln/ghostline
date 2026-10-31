@@ -119,7 +119,9 @@ namespace ghostline
             }
         }
 
-        public static List<SmsRecord> Query(int limit, string? direction, string? channel, string? text)
+        // from / to: yyyy-mm-dd, both days included (as in QueryCalls).
+        public static List<SmsRecord> Query(int limit, string? direction, string? channel, string? text,
+                                            string? from = null, string? to = null)
         {
             var result = new List<SmsRecord>();
             try
@@ -131,6 +133,8 @@ namespace ghostline
                 if (!string.IsNullOrEmpty(direction)) where.Add("direction = $direction");
                 if (!string.IsNullOrEmpty(channel)) where.Add("channel = $channel");
                 if (!string.IsNullOrEmpty(text)) where.Add("(content LIKE $text OR peer LIKE $text OR note LIKE $text)");
+                if (!string.IsNullOrEmpty(from)) { where.Add("ts >= $from"); cmd.Parameters.AddWithValue("$from", from); }
+                if (!string.IsNullOrEmpty(to)) { where.Add("ts < date($to, '+1 day')"); cmd.Parameters.AddWithValue("$to", to); }
                 string whereSql = where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "";
 
                 cmd.CommandText = $"SELECT id, ts, direction, gateway, channel, peer, note, content FROM sms {whereSql} ORDER BY id DESC LIMIT $limit;";

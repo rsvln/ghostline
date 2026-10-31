@@ -257,7 +257,7 @@ goip:
 | `web.port` | Web interface port, default `8889` |
 | `web.user` / `web.password` | HTTP Basic authentication; both empty — no authentication |
 | `logger.level` | System log level: `error`, `warning`, `info` (default) or `debug`. The log goes to journald with the level (`journalctl -p warning -u ghostline`), to `/var/log/ghostline/system-YYYY-MM-DD.log` (14 days) and to the System tab |
-| `logger.file` | Also write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log`, text files for other systems. The Journal tab does not need them |
+| `logger.file` | Also write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log`, text files for other systems. The PBX tab does not need them |
 | `goip.smtp.enabled` / `goip.smtp.port` | Built-in SMTP server for GoIP gateways that deliver SMS by e-mail |
 | `monitor.alert_minutes` | A monitored line without network this long gets a message in its chats/topic, and another when it is back; `0` — no messages. Default `2` |
 
@@ -384,8 +384,13 @@ work. `/` opens the tab used last.
   the recording, download the transcript (PDF; plain text inside the opened
   transcript). **Transcribe again** re-runs transcription, for example after
   changing `transcribe.prompt`.
-- **SMS** — history, filters, export, sending.
-- **Journal** — SMS and calls of all lines in time order, newest first (from the database).
+- **SMS** — history with the same filters (line, direction, search by number,
+  contact or text, dates); a click on a row shows the whole text. Export, sending.
+- **PBX** — SMS and calls of all lines in time order, newest first (from the database),
+  with the same filters plus the kind (SMS / calls); recordings and transcripts open here too.
+
+All three lists share the toolbar and the row look, load the newest 500 matching rows
+and can refresh themselves (off / 5 / 10 / 30 s).
 - **System** — what ghostline itself does: start, connections, lines losing network, PBX changes,
   failures. Filters by level (errors / warnings / info / debug) and area.
 - **Status** — state of gateways, Telegram and queues.

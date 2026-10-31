@@ -17,7 +17,7 @@
   <div class="tabs">
     <a class="tab" data-tab="calls" href="/calls" id="tab-calls" hidden>{{web.tab.calls}}</a>
     <a class="tab" data-tab="sms" href="/sms">{{web.tab.sms}}</a>
-    <a class="tab" data-tab="log" href="/log">{{web.tab.log}}</a>
+    <a class="tab" data-tab="pbx" href="/pbx">{{web.tab.pbx}}</a>
     <a class="tab" data-tab="system" href="/system">{{web.tab.system}}</a>
     <a class="tab" data-tab="status" href="/status">{{web.tab.status}}</a>
     <a class="tab" data-tab="config" href="/config">{{web.tab.config}}</a>
@@ -27,75 +27,20 @@
 
 <div class="panels">
 
+  <!-- Calls, SMS and PBX: the same toolbar (listToolbar in app.js) and the same rows. -->
   <div class="panel" id="panel-calls">
-    <div class="toolbar">
-      <select id="calls-line" onchange="navigate(callsUrl())"><option value="">{{web.calls.all_lines}}</option></select>
-      <select id="calls-dir" onchange="navigate(callsUrl())">
-        <option value="">{{web.all}}</option>
-        <option value="in">{{web.calls.dir.in}}</option>
-        <option value="out">{{web.calls.dir.out}}</option>
-      </select>
-      <label><input type="checkbox" id="calls-rec" checked onchange="navigate(callsUrl())"> {{web.calls.with_recording}}</label>
-      <label><input type="checkbox" id="calls-missed" onchange="if (this.checked) document.getElementById('calls-rec').checked = false; navigate(callsUrl())"> {{web.calls.missed_only}}</label>
-      <input type="text" id="calls-q" placeholder="{{web.calls.search}}" oninput="debounced(() => navigate(callsUrl(), true))" style="width:220px">
-      <!-- Dates as text: with <input type="date"> the browser forces its own format. -->
-      <label>{{web.calls.date_from}}</label>
-      <input type="text" id="calls-from" class="date" placeholder="{{web.calls.date_format}}" onchange="navigate(callsUrl())">
-      <label>{{web.calls.date_to}}</label>
-      <input type="text" id="calls-to" class="date" placeholder="{{web.calls.date_format}}" onchange="navigate(callsUrl())">
-      <button class="btn" onclick="loadCalls()">{{web.refresh}}</button>
-      <a class="btn" href="/calls">{{web.clear}}</a>
-      <span class="count" id="calls-count"></span>
-    </div>
-    <div class="scroll" id="calls-container"></div>
+    <div class="toolbar" id="calls-toolbar"></div>
+    <div class="scroll list" id="calls-container"></div>
   </div>
 
   <div class="panel" id="panel-sms">
-    <div class="toolbar">
-      <label>{{web.sms.rows}}</label>
-      <input type="number" id="sms-limit" value="200" min="10" max="5000" style="width:70px" onchange="loadSms()">
-      <label>{{web.sms.dir}}</label>
-      <select id="sms-dir" onchange="navigate(smsUrl())">
-        <option value="">{{web.all}}</option>
-        <option value="in">in</option>
-        <option value="out">out</option>
-      </select>
-      <label>{{web.sms.channel}}</label>
-      <select id="sms-line" onchange="navigate(smsUrl())"><option value="">{{web.all}}</option></select>
-      <label>{{web.sms.text}}</label>
-      <input type="text" id="sms-q" placeholder="{{web.sms.search}}" oninput="debounced(() => navigate(smsUrl(), true))" style="width:150px">
-      <button class="btn" onclick="loadSms()">{{web.refresh}}</button>
-      <button class="btn" onclick="exportSms()">{{web.sms.export}}</button>
-      <button class="btn primary" onclick="openSendModal()">{{web.sms.send}}</button>
-      <div class="autoscroll-toggle">
-        <label>{{web.autorefresh}}</label>
-        <select id="sms-refresh" onchange="setSmsRefresh()">
-          <option value="0">{{web.off}}</option>
-          <option value="5000">5s</option>
-          <option value="10000">10s</option>
-          <option value="30000">30s</option>
-        </select>
-      </div>
-    </div>
-    <div class="mono-scroll" id="sms-container"></div>
+    <div class="toolbar" id="sms-toolbar"></div>
+    <div class="scroll list" id="sms-container"></div>
   </div>
 
-  <div class="panel" id="panel-log">
-    <div class="toolbar">
-      <label>{{web.log.lines}}</label>
-      <input type="number" id="log-lines" value="200" min="10" max="2000" style="width:70px" onchange="loadLog()">
-      <button class="btn" onclick="loadLog()">{{web.refresh}}</button>
-      <div class="autoscroll-toggle">
-        <label>{{web.autorefresh}}</label>
-        <select id="log-refresh" onchange="setLogRefresh()">
-          <option value="0">{{web.off}}</option>
-          <option value="5000" selected>5s</option>
-          <option value="10000">10s</option>
-          <option value="30000">30s</option>
-        </select>
-      </div>
-    </div>
-    <div class="mono-scroll" id="log-container"></div>
+  <div class="panel" id="panel-pbx">
+    <div class="toolbar" id="pbx-toolbar"></div>
+    <div class="scroll list" id="pbx-container"></div>
   </div>
 
   <div class="panel" id="panel-system">

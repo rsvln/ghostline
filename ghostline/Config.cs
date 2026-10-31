@@ -302,7 +302,7 @@ namespace ghostline
     public class LoggerSettings
     {
         // Also write SMS and calls to /var/log/ghostline/ghostline_DATE.log, text files for other systems.
-        // The Journal tab reads the DB and does not need them.
+        // The PBX tab reads the DB and does not need them.
         public bool file { get; set; }
         // The system log (journald, /var/log/ghostline/system-DATE.log, the System tab):
         // error | warning | info | debug. Empty: info.
