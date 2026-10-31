@@ -369,5 +369,6 @@
   "web.calls.copy_transcript": "Копировать расшифровку",
   "web.sms.copy.from": "От",
   "web.sms.copy.to": "Кому",
-  "web.sms.copy.line": "Линия"
+  "web.sms.copy.line": "Линия",
+  "web.calendar": "Календарь"
 }

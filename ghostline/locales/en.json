@@ -369,5 +369,6 @@
   "web.calls.copy_transcript": "Copy the transcript",
   "web.sms.copy.from": "From",
   "web.sms.copy.to": "To",
-  "web.sms.copy.line": "Line"
+  "web.sms.copy.line": "Line",
+  "web.calendar": "Calendar"
 }

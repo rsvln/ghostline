@@ -292,11 +292,10 @@ function listToolbar(v) {
       <label><input type="checkbox" id="${v}-missed" onchange="if (this.checked) document.getElementById('${v}-rec').checked = false; navigate(listUrl('${v}'))"> ${esc(t('web.calls.missed_only'))}</label>
     </span>
     <input type="text" id="${v}-q" placeholder="${esc(t(v === 'sms' ? 'web.sms.search' : 'web.calls.search'))}" oninput="debounced(() => navigate(listUrl('${v}'), true))" style="width:220px">
-    <!-- Dates as text: with <input type="date"> the browser forces its own format. -->
     <label>${esc(t('web.calls.date_from'))}</label>
-    <input type="text" id="${v}-from" class="date" placeholder="${esc(t('web.calls.date_format'))}" ${go}>
+    ${dateField(v, v + '-from')}
     <label>${esc(t('web.calls.date_to'))}</label>
-    <input type="text" id="${v}-to" class="date" placeholder="${esc(t('web.calls.date_format'))}" ${go}>
+    ${dateField(v, v + '-to')}
     <button class="btn" onclick="loadList('${v}')">${esc(t('web.refresh'))}</button>
     <a class="btn" href="/${v}">${esc(t('web.clear'))}</a>
     <span class="count" id="${v}-count"></span>
@@ -310,6 +309,45 @@ function listToolbar(v) {
     </div>`;
 }
 
+// Dates are a text field in the format of the interface language, with a mask (digits only, the
+// separators come by themselves) and a calendar button: <input type="date"> itself would force the
+// browser's own format, so it is hidden and only opens its calendar.
+const DATE_ISO = /^[yг]/i.test(t('web.calls.date_format'));
+const ICON_CALENDAR = svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>');
+
+function dateField(v, id) {
+  return `<span class="date-field">
+      <input type="text" id="${id}" class="date" placeholder="${esc(t('web.calls.date_format'))}" inputmode="numeric" maxlength="10"
+        oninput="maskDate(this)" onchange="navigate(listUrl('${v}'))">
+      <button type="button" class="date-btn" title="${esc(t('web.calendar'))}" onclick="openCalendar('${id}')">${ICON_CALENDAR}</button>
+      <input type="date" class="date-picker" id="${id}-picker" tabindex="-1" aria-hidden="true"
+        onchange="document.getElementById('${id}').value = showDate(this.value); navigate(listUrl('${v}'))">
+    </span>`;
+}
+
+// yyyy-mm-dd (as in the address) -> the interface format.
+function showDate(iso) {
+  if (!iso || DATE_ISO) return iso || '';
+  const [y, m, d] = iso.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+// Typing at the end: digits only, the separators added. Editing in the middle is left as typed.
+function maskDate(el) {
+  if (el.selectionStart !== el.value.length) return;
+  const d = el.value.replace(/\D/g, '').slice(0, 8);
+  const parts = DATE_ISO ? [d.slice(0, 4), d.slice(4, 6), d.slice(6)] : [d.slice(0, 2), d.slice(2, 4), d.slice(4)];
+  el.value = parts.filter(Boolean).join(DATE_ISO ? '-' : '.');
+}
+
+function openCalendar(id) {
+  const picker = document.getElementById(id + '-picker');
+  const text = document.getElementById(id);
+  const cur = text.value.trim() ? readDate(id) : '';
+  picker.value = cur || '';
+  try { picker.showPicker(); } catch { picker.focus(); picker.click(); }
+}
+
 // The toolbar shows the address; the controls of one kind only where that kind is listed.
 function fillToolbar(v, q) {
   if (v === 'pbx' && MODE.mode === 'full') setSelect('pbx-kind', q.kind || '');
@@ -318,8 +356,8 @@ function fillToolbar(v, q) {
   document.getElementById(v + '-rec').checked = q.rec !== '0' && q.missed !== '1';
   document.getElementById(v + '-missed').checked = q.missed === '1';
   if (document.activeElement?.id !== v + '-q') document.getElementById(v + '-q').value = q.q || '';
-  document.getElementById(v + '-from').value = q.from || '';
-  document.getElementById(v + '-to').value = q.to || '';
+  document.getElementById(v + '-from').value = showDate(q.from);
+  document.getElementById(v + '-to').value = showDate(q.to);
   const kind = listKind(v, q);
   const bar = document.getElementById(v + '-toolbar');
   bar.querySelector('.only-calls').style.display = kind === 'calls' ? 'contents' : 'none';
