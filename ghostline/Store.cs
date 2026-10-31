@@ -115,7 +115,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store insert failed: " + ex.Message);
+                SysLog.Error("store", "insert failed: " + ex.Message);
             }
         }
 
@@ -157,7 +157,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store query failed: " + ex.Message);
+                SysLog.Error("store", "query failed: " + ex.Message);
             }
             return result;
         }
@@ -178,7 +178,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store enqueue failed: " + ex.Message);
+                SysLog.Error("store", "enqueue failed: " + ex.Message);
             }
         }
 
@@ -206,7 +206,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store queue read failed: " + ex.Message);
+                SysLog.Error("store", "queue read failed: " + ex.Message);
             }
             return result;
         }
@@ -224,7 +224,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store queue update failed: " + ex.Message);
+                SysLog.Error("store", "queue update failed: " + ex.Message);
             }
         }
 
@@ -240,7 +240,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store queue delete failed: " + ex.Message);
+                SysLog.Error("store", "queue delete failed: " + ex.Message);
             }
         }
 
@@ -263,7 +263,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store sms-queue enqueue failed: " + ex.Message);
+                SysLog.Error("store", "sms-queue enqueue failed: " + ex.Message);
             }
         }
 
@@ -293,7 +293,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store sms-queue read failed: " + ex.Message);
+                SysLog.Error("store", "sms-queue read failed: " + ex.Message);
             }
             return result;
         }
@@ -311,7 +311,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store sms-queue update failed: " + ex.Message);
+                SysLog.Error("store", "sms-queue update failed: " + ex.Message);
             }
         }
 
@@ -327,7 +327,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store sms-queue delete failed: " + ex.Message);
+                SysLog.Error("store", "sms-queue delete failed: " + ex.Message);
             }
         }
 
@@ -360,7 +360,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store stats query failed: " + ex.Message);
+                SysLog.Error("store", "stats query failed: " + ex.Message);
             }
             return result.Values.ToList();
         }
@@ -376,7 +376,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store tg_queue count failed: " + ex.Message);
+                SysLog.Error("store", "tg_queue count failed: " + ex.Message);
                 return 0;
             }
         }
@@ -392,7 +392,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Store sms_out_queue count failed: " + ex.Message);
+                SysLog.Error("store", "sms_out_queue count failed: " + ex.Message);
                 return 0;
             }
         }

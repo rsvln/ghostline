@@ -185,7 +185,7 @@ namespace ghostline
                 }
                 prev = gain[f];
             }
-            Console.WriteLine($"EchoGate: muted {muted} of {frames} frames ({muted * 20 / 1000.0:F1} s)");
+            SysLog.Debug("transcribe", $"echo gate: muted {muted} of {frames} frames ({muted * 20 / 1000.0:F1} s)");
             return result;
         }
 
@@ -321,14 +321,14 @@ namespace ghostline
                 await p.WaitForExitAsync();
                 if (p.ExitCode != 0 || !File.Exists(outFile))
                 {
-                    Console.WriteLine("ffmpeg failed: " + err.Trim());
+                    SysLog.Error("calls", "ffmpeg failed: " + err.Trim());
                     return null;
                 }
                 return await File.ReadAllBytesAsync(outFile);
             }
             catch (Exception ex)
             {
-                Console.WriteLine("ffmpeg failed: " + ex.Message);
+                SysLog.Error("calls", "ffmpeg failed: " + ex.Message);
                 return null;
             }
             finally

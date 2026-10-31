@@ -48,7 +48,7 @@ namespace ghostline
                     {
                         Store.MarkTelegramMessageFailed(item.Id, ex.Message);
                         HealthStatus.MarkError(kind, ex.Message);
-                        Console.WriteLine($"{kind} send to {item.ChatId} failed (attempt {item.Attempts + 1}): {ex.Message}");
+                        SysLog.Warn(kind, $"send to {item.ChatId} failed (attempt {item.Attempts + 1}): {ex.Message}");
                     }
                 }
                 await Task.Delay(5000);
@@ -165,7 +165,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Telegram SetMyCommands failed: " + DescribeException(ex));
+                SysLog.Warn("telegram", "SetMyCommands failed: " + DescribeException(ex));
             }
         }
 
@@ -203,7 +203,7 @@ namespace ghostline
                 _ => DescribeException(exception)
             };
 
-            Console.WriteLine("Telegram polling error: " + ErrorMessage + ", retrying in 5s");
+            SysLog.Warn("telegram", "polling error: " + ErrorMessage + ", retrying in 5 s");
             HealthStatus.MarkError("telegram", ErrorMessage);
             try { await Task.Delay(5000, cancellationToken); } catch (OperationCanceledException) { }
         }

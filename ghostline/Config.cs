@@ -301,8 +301,12 @@ namespace ghostline
 
     public class LoggerSettings
     {
-        // Also write SMS to /var/log/ghostline/ghostline_DATE.log.
+        // Also write SMS and calls to /var/log/ghostline/ghostline_DATE.log, text files for other systems.
+        // The Journal tab reads the DB and does not need them.
         public bool file { get; set; }
+        // The system log (journald, /var/log/ghostline/system-DATE.log, the System tab):
+        // error | warning | info | debug. Empty: info.
+        public string level { get; set; }
     }
 
     // ntfy (self-hosted push, https://ntfy.sh): SMS and calls to the topic of the line (channels[].ntfy.topic,
@@ -523,8 +527,8 @@ namespace ghostline
             File.Copy(yamlPath, yamlPath + ".bak-v2", overwrite: true);
             // In place, not via a temp file: the config keeps its mode (it holds secrets).
             File.WriteAllText(yamlPath, text);
-            Console.WriteLine($"Config converted to the current format{(same ? "" : " (written out in full, comments lost)")}: " +
-                              $"{yamlPath}, the old one is {yamlPath}.bak-v2");
+            SysLog.Info("config", $"converted to the current format{(same ? "" : " (written out in full, comments lost)")}: " +
+                                  $"{yamlPath}, the old one is {yamlPath}.bak-v2");
         }
 
         // No ghostline.yaml but a ghostline.json next to it: convert.
@@ -537,7 +541,7 @@ namespace ghostline
             File.WriteAllText(yamlPath, "# ghostline settings. Converted from " + Path.GetFileName(jsonPath) +
                                         " " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + "\n" + Serialize(s));
             File.Move(jsonPath, jsonPath + ".migrated");
-            Console.WriteLine($"Config migrated: {jsonPath} -> {yamlPath}");
+            SysLog.Info("config", $"migrated: {jsonPath} -> {yamlPath}");
         }
     }
 

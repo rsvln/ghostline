@@ -51,7 +51,7 @@ namespace ghostline
                     });
 
                     // The page, at the address of every view (the script picks the view from the address).
-                    foreach (var path in new[] { "/", "/calls", "/sms", "/log", "/status", "/config", "/config/yaml", "/about" })
+                    foreach (var path in new[] { "/", "/calls", "/sms", "/log", "/system", "/status", "/config", "/config/yaml", "/about" })
                         app.MapGet(path, () => Results.Content(Localize(Asset("index.html")), "text/html; charset=utf-8"));
                     app.MapGet("/js/app.js", () => Results.Content(Localize(Asset("app.js")), "text/javascript; charset=utf-8"));
                     app.MapGet("/css/app.css", () => Results.Content(Asset("app.css"), "text/css; charset=utf-8"));
@@ -378,31 +378,18 @@ namespace ghostline
                     app.MapPost("/api/calls/{id:long}/retranscribe", (long id) =>
                         Results.Ok(new { ok = Store.RequeueTranscription(id) }));
 
-                    app.MapGet("/api/log", (int? lines) =>
-                    {
-                        int n = lines ?? 200;
-                        string logDir = "/var/log/ghostline/";
-                        if (!Directory.Exists(logDir))
-                            return Results.Ok(new { lines = Array.Empty<string>() });
+                    // SMS and calls in time order, from the DB.
+                    app.MapGet("/api/journal", (int? lines) =>
+                        Results.Ok(new { entries = Program.Journal(Math.Clamp(lines ?? 200, 1, 5000)) }));
 
-                        var logFiles = Directory.GetFiles(logDir, "ghostline_*.log")
-                                                .OrderByDescending(f => f)
-                                                .ToArray();
-
-                        if (logFiles.Length == 0)
-                            return Results.Ok(new { lines = Array.Empty<string>() });
-
-                        var result = new List<string>();
-                        foreach (var file in logFiles)
+                    // The system log: entries of this level and more severe, newest first.
+                    app.MapGet("/api/system-log", (string? level, string? area, int? lines) =>
+                        Results.Ok(new
                         {
-                            if (result.Count >= n) break;
-                            var fileLines = File.ReadAllLines(file);
-                            result.InsertRange(0, fileLines);
-                        }
-
-                        var tail = result.Skip(Math.Max(0, result.Count - n)).ToArray();
-                        return Results.Ok(new { lines = tail });
-                    });
+                            entries = SysLog.Read(level, area, Math.Clamp(lines ?? 500, 1, 5000))
+                                .Select(e => new { ts = e.ts.ToString("yyyy-MM-dd HH:mm:ss.fff"), e.level, e.area, e.message }),
+                            areas = SysLog.Areas()
+                        }));
 
                     app.MapGet("/api/config", () =>
                     {
@@ -471,7 +458,7 @@ namespace ghostline
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("WebUi failed to start: " + ex.Message);
+                    SysLog.Error("web", "web interface failed to start: " + ex.Message);
                 }
             });
         }
@@ -551,7 +538,7 @@ namespace ghostline
             {
                 return Results.Ok(new { ok = false, error = ex.Message });
             }
-            Console.WriteLine("Settings saved from the web UI" + (restart ? ", restarting" : ""));
+            SysLog.Info("config", "settings saved from the web interface" + (restart ? ", restarting" : ""));
             Dictionary<string, string> secrets = new();
             Program.PbxApplyResult applied = null;
             if (parsed.ManagedGateway != null)

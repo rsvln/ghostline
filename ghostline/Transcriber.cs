@@ -80,15 +80,15 @@ namespace ghostline
                     Store.SetTranscript(call.Id, text, JsonConvert.SerializeObject(segs));
                     HealthStatus.MarkConnected("transcribe");
                     HealthStatus.MarkActivity("transcribe");
-                    Console.WriteLine($"Transcribed call {call.Id} ({call.Billsec}s audio, {(legs ? "2 legs" : "mono")}) " +
-                                      $"in {sw.Elapsed.TotalSeconds:F0}s, {segs.Count} lines");
+                    SysLog.Info("transcribe", $"call {call.Id} transcribed ({call.Billsec} s of audio, {(legs ? "2 legs" : "mono")}) " +
+                                              $"in {sw.Elapsed.TotalSeconds:F0} s, {segs.Count} lines");
                 }
                 catch (TranscribeHttpException ex)
                 {
                     bool final = Store.GetTranscriptAttempts(call.Id) + 1 >= MaxTranscribeAttempts;
                     Store.SetTranscriptError(call.Id, ex.Message, final);
                     HealthStatus.MarkError("transcribe", ex.Message);
-                    Console.WriteLine($"Transcribe call {call.Id} failed: {ex.Message}");
+                    SysLog.Warn("transcribe", $"call {call.Id} failed: {ex.Message}");
                     await Task.Delay(30000);
                 }
                 catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
@@ -97,14 +97,14 @@ namespace ghostline
                     string err = DescribeException(ex);
                     HealthStatus.MarkDisconnected("transcribe");
                     HealthStatus.MarkError("transcribe", err);
-                    Console.WriteLine($"Transcribe unavailable (call {call?.Id}): {err}, retrying in 60s");
+                    SysLog.Warn("transcribe", $"service unavailable (call {call?.Id}): {err}, retrying in 60 s");
                     await Task.Delay(60000);
                 }
                 catch (Exception ex)
                 {
                     string err = DescribeException(ex);
                     HealthStatus.MarkError("transcribe", err);
-                    Console.WriteLine($"Transcribe call {call?.Id} error: {err}");
+                    SysLog.Error("transcribe", $"call {call?.Id}: {err}");
                     if (call != null)
                         Store.SetTranscriptError(call.Id, err, Store.GetTranscriptAttempts(call.Id) + 1 >= MaxTranscribeAttempts);
                     await Task.Delay(30000);
@@ -173,7 +173,7 @@ namespace ghostline
                     if (!IsPromptEcho(seg.t, settings.calls.transcribe.prompt))
                         result.Add(seg with { s = Math.Round(seg.s + s, 1), e = Math.Round(seg.e + s, 1) });
             }
-            Console.WriteLine($"Transcribe call {call.Id} {who ?? "mono"}: {chunks.Count} chunks, {chunks.Sum(c => c.e - c.s):F0}s of sound");
+            SysLog.Debug("transcribe", $"call {call.Id} {who ?? "mono"}: {chunks.Count} chunks, {chunks.Sum(c => c.e - c.s):F0} s of sound");
             return result;
         }
 

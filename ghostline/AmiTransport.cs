@@ -24,11 +24,17 @@ namespace ghostline
                     // sends a "silent" drop into the same reconnect loop.
                     client.Client.ReceiveTimeout = 90000;
                     HealthStatus.MarkConnected(gw.id);
+                    if (_amiUp.TryGetValue(gw.id, out var up) == false || !up)
+                        SysLog.Info("ami", $"{gw.id}: connected to {gw.ip}:{gw.amiPort}");
+                    _amiUp[gw.id] = true;
                     break;
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"AMI ({gw.id}) connect failed: {ex.Message}, retrying in 5s");
+                    // Logged once per outage, not on every retry.
+                    if (_amiUp.GetValueOrDefault(gw.id, true))
+                        SysLog.Warn("ami", $"{gw.id}: cannot connect to {gw.ip}:{gw.amiPort}: {ex.Message}; retrying every 5 s");
+                    _amiUp[gw.id] = false;
                     HealthStatus.MarkError(gw.id, ex.Message);
                     Thread.Sleep(5000);
                 }
@@ -90,7 +96,8 @@ namespace ghostline
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"AMI ({gw.id}) socket error: {ex.Message}");
+                    SysLog.Warn("ami", $"{gw.id}: connection lost: {ex.Message}");
+                    _amiUp[gw.id] = false;
                     HealthStatus.MarkDisconnected(gw.id);
                     HealthStatus.MarkError(gw.id, ex.Message);
                     ReconnectClient(client, gw);
@@ -157,7 +164,7 @@ namespace ghostline
             // come, and it looks like "connected, but silence".
             else if (evt.TryGetValue("Response", out var response) && response == "Error")
             {
-                Console.WriteLine($"AMI ({gw.id}) error response: {evt.GetValueOrDefault("Message", "(no message)")}");
+                SysLog.Warn("ami", $"{gw.id}: error response: {evt.GetValueOrDefault("Message", "(no message)")}");
                 HealthStatus.MarkError(gw.id, "AMI error: " + evt.GetValueOrDefault("Message", "(no message)"));
             }
             // everything else (QuectelNewCMGR, Newchannel/Hangup of the service Local channel,
@@ -174,7 +181,7 @@ namespace ghostline
             Channel chan = getChannel("Channel: " + channelField, gw.id);
             if (chan == null)
             {
-                Console.WriteLine($"AMI ({gw.id}): incoming SMS on channel '{channelField}' matched no configured channel, dropping");
+                SysLog.Warn("sms", $"{gw.id}: incoming SMS on channel '{channelField}' matches no line, dropped");
                 return;
             }
 
@@ -214,7 +221,7 @@ namespace ghostline
             Channel chan = getChannelByLine(gw.id, device);
             if (chan == null)
             {
-                Console.WriteLine($"AMI ({gw.id}): incoming SMS on device '{device}' matched no configured channel, dropping");
+                SysLog.Warn("sms", $"{gw.id}: incoming SMS on modem '{device}' matches no line, dropped");
                 return;
             }
 

@@ -72,6 +72,13 @@ namespace ghostline
         // Validates, writes the files that changed (the old ones go to .bak) and reloads Asterisk.
         internal static async Task<PbxApplyResult> ApplyPbx()
         {
+            var r = await ApplyPbxLocked();
+            if (!r.ok) SysLog.Error("pbx", "Asterisk files not applied: " + string.Join("; ", r.errors));
+            return r;
+        }
+
+        private static async Task<PbxApplyResult> ApplyPbxLocked()
+        {
             await _pbxApplyLock.WaitAsync();
             try
             {
@@ -97,7 +104,7 @@ namespace ghostline
                 var output = new StringBuilder();
                 if (changed.Count > 0)
                 {
-                    Console.WriteLine("PBX: wrote " + string.Join(", ", changed) + ", reloading");
+                    SysLog.Info("pbx", "wrote " + string.Join(", ", changed) + ", reloading");
                     var cmds = new List<string>();
                     if (changed.Contains(PbxConfig.PjsipFile)) cmds.Add("module reload res_pjsip.so");
                     // Before the modem reload: a modem's new context must exist when it comes up.
@@ -141,7 +148,7 @@ namespace ghostline
             SettingsFile.Parse(yaml);
             File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
             File.WriteAllText(ConfigPath, yaml);
-            Console.WriteLine($"PBX: new phone secret for line {lineName} (apply to use it)");
+            SysLog.Info("pbx", $"new phone secret for line {lineName}");
             return secret;
         }
 
@@ -164,7 +171,7 @@ namespace ghostline
                 SettingsFile.Parse(yaml);
                 // In place, not via a temp file: the config keeps its mode (it holds secrets).
                 File.WriteAllText(ConfigPath, yaml);
-                Console.WriteLine("PBX: new phone secret for " + string.Join(", ", secrets.Keys));
+                SysLog.Info("pbx", "new phone secret for " + string.Join(", ", secrets.Keys));
             }
             return secrets;
         }
@@ -270,7 +277,7 @@ namespace ghostline
 
                 File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
                 File.WriteAllText(ConfigPath, yaml);
-                Console.WriteLine($"PBX: modem {gw.id}/{name} {(e.action == "add" ? "added" : "removed")}");
+                SysLog.Info("pbx", $"modem {gw.id}/{name} {(e.action == "add" ? "added" : "removed")}");
                 return new(true, null);
             }
         }
@@ -368,7 +375,7 @@ namespace ghostline
                 && (!_securityAlerted.TryGetValue(address, out var last) || DateTime.Now - last > TimeSpan.FromHours(24)))
             {
                 _securityAlerted[address] = DateTime.Now;
-                Console.WriteLine($"PBX: {recent} failed SIP attempts from {address} in {SecurityWindow.TotalMinutes} min");
+                SysLog.Warn("pbx", $"{recent} failed SIP attempts from {address} in {SecurityWindow.TotalMinutes} min");
                 EnqueueAdminAlert(L10n.Tg.T("tg.pbx.attack.title"), L10n.Tg.T("tg.pbx.attack.text", address, recent, e.account));
             }
             return true;
@@ -422,7 +429,7 @@ namespace ghostline
                 {
                     if (PbxCertificate(ReadSettingsFile()) is { daysLeft: <= 14 } c)
                     {
-                        Console.WriteLine($"PBX: the TLS certificate expires in {c.daysLeft} days ({c.notAfter:yyyy-MM-dd})");
+                        SysLog.Warn("pbx", $"the TLS certificate expires in {c.daysLeft} days ({c.notAfter:yyyy-MM-dd})");
                         EnqueueAdminAlert(L10n.Tg.T("tg.pbx.cert.title"), L10n.Tg.T("tg.pbx.cert.text", c.daysLeft, c.notAfter.ToString("yyyy-MM-dd")));
                     }
                 }

@@ -137,7 +137,7 @@ namespace ghostline
             var topicList = AllLines.Select(LineTopic).Where(t => t != null).Distinct().ToList();
             if (topicList.Count == 0)
             {
-                Console.WriteLine("ntfy: no topics (set clients.ntfy.topic or channels[].clients.ntfy.topic)");
+                SysLog.Warn("ntfy", "no topics (set clients.ntfy.topic or lines[].clients.ntfy.topic)");
                 return;
             }
             string topics = string.Join(",", topicList.Select(Uri.EscapeDataString));
@@ -180,7 +180,7 @@ namespace ghostline
                 {
                     HealthStatus.MarkDisconnected("ntfy");
                     HealthStatus.MarkError("ntfy", DescribeException(ex));
-                    Console.WriteLine("ntfy listen failed: " + DescribeException(ex) + ", retrying in 5s");
+                    SysLog.Warn("ntfy", "listen failed: " + DescribeException(ex) + ", retrying in 5 s");
                     await Task.Delay(5000);
                 }
             }
@@ -193,7 +193,7 @@ namespace ghostline
             var lines = LinesOfTopic(topic);
             if (lines.Count == 0) return;
             string text = message.Replace("\r", "").Trim();
-            Console.WriteLine($"ntfy in [{topic}]: {text.Replace("\n", " | ")}");
+            SysLog.Debug("ntfy", $"message in [{topic}]");
             var l = L10n.Tg;
 
             if (text.StartsWith('/'))

@@ -189,7 +189,8 @@ web:                          # empty user and password disable authentication
   password: change-me
 
 logger:
-  file: true                  # also write SMS and calls to /var/log/ghostline/
+  level: info                 # system log: error | warning | info | debug
+  file: false                 # also write SMS and calls to /var/log/ghostline/ (text files)
 
 gateways:
   - id: pbx
@@ -255,7 +256,8 @@ goip:
 | `clients.ntfy.topic` | Common topic, for lines without their own |
 | `web.port` | Web interface port, default `8889` |
 | `web.user` / `web.password` | HTTP Basic authentication; both empty — no authentication |
-| `logger.file` | Write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log` |
+| `logger.level` | System log level: `error`, `warning`, `info` (default) or `debug`. The log goes to journald with the level (`journalctl -p warning -u ghostline`), to `/var/log/ghostline/system-YYYY-MM-DD.log` (14 days) and to the System tab |
+| `logger.file` | Also write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log`, text files for other systems. The Journal tab does not need them |
 | `goip.smtp.enabled` / `goip.smtp.port` | Built-in SMTP server for GoIP gateways that deliver SMS by e-mail |
 | `monitor.alert_minutes` | A monitored line without network this long gets a message in its chats/topic, and another when it is back; `0` — no messages. Default `2` |
 
@@ -383,7 +385,9 @@ work. `/` opens the tab used last.
   transcript). **Transcribe again** re-runs transcription, for example after
   changing `transcribe.prompt`.
 - **SMS** — history, filters, export, sending.
-- **Log** — the text log, newest first.
+- **Journal** — SMS and calls of all lines in time order, newest first (from the database).
+- **System** — what ghostline itself does: start, connections, lines losing network, PBX changes,
+  failures. Filters by level (errors / warnings / info / debug) and area.
 - **Status** — state of gateways, Telegram and queues.
 - **Config** — two editors for the same file:
   - **Form**: sections in a tree (general, Telegram, web, gateways, lines,

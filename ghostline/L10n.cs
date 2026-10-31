@@ -57,7 +57,7 @@ namespace ghostline
             Web = Make(Or(s?.web), fallback);
             Tg = Make(Or(s?.telegram), fallback);
             Transcript = Make(Or(s?.transcript), fallback);
-            Console.WriteLine($"locale: web={Web.Locale}, telegram={Tg.Locale}, transcript={Transcript.Locale}");
+            SysLog.Debug("app", $"locale: web={Web.Locale}, telegram={Tg.Locale}, transcript={Transcript.Locale}");
         }
 
         static Strings Make(string locale, Dictionary<string, string> fallback)
@@ -66,7 +66,7 @@ namespace ghostline
             var selected = locale == DefaultLocale ? fallback : ReadFile(locale);
             if (selected == null)
             {
-                Console.WriteLine($"Locale '{locale}' not found in {LocalesDir}, using {DefaultLocale}");
+                SysLog.Warn("app", $"locale '{locale}' not found in {LocalesDir}, using {DefaultLocale}");
                 return new Strings(DefaultLocale, fallback, fallback);
             }
             return new Strings(locale, selected, fallback);
@@ -83,7 +83,7 @@ namespace ghostline
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to read locale file {path}: {ex.Message}");
+                SysLog.Error("app", $"cannot read locale file {path}: {ex.Message}");
                 return null;
             }
         }

@@ -112,7 +112,7 @@ namespace ghostline
                     var chan = getChannelType(item.ChannelName);
                     if (chan == null)
                     {
-                        Console.WriteLine($"Outgoing SMS #{item.Id}: channel '{item.ChannelName}' not found in config, dropping");
+                        SysLog.Error("sms", $"outgoing SMS #{item.Id}: line '{item.ChannelName}' is not in the config, dropped");
                         Store.DeleteOutgoingSms(item.Id);
                         continue;
                     }
@@ -120,7 +120,7 @@ namespace ghostline
                     var gw = getGatewayById(chan.gateway);
                     if (gw == null)
                     {
-                        Console.WriteLine($"Outgoing SMS #{item.Id}: gateway '{chan.gateway}' not found in config, dropping");
+                        SysLog.Error("sms", $"outgoing SMS #{item.Id}: gateway '{chan.gateway}' is not in the config, dropped");
                         Store.DeleteOutgoingSms(item.Id);
                         continue;
                     }
@@ -134,7 +134,7 @@ namespace ghostline
                     {
                         Store.MarkOutgoingSmsFailed(item.Id, ex.Message);
                         HealthStatus.MarkError(gw.id, ex.Message);
-                        Console.WriteLine($"Outgoing SMS #{item.Id} via {chan.name} failed (attempt {item.Attempts + 1}): {ex.Message}");
+                        SysLog.Warn("sms", $"outgoing SMS #{item.Id} via {chan.name} failed (attempt {item.Attempts + 1}): {ex.Message}");
                     }
                 }
                 await Task.Delay(5000);
@@ -148,7 +148,7 @@ namespace ghostline
 
             if (settings.logger.file)
                 Log(gwt, "out", ts, chan.name, peer, logContent);
-            Console.WriteLine(ts + "\t" + gwt + "\tout\t" + chan.name + "\t" + peer + "\t" + logContent);
+            SysLog.Info("sms", $"{chan.name}: outgoing SMS ({sourceLabel})");
 
             Store.Insert(new SmsRecord
             {

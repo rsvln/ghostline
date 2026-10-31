@@ -33,6 +33,8 @@ namespace ghostline
         // persistent socket, also one per physical gateway. The key is Gateway.id.
         private static readonly ConcurrentDictionary<string, HttpClient> _goipClients = new();
         private static readonly ConcurrentDictionary<string, TcpClient> _amiClients = new();
+        // Whether a gateway's AMI is up, so the system log gets one line per change, not one per retry.
+        private static readonly ConcurrentDictionary<string, bool> _amiUp = new();
 
         // Buffer of multipart SMS parts. Key: "<gateway id>|<channel/device>|<sender>".
         private static readonly ConcurrentDictionary<string, string[]> _multipartBuffers = new();
@@ -41,7 +43,7 @@ namespace ghostline
         {
             var version = Assembly.GetExecutingAssembly()
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
-            Console.WriteLine($"ghostline {version}");
+            SysLog.Info("app", $"ghostline {version} starting");
 
             contacts = LoadContacts();
 
@@ -52,16 +54,17 @@ namespace ghostline
             else
                 fs = args[0];
 
-            Console.WriteLine(fs);
+            SysLog.Info("config", "config: " + fs);
             try
             {
                 SettingsFile.MigrateFromJson(fs);
                 SettingsFile.MigrateToV2(fs);
                 settings = SettingsFile.Parse(System.IO.File.ReadAllText(fs));
+                SysLog.Configure(settings.logger?.level);
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Bad settings file: " + SettingsFile.Describe(ex) + ". Exit");
+                SysLog.Error("config", "bad settings file: " + SettingsFile.Describe(ex) + "; exit");
                 return;
             }
 
@@ -77,11 +80,11 @@ namespace ghostline
 
             // gateways[].pbx: managed — ghostline writes that Asterisk's config; otherwise FreePBX owns it.
             var managed = settings.ManagedGateway;
-            Console.WriteLine("pbx: " + (managed != null ? "managed (" + managed.id + ")" : "freepbx"));
+            SysLog.Info("app", "pbx: " + (managed != null ? "managed (" + managed.id + ")" : "freepbx"));
             if (managed != null)
                 Task.Run(() => PbxCertWatchLoop());
             if (settings.lines.Any(c => c.phone != null && c.gateway != managed?.id))
-                Console.WriteLine("Config warning: lines[].phone is used only on a gateway with pbx: managed, ignored");
+                SysLog.Warn("config", "lines[].phone is used only on a gateway with pbx: managed, ignored");
 
             // Inconsistent config: a channel refers to a gateway that is not in gateways[].
             // Nothing breaks loudly (the channel simply never fires), so warn explicitly
@@ -90,9 +93,9 @@ namespace ghostline
             {
                 var gw = settings.gateways.FirstOrDefault(g => g.id == ch.gateway);
                 if (gw == null)
-                    Console.WriteLine($"Config warning: line '{ch.name}' references unknown gateway '{ch.gateway}'");
+                    SysLog.Warn("config", $"line '{ch.name}' references unknown gateway '{ch.gateway}'");
                 else if (gw.IsAsterisk && gw.Modem(ch.modem) == null)
-                    Console.WriteLine($"Config warning: line '{ch.name}': gateway '{gw.id}' has no modem '{ch.modem}'");
+                    SysLog.Warn("config", $"line '{ch.name}': gateway '{gw.id}' has no modem '{ch.modem}'");
             }
 
             foreach (var gw in settings.gateways)
@@ -122,7 +125,7 @@ namespace ghostline
                 }
                 else
                 {
-                    Console.WriteLine($"Config warning: gateway '{gw.id}' has unknown type '{gw.type}'");
+                    SysLog.Warn("config", $"gateway '{gw.id}' has unknown type '{gw.type}'");
                 }
             }
 
@@ -145,19 +148,19 @@ namespace ghostline
                 HealthStatus.MarkConfigured("ntfy");
                 Task.Run(() => NtfyListenLoop());
             }
-            Console.WriteLine($"channels: telegram={(TelegramEnabled ? "on" : "off")}, ntfy={(NtfyEnabled ? "on" : "off")}");
+            SysLog.Info("app", $"clients: telegram={(TelegramEnabled ? "on" : "off")}, ntfy={(NtfyEnabled ? "on" : "off")}");
             Task.Run(() => TelegramOutboxWorker());
             Task.Run(() => SmsOutboxWorker());
 
             // Mode "full": calls, i.e. the journal from the PBX CDR, recordings, transcription, Telegram.
             // In mode "sms" none of this starts, and neither the PBX nor the transcription service is contacted.
-            Console.WriteLine("mode: " + (settings.FullMode ? "full" : "sms"));
+            SysLog.Info("app", "mode: " + (settings.FullMode ? "full" : "sms"));
             if (settings.FullMode)
             {
                 if (settings.calls?.CdrConfigured != true || !settings.calls.RecordingsConfigured)
                 {
-                    Console.WriteLine("Config error: mode \"full\" needs calls.cdr_db or calls.cdr_sqlite, and calls.recordings_url " +
-                                      "or calls.recordings_dir — calls are disabled");
+                    SysLog.Error("config", "mode \"full\" needs calls.cdr_db or calls.cdr_sqlite, and calls.recordings_url " +
+                                           "or calls.recordings_dir; calls are disabled");
                 }
                 else
                 {

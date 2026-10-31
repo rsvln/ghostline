@@ -62,7 +62,7 @@ namespace ghostline
                     string err = DescribeException(ex);
                     HealthStatus.MarkDisconnected("cdr");
                     HealthStatus.MarkError("cdr", err);
-                    Console.WriteLine("CDR poll failed: " + err);
+                    SysLog.Warn("calls", "CDR poll failed: " + err);
                 }
                 await Task.Delay(TimeSpan.FromSeconds(Math.Max(5, settings.calls.pollSeconds)));
             }
@@ -136,11 +136,12 @@ namespace ghostline
                 if (id == 0) continue;   // already there
                 call.Id = id;
                 added++;
-                Console.WriteLine($"Call {call.Ts} {call.Direction} {call.Channel} {call.Peer} {call.Billsec}s rec={call.RecSize}");
 
                 // On the first start the whole history is imported; it is not sent to Telegram or the log.
                 if (initialized)
                 {
+                    SysLog.Info("calls", $"{call.Channel}: {(call.Direction == "in" ? "incoming" : "outgoing")} call " +
+                                         $"{(call.Missed ? "not answered" : $"{call.Billsec} s")}");
                     EnqueueCallNotifications(call, ch);
                     LogCall(call);
                 }
@@ -151,7 +152,7 @@ namespace ghostline
             if (!initialized)
             {
                 Store.SetKv(KvInitialized, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-                Console.WriteLine($"Calls: initial import done, {added} calls");
+                SysLog.Info("calls", $"initial import done, {added} calls");
             }
             return added;
         }
@@ -208,16 +209,32 @@ namespace ghostline
             }, ch);
         }
 
-        // A call in the text log, next to SMS and in the same format: "📞 Incoming 0:52".
-        private static void LogCall(CallRecord c)
+        // A call next to SMS, in the journal and in the text log: "📞 Incoming 0:52".
+        internal static string CallText(CallRecord c)
         {
-            if (!settings.logger.file) return;
             string kind = L10n.Web.T(c.Missed
                 ? (c.Direction == "in" ? "web.calls.kind.missed" : "web.calls.kind.no_answer")
                 : (c.Direction == "in" ? "web.calls.kind.in" : "web.calls.kind.out"));
-            string text = "📞 " + kind + (c.Missed ? "" : $" {c.Billsec / 60}:{c.Billsec % 60:D2}");
+            return "📞 " + kind + (c.Missed ? "" : $" {c.Billsec / 60}:{c.Billsec % 60:D2}");
+        }
+
+        private static void LogCall(CallRecord c)
+        {
+            if (!settings.logger.file) return;
             string who = string.IsNullOrEmpty(c.PeerName) ? c.Peer : c.Peer + " " + c.PeerName;
-            Log("q", c.Direction, c.Ts, c.Channel, who, text);
+            Log("q", c.Direction, c.Ts, c.Channel, who, CallText(c));
+        }
+
+        internal record JournalEntry(string ts, string kind, string gateway, string direction, string line, string peer, string name, string text);
+
+        // SMS and calls in one list, newest first. Both tables keep ts as "yyyy-MM-dd HH:mm:ss".
+        internal static List<JournalEntry> Journal(int limit)
+        {
+            var sms = Store.Query(limit, null, null, null)
+                .Select(m => new JournalEntry(m.Ts, "sms", m.Gateway, m.Direction, m.Channel, m.Peer, m.Note, m.Content));
+            var calls = Store.QueryCalls(limit, null, null, false, false, null, null, null)
+                .Select(c => new JournalEntry(c.Ts, "call", "q", c.Direction, c.Channel, c.Peer, c.PeerName, CallText(c)));
+            return sms.Concat(calls).OrderByDescending(e => e.ts, StringComparer.Ordinal).Take(limit).ToList();
         }
 
         internal static string ContactName(string number)

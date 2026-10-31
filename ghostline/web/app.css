@@ -216,6 +216,12 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .log-line > span.log-msg { overflow: visible; }
 .log-peer { color: var(--yellow); }
 .log-line:hover { filter: brightness(1.3); }
+.sys-line { display: grid; grid-template-columns: 170px 100px 90px 1fr; gap: 0 12px; padding: 1px 0; min-width: max-content; }
+.sys-line > span { white-space: nowrap; }
+.sys-line:hover { filter: brightness(1.3); }
+.sys-error .sys-level, .sys-error .log-msg { color: var(--red); }
+.sys-warning .sys-level, .sys-warning .log-msg { color: var(--yellow); }
+.sys-debug .sys-level, .sys-debug .log-msg { color: var(--muted); }
 .log-ts { color: var(--muted); }
 .log-gw { color: var(--accent); }
 

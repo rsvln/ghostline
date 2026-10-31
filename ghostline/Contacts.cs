@@ -90,7 +90,7 @@ namespace ghostline
                     }
                 }
             }
-            catch (Exception ex) { Console.WriteLine("Contacts load failed: " + ex.Message); }
+            catch (Exception ex) { SysLog.Error("contacts", "load failed: " + ex.Message); }
             return result;
         }
 

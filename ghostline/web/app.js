@@ -5,7 +5,7 @@ const t = (k, ...a) => (I18N[k] ?? k).replace(/\{(\d+)\}/g, (_, i) => a[i]);
 // Every view has its own address: /calls, /sms, /log, /status, /config, /config/yaml, /about,
 // with the filters in the query string. F5 shows the same view, links can be shared and
 // the browser's Back / Forward move between views. "/" opens the view seen last.
-const TABS = ['calls', 'sms', 'log', 'status', 'config', 'about'];
+const TABS = ['calls', 'sms', 'log', 'system', 'status', 'config', 'about'];
 const val = id => document.getElementById(id).value;
 const checked = id => document.getElementById(id).checked;
 
@@ -15,7 +15,7 @@ function esc(s) {
 
 // Settings of this browser (lines, auto-refresh) and the last address of every tab stay in localStorage.
 const PREFS_KEY = 'ghostline.prefs';
-const PREFS = ['sms-limit', 'sms-refresh', 'log-lines', 'log-refresh'];
+const PREFS = ['sms-limit', 'sms-refresh', 'log-lines', 'log-refresh', 'sys-level', 'sys-lines', 'sys-refresh'];
 
 function readPrefs() {
   try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; }
@@ -125,6 +125,8 @@ async function render() {
     loadSms();
   } else if (r.view === 'log') {
     loadLog();
+  } else if (r.view === 'system') {
+    loadSystemLog();
   } else if (r.view === 'status') {
     loadStatus();
   } else if (r.view === 'config') {
@@ -421,20 +423,43 @@ function setLogRefresh() {
   if (ms > 0) logTimer = setInterval(() => { if (parseRoute().view === 'log') loadLog(); }, ms);
 }
 
+// The journal: SMS and calls from the DB, newest first, as on the Calls and SMS tabs.
 async function loadLog() {
-  const data = await (await fetch('/api/log?lines=' + val('log-lines'))).json();
-  // Newest first, as on the Calls and SMS tabs.
-  document.getElementById('log-container').innerHTML = data.lines.slice().reverse().map(line => {
-    const p = line.split('\t');
-    if (p.length < 8) return `<div class="log-line"><span>${esc(line)}</span></div>`;
-    const [date, time, gw, dir, , from, dest, ...rest] = p;
+  const data = await (await fetch('/api/journal?lines=' + val('log-lines'))).json();
+  document.getElementById('log-container').innerHTML = data.entries.map(e => {
+    const [date, time] = (e.ts || '').split(' ');
+    const peer = e.name ? `${e.peer} ${e.name}` : e.peer;
     return `<div class="log-line">
-      <span class="log-ts">${esc(date)}</span><span class="log-ts">${esc(time)}</span>
-      <span class="log-gw">${esc(gw)}</span><span class="dir-${esc(dir)}">${esc(dir)}</span>
-      <span title="${esc(from)}">${esc(from)}</span><span class="log-peer" title="${esc(dest)}">${esc(dest)}</span>
-      <span class="log-msg">${esc(rest.join('\t'))}</span>
+      <span class="log-ts">${esc(date)}</span><span class="log-ts">${esc(time || '')}</span>
+      <span class="log-gw">${esc(e.gateway)}</span><span class="dir-${esc(e.direction)}">${esc(e.direction)}</span>
+      <span title="${esc(e.line)}">${esc(e.line)}</span><span class="log-peer" title="${esc(peer)}">${esc(peer)}</span>
+      <span class="log-msg">${esc((e.text || '').replace(/\n/g, ' ⏎ '))}</span>
     </div>`;
   }).join('');
+}
+
+// ---- System log ----
+
+let sysTimer = null;
+function setSystemRefresh() {
+  clearInterval(sysTimer);
+  const ms = parseInt(val('sys-refresh'));
+  if (ms > 0) sysTimer = setInterval(() => { if (parseRoute().view === 'system') loadSystemLog(); }, ms);
+}
+
+async function loadSystemLog() {
+  const q = new URLSearchParams({ level: val('sys-level'), area: val('sys-area'), lines: val('sys-lines') });
+  const data = await (await fetch('/api/system-log?' + q)).json();
+  const sel = document.getElementById('sys-area');
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">${esc(t('web.sys.all'))}</option>`
+    + [...new Set([...data.areas, cur].filter(Boolean))].sort()
+      .map(a => `<option${a === cur ? ' selected' : ''}>${esc(a)}</option>`).join('');
+  document.getElementById('system-container').innerHTML = data.entries.map(e =>
+    `<div class="sys-line sys-${esc(e.level)}"><span class="log-ts">${esc(e.ts)}</span>`
+    + `<span class="sys-level">${esc(t('web.sys.tag.' + e.level))}</span>`
+    + `<span class="log-gw">${esc(e.area)}</span><span class="log-msg">${esc(e.message)}</span></div>`).join('')
+    || `<div class="muted">${esc(t('web.sys.empty'))}</div>`;
 }
 
 // ---- State: dots in the header and the Status tab ----
@@ -1314,6 +1339,7 @@ async function waitForRestart() {
 
   setSmsRefresh();
   setLogRefresh();
+  setSystemRefresh();
   loadStatus();
   setInterval(loadStatus, 15000);
   // While calls are queued for transcription, refresh so the clock turns into text.

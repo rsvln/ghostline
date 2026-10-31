@@ -161,7 +161,7 @@ namespace ghostline
             Store.MarkCallTgFailed(item.Id, err);
             string kind = IsNtfyTarget(item.ChatId) ? "ntfy" : "telegram";
             HealthStatus.MarkError(kind, err);
-            Console.WriteLine($"Call {item.CallId} {kind} {what} to {item.ChatId} failed (attempt {item.Attempts + 1}): {err}");
+            SysLog.Warn("telegram", $"call {item.CallId} {kind} {what} to {item.ChatId} failed (attempt {item.Attempts + 1}): {err}");
             // For example the message was deleted: nothing left to edit.
             if (item.Attempts + 1 >= MaxCallTgAttempts)
                 Store.MarkCallTgFinal(item.Id);

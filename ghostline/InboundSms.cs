@@ -23,7 +23,7 @@ namespace ghostline
 
             if (settings.logger.file)
                 Log(gwt, "in", recvTime, chan.name, sender, logText);
-            Console.WriteLine(recvTime + "\t" + gwt + "\tin" + "\t" + chan.name + "\t" + sender + "\t" + logText);
+            SysLog.Info("sms", $"{chan.name}: incoming SMS");
 
             Store.Insert(new SmsRecord
             {
@@ -72,7 +72,7 @@ namespace ghostline
                 EnqueueNtfy(chan, SmsTitle(sender, contactName), content);
                 if (settings.logger.file)
                     Log("g", "in", recvTime, chan.name, sender, content);
-                Console.WriteLine(recvTime + "\t" + "g\tin" + "\t" + chan.name + "\t" + sender + "\t" + content);
+                SysLog.Info("sms", $"{chan.name}: incoming SMS");
 
                 Store.Insert(new SmsRecord
                 {

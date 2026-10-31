@@ -121,8 +121,8 @@ namespace ghostline
             if (evt.GetValueOrDefault("Response") == "Error")
             {
                 if (_radioDenied.TryAdd(gw.id, true))
-                    Console.WriteLine($"AMI ({gw.id}): ShowDevices refused ({evt.GetValueOrDefault("Message", "")}); " +
-                                      "line monitoring is off until a restart. The AMI user needs 'reporting' in 'write'.");
+                    SysLog.Warn("line", $"{gw.id}: ShowDevices refused ({evt.GetValueOrDefault("Message", "")}); " +
+                                        "line monitoring is off until a restart. The AMI user needs 'reporting' in 'write'.");
                 return true;
             }
             if (!Modems.All.Any(f => evt.GetValueOrDefault("Event") == f.DeviceEntryEvent)) return true;
@@ -163,7 +163,7 @@ namespace ghostline
                 if (r.Alerted)
                 {
                     int down = (int)Math.Round((DateTime.Now - r.DownSince.Value).TotalMinutes);
-                    Console.WriteLine($"line {ch.name}: network is back after {down} min");
+                    SysLog.Info("line", $"{ch.name}: network is back after {down} min");
                     EnqueueTelegramForLine(ch, l.T("tg.radio.back", ch.name, down));
                     EnqueueNtfy(ch, l.T("tg.radio.back.title", ch.name), l.T("tg.radio.back.text", down));
                 }
@@ -178,7 +178,7 @@ namespace ghostline
             string since = r.DownSince.Value.ToString("HH:mm");
             // The driver state says more when the device itself is down ("Not connected").
             string state = (r.State is null or "Free" ? r.Registration : r.State) ?? "";
-            Console.WriteLine($"line {ch.name}: no network since {since} ({r.State}, {r.Registration})");
+            SysLog.Warn("line", $"{ch.name}: no network since {since} ({r.State}, {r.Registration})");
             EnqueueTelegramForLine(ch, l.T("tg.radio.lost", ch.name, since, state));
             EnqueueNtfy(ch, l.T("tg.radio.lost.title", ch.name), l.T("tg.radio.lost.text", since, state));
         }

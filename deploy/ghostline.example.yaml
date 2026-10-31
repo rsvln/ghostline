@@ -29,7 +29,8 @@ web:                          # empty user and password disable authentication
   password: change-me
 
 logger:
-  file: true
+  level: info                 # system log: error | warning | info | debug
+  file: false                 # also write SMS and calls to /var/log/ghostline/ (text files)
 
 gateways:
   - id: pbx

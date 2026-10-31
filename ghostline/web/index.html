@@ -18,6 +18,7 @@
     <a class="tab" data-tab="calls" href="/calls" id="tab-calls" hidden>{{web.tab.calls}}</a>
     <a class="tab" data-tab="sms" href="/sms">{{web.tab.sms}}</a>
     <a class="tab" data-tab="log" href="/log">{{web.tab.log}}</a>
+    <a class="tab" data-tab="system" href="/system">{{web.tab.system}}</a>
     <a class="tab" data-tab="status" href="/status">{{web.tab.status}}</a>
     <a class="tab" data-tab="config" href="/config">{{web.tab.config}}</a>
     <a class="tab" data-tab="about" href="/about">{{web.tab.about}}</a>
@@ -95,6 +96,33 @@
       </div>
     </div>
     <div class="mono-scroll" id="log-container"></div>
+  </div>
+
+  <div class="panel" id="panel-system">
+    <div class="toolbar">
+      <label>{{web.sys.level}}</label>
+      <select id="sys-level" onchange="loadSystemLog()">
+        <option value="error">{{web.sys.level.error}}</option>
+        <option value="warning">{{web.sys.level.warning}}</option>
+        <option value="info" selected>{{web.sys.level.info}}</option>
+        <option value="debug">{{web.sys.level.debug}}</option>
+      </select>
+      <label>{{web.sys.area}}</label>
+      <select id="sys-area" onchange="loadSystemLog()"><option value="">{{web.sys.all}}</option></select>
+      <label>{{web.log.lines}}</label>
+      <input type="number" id="sys-lines" value="500" min="10" max="5000" style="width:70px" onchange="loadSystemLog()">
+      <button class="btn" onclick="loadSystemLog()">{{web.refresh}}</button>
+      <div class="autoscroll-toggle">
+        <label>{{web.autorefresh}}</label>
+        <select id="sys-refresh" onchange="setSystemRefresh()">
+          <option value="0">{{web.off}}</option>
+          <option value="5000" selected>5s</option>
+          <option value="10000">10s</option>
+          <option value="30000">30s</option>
+        </select>
+      </div>
+    </div>
+    <div class="mono-scroll" id="system-container"></div>
   </div>
 
   <div class="panel" id="panel-status">
