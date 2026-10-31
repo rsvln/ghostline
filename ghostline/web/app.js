@@ -16,7 +16,7 @@ function esc(s) {
 
 // Settings of this browser (lines, auto-refresh) and the last address of every tab stay in localStorage.
 const PREFS_KEY = 'ghostline.prefs';
-const PREFS = ['calls-refresh', 'sms-refresh', 'pbx-refresh', 'sys-level', 'sys-lines', 'sys-refresh'];
+const PREFS = ['calls-refresh', 'sms-refresh', 'pbx-refresh', 'sys-level', 'sys-lines', 'sys-refresh', 'status-refresh'];
 
 function readPrefs() {
   try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; }
@@ -680,7 +680,15 @@ function signalTitle(r) {
   return r.rssi != null ? `RSSI ${r.rssi} dBm` : '';
 }
 
-async function loadStatus() {
+let statusTimer = null;
+function setStatusRefresh() {
+  clearInterval(statusTimer);
+  const ms = parseInt(val('status-refresh'));
+  if (ms > 0) statusTimer = setInterval(() => { if (parseRoute().view === 'status') loadStatus(); }, ms);
+}
+
+// headerOnly: the dots in the header (kept fresh on every tab), not the Status tab itself.
+async function loadStatus(headerOnly) {
   let data;
   try {
     const res = await fetch('/api/status');
@@ -692,7 +700,7 @@ async function loadStatus() {
     `<div class="hstat" title="${esc(stateText(c) + (c.state === 'err' && c.lastError ? ': ' + c.lastError : ''))}"><span class="hdot ${c.state}"></span>${esc(c.title)}</div>`
   ).join('');
 
-  if (parseRoute().view !== 'status') return;
+  if (headerOnly || parseRoute().view !== 'status') return;
   document.getElementById('status-updated').textContent =
     t('web.status.updated', new Date().toLocaleTimeString(), ago(data.startedAt), data.version);
   document.getElementById('status-cards').innerHTML = data.components.map(componentCard).join('');
@@ -1488,8 +1496,9 @@ async function waitForRestart() {
 
   LISTS_VIEWS.forEach(setListRefresh);
   setSystemRefresh();
+  setStatusRefresh();
   loadStatus();
-  setInterval(loadStatus, 15000);
+  setInterval(() => loadStatus(true), 15000);
   // While calls are queued for transcription, refresh so the clock turns into text.
   if (full) setInterval(() => {
     const v = parseRoute().view;
