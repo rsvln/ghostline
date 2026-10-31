@@ -214,7 +214,7 @@ namespace ghostline
                             {
                                 g.id, managed = g.Managed, address = GatewayAddress(g),
                                 connected = HealthStatus.Find(g.id)?.Connected == true,
-                                cert = g.Managed && cert != null ? new { cert.subject, notAfter = cert.notAfter.ToString("yyyy-MM-dd"), cert.daysLeft } : null,
+                                cert = g.Managed && cert != null ? new { cert.subject, cert.issuer, notAfter = cert.notAfter.ToString("yyyy-MM-dd"), cert.daysLeft } : null,
                                 modems = (g.modems ?? new()).Select(m =>
                                 {
                                     var k = known.FirstOrDefault(x => x.gateway == g.id && x.device == m.name);
@@ -249,6 +249,7 @@ namespace ghostline
                             contactsError,
                             security = managed == null ? null : Program.RecentSecurityEvents.Take(50),
                             fail2ban = managed == null ? null : Program.ReadFail2ban(s),
+                            acme = managed == null ? null : Program.ReadAcme(s),
                         });
                     });
 
@@ -317,6 +318,12 @@ namespace ghostline
                         if (s?.ManagedGateway?.id != data.gateway) return Results.Ok(new { ok = true });
                         var applied = await Program.ApplyPbx();
                         return Results.Ok(new { ok = true, applyErrors = applied.errors, applied.output });
+                    });
+
+                    app.MapPost("/api/pbx/acme/renew", () =>
+                    {
+                        string error = Program.RequestRenew();
+                        return Results.Ok(new { ok = error == null, error });
                     });
 
                     app.MapPost("/api/pbx/fail2ban/unban", async (HttpRequest req) =>

@@ -17,6 +17,8 @@ What it installs:
   after 5 failures in 10 minutes, for 1 hour, on all ports. Once ghostline
   has saved its settings, `gl-fail2ban` replaces this jail with the rule from
   `gateways[].managed.fail2ban` ([managed-pbx.md](managed-pbx.md#security)).
+- acme.sh (pinned release) and `gl-acme`: Let's Encrypt for the SIP
+  certificate, idle until ghostline turns it on (see section 6).
 - The base configs (see below) and a systemd unit. Asterisk runs as the user
   `asterisk`, in the groups `dialout` and `audio` (modem ports and UAC sound
   cards).
@@ -61,6 +63,7 @@ is shown only when `manager.conf` is created.
 | `rtp.conf` | RTP ports 10000–20000 |
 | `quectel.conf`, `dongle.conf` | `[general]` / `[defaults]` and `#include` of the files ghostline writes; the modems are added in ghostline's settings |
 | `gl-fail2ban` (root; timer every 30 s, path unit on the request files) | builds the fail2ban jail from `<conf-dir>/fail2ban_ghostline.json`, handles unban requests (`fail2ban_request.json`), writes the bans to `<conf-dir>/fail2ban.json` |
+| `gl-acme` (root; timer every 30 s, path unit on the request files), `gl-acme-deploy`, acme.sh in `/root/.acme.sh` | Let's Encrypt for the SIP certificate when ghostline turns it on (`<conf-dir>/acme_ghostline.json`); reports to `<conf-dir>/acme.json`. acme.sh's own cron is removed: gl-acme renews |
 | `gl-usb-inventory` (timer, every 30 s) | writes `<conf-dir>/usb.json`, the USB modems ghostline offers; reads sysfs only |
 | `<conf-dir>/keys/sip.crt`, `sip.key` | self-signed certificate, so TLS starts |
 
@@ -179,11 +182,27 @@ asterisk -rx "dialplan show gl-in-gsm1"
 ## 6. Certificate
 
 The self-signed certificate is only there so that TLS starts; phones
-usually refuse it. Put a real one at the same paths, `keys/sip.crt` (with the
-chain) and `keys/sip.key`, readable by `asterisk`. For example, use acme.sh
-with a DNS challenge and a deploy hook that copies the files and runs
-`asterisk -rx "module reload res_pjsip.so"`. ghostline shows the expiry on
-the Status tab and warns 14 days ahead.
+usually refuse it. For a real one:
+
+- **Let's Encrypt from ghostline:** turn on `gateways[].managed.sip.tls.acme`
+  (form: the gateway → Managed PBX → Certificate) and forward port 80 from
+  outside to the Asterisk host's `http_port`. `gl-acme` issues the certificate
+  into `keys/sip.crt` / `keys/sip.key` and renews it; see
+  [managed-pbx.md](managed-pbx.md#settings).
+- **By hand** (for example acme.sh with a DNS challenge): put the certificate
+  with the chain at `keys/sip.crt` and the key at `keys/sip.key`, readable by
+  `asterisk`, and reload PJSIP after each renewal:
+  `gl-acme-deploy <cert> <key>` does that.
+
+ghostline shows the expiry on the Status tab and warns 14 days ahead.
+
+Check:
+
+```
+systemctl status gl-acme.timer gl-acme.path
+cat /etc/asterisk/ghostline/acme.json
+/root/.acme.sh/acme.sh --info -d <domain> --ecc
+```
 
 ## 7. Firewall and NAT
 

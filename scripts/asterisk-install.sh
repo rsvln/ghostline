@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Installs a plain Asterisk for ghostline's managed PBX mode (gateway pbx: managed)
 # on Debian 13: Asterisk 22 from source, chan_quectel and chan_dongle with the
-# ghostline patches, fail2ban on the Asterisk security log, and the base configs
-# that include the files ghostline generates.
+# ghostline patches, fail2ban on the Asterisk security log, acme.sh for the SIP
+# certificate, and the base configs that include the files ghostline generates.
 #
 # Run as root. Safe to run again: existing configs are never overwritten, and
 # Asterisk is rebuilt only when the version differs (or with --rebuild).
@@ -15,6 +15,7 @@ QUECTEL_REPO=https://github.com/IchthysMaranatha/asterisk-chan-quectel.git
 QUECTEL_COMMIT=3d45c7f
 DONGLE_REPO=https://github.com/wdoekes/asterisk-chan-dongle.git
 DONGLE_COMMIT=7db8e75
+ACME_VERSION=3.1.6
 GHOSTLINE_RAW=https://raw.githubusercontent.com/rsvln/ghostline
 
 AMI_PERMIT=
@@ -122,7 +123,7 @@ apt-get install -y -q --no-install-recommends \
   build-essential pkg-config autoconf automake libtool git curl ca-certificates \
   bzip2 patch openssl libedit-dev libjansson-dev libxml2-dev uuid-dev \
   libsqlite3-dev libssl-dev libsrtp2-dev libasound2-dev libncurses-dev \
-  sqlite3 fail2ban nftables python3-systemd logrotate
+  sqlite3 fail2ban nftables python3-systemd logrotate socat
 
 log "User"
 if ! id asterisk >/dev/null 2>&1; then
@@ -386,7 +387,7 @@ log "TLS certificate"
 if [ -e keys/sip.crt ]; then
   echo "  keep $CONF_DIR/keys/sip.crt (exists)"
 else
-  # Self-signed, so TLS starts; replace with a real one (pbx.tls.cert/key).
+  # Self-signed, so TLS starts; Let's Encrypt replaces it (gateways[].managed.sip.tls.acme).
   openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=$SIP_NAME" \
     -keyout keys/sip.key -out keys/sip.crt 2>/dev/null
   chown asterisk:asterisk keys/sip.key keys/sip.crt
@@ -527,6 +528,56 @@ WantedBy=paths.target
 EOF
 systemctl daemon-reload
 systemctl enable --now gl-fail2ban.timer gl-fail2ban.path >/dev/null 2>&1
+
+log "Let's Encrypt (acme.sh)"
+# Idle until ghostline's settings turn it on (gateways[].managed.sip.tls.acme). Then gl-acme issues the
+# certificate into conf_dir (HTTP-01, acme.sh standalone) and renews it; acme.sh's own cron is not used,
+# so a failed renewal reaches ghostline.
+if [ -x /root/.acme.sh/acme.sh ]; then
+  echo "  keep /root/.acme.sh (exists)"
+else
+  curl -fsSL "https://github.com/acmesh-official/acme.sh/archive/refs/tags/v$ACME_VERSION.tar.gz" | tar -xz -C "$SRC"
+  (cd "$SRC/acme.sh-$ACME_VERSION" && ./acme.sh --install --home /root/.acme.sh --nocron --noprofile >/dev/null)
+  echo "  installed acme.sh $ACME_VERSION"
+fi
+/root/.acme.sh/acme.sh --home /root/.acme.sh --uninstall-cronjob >/dev/null 2>&1 || true
+install -m 755 "$(script_file gl-acme.py)" /usr/local/bin/gl-acme
+install -m 755 "$(script_file gl-acme-deploy.sh)" /usr/local/bin/gl-acme-deploy
+cat >/etc/systemd/system/gl-acme.service <<EOF
+[Unit]
+Description=Let's Encrypt certificate for ghostline's SIP
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gl-acme $CONF_DIR
+EOF
+cat >/etc/systemd/system/gl-acme.timer <<'EOF'
+[Unit]
+Description=Let's Encrypt status for ghostline, every 30 s
+
+[Timer]
+OnBootSec=40
+OnUnitActiveSec=30
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target
+EOF
+cat >/etc/systemd/system/gl-acme.path <<EOF
+[Unit]
+Description=ghostline certificate requests
+
+[Path]
+PathChanged=$CONF_DIR/acme_ghostline.json
+PathChanged=$CONF_DIR/acme_request.json
+Unit=gl-acme.service
+
+[Install]
+WantedBy=paths.target
+EOF
+systemctl daemon-reload
+systemctl enable --now gl-acme.timer gl-acme.path >/dev/null 2>&1
 
 log "Check"
 for i in $(seq 1 20); do

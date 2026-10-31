@@ -70,7 +70,11 @@ lines:
 #         conf_dir: /srv/asterisk-conf     # shared with Asterisk
 #         asterisk_dir: /etc/asterisk/ghostline
 #         sip:
-#           tls: { cert: keys/sip.crt, key: keys/sip.key, port: 5061 }
+#           tls:
+#             cert: keys/sip.crt
+#             key: keys/sip.key
+#             port: 5061
+#             acme: { enabled: false, domain: "", http_port: 80 }   # Let's Encrypt, see docs/managed-pbx.md
 #           external_address: sip.example.org
 #           local_nets: [10.0.0.0/8]
 #       modems:

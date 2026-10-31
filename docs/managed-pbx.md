@@ -109,6 +109,10 @@ gateways:
           cert: keys/sip.crt              # relative: inside conf_dir
           key: keys/sip.key
           port: 5061
+          acme:                           # Let's Encrypt, see below
+            enabled: true
+            domain: ""                    # empty: external_address
+            http_port: 80
         udp_port: 0                       # 0: no plain UDP (LAN phones without TLS)
         external_address: sip.example.org # public name or IP for NAT
         local_nets: [192.168.0.0/16]
@@ -134,6 +138,22 @@ lines:
 - **Certificate:** a relative path is inside `conf_dir`. ghostline can then
   read it, show its expiry and warn 14 days ahead. An absolute path is used
   as is on the Asterisk side and is not checked.
+- **Let's Encrypt (`sip.tls.acme`):** `gl-acme` on the Asterisk host gets the
+  certificate with acme.sh (HTTP-01, standalone) into `cert` / `key` and
+  renews it when acme.sh says it is due (about 30 days before expiry).
+  - Port 80 from outside must reach the Asterisk host on `http_port`.
+  - The domain is `domain`, or `sip.external_address` when that is a name.
+  - Needs relative `cert` / `key` (inside `conf_dir`).
+  - ghostline writes `<conf_dir>/acme_ghostline.json`; the host reports in
+    `<conf_dir>/acme.json`. A failed renewal is sent to the common Telegram
+    chats and ntfy topic; after a failure the host waits 6 hours before the
+    next try (Let's Encrypt limits failed validations).
+  - Status tab, "SIP certificate": the issuer, the expiry, the next renewal,
+    the last error and "Renew now" (`<conf_dir>/acme_request.json`).
+  - A certificate acme.sh already has for the domain is taken over, not
+    issued again.
+  - With a DNS challenge set up by hand on the host, leave `acme` off; the
+    expiry is still shown and warned about.
 - **Secret:** 24 letters and digits, generated on save (or by "New secret")
   and shown once.
   It is not in the form, and the preview masks it.

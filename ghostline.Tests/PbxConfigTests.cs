@@ -110,6 +110,26 @@ namespace ghostline.Tests
         }
 
         [Fact]
+        public void AcmeTakesTheExternalNameAndChecksItsValues()
+        {
+            var s = Sample();
+            var tls = s.ManagedGateway.managed.sip.tls;
+            tls.acme = new PbxAcme { enabled = true, httpPort = 8081 };
+            Assert.Empty(PbxConfig.Validate(s));
+            var json = System.Text.Json.JsonDocument.Parse(PbxConfig.Generate(s)[PbxConfig.AcmeFile]).RootElement;
+            Assert.Equal("sip.example.org", json.GetProperty("domain").GetString());
+            Assert.True(json.GetProperty("enabled").GetBoolean());
+
+            tls.acme.domain = "bad domain; rm -rf /";
+            tls.acme.httpPort = 0;
+            tls.cert = "/etc/ssl/sip.crt";
+            var errors = PbxConfig.Validate(s);
+            Assert.Contains(errors, e => e.Contains("acme.domain"));
+            Assert.Contains(errors, e => e.Contains("acme.http_port"));
+            Assert.Contains(errors, e => e.Contains("inside conf_dir"));
+        }
+
+        [Fact]
         public void FreepbxModeIsNotGenerated()
         {
             var s = Sample();

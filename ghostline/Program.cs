@@ -61,7 +61,7 @@ namespace ghostline
                 SettingsFile.Migrate(fs);
                 settings = SettingsFile.Parse(System.IO.File.ReadAllText(fs));
                 SysLog.Configure(settings.logger?.level);
-                SyncFail2banFile(settings);
+                SyncHostFiles(settings);
             }
             catch (Exception ex)
             {

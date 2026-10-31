@@ -287,7 +287,7 @@ into `system` (old file: `ghostline.yaml.bak-v3`).
 | `user` / `password` | AMI credentials (`asterisk`, `yeastar`) or HTTP credentials (`goip`) |
 | `monitor` | `asterisk`: poll the modems' registration, operator, network type and signal; default `true`. The AMI user needs `reporting` in `write`, see [docs/quectel-setup.md](docs/quectel-setup.md#4-line-monitoring) |
 | `pbx` | `asterisk`: `freepbx` (default): FreePBX owns the PBX, ghostline only connects. `managed`: ghostline writes the PJSIP, dialplan and modem files of a plain Asterisk, see [docs/managed-pbx.md](docs/managed-pbx.md); one gateway at most |
-| `managed.*` | `pbx: managed` only: `conf_dir`, `asterisk_dir`, `recordings_path`, `sip.tls`, `sip.udp_port`, `sip.external_address`, `sip.local_nets`, see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
+| `managed.*` | `pbx: managed` only: `conf_dir`, `asterisk_dir`, `recordings_path`, `sip.tls` (with `sip.tls.acme`: Let's Encrypt), `sip.udp_port`, `sip.external_address`, `sip.local_nets`, `fail2ban`, see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
 | `modems[]` | `asterisk`: its modems. `name` (device name in quectel.conf / dongle.conf) and `driver` (`quectel` / `dongle`); with `pbx: managed` also the ports `data`, `audio` or `alsadev`, and `noqpcmv` |
 
 `lines[]` (SIM lines):

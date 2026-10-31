@@ -148,6 +148,17 @@ namespace ghostline
         public string cert { get; set; }
         public string key { get; set; }
         public int port { get; set; } = 5061;
+        public PbxAcme acme { get; set; } = new();
+    }
+
+    // Let's Encrypt on the Asterisk host (HTTP-01, acme.sh standalone): gl-acme there issues the
+    // certificate into cert/key from these values (<conf_dir>/acme_ghostline.json) and reports back
+    // (acme.json). acme.sh renews it by itself.
+    public class PbxAcme
+    {
+        public bool enabled { get; set; }
+        public string domain { get; set; }                  // empty: sip.external_address when it is a name
+        public int httpPort { get; set; } = 80;             // acme.sh listens here; outside port 80 forwarded to it
     }
 
     public class LineClients

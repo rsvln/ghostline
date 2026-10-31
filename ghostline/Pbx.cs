@@ -419,23 +419,27 @@ namespace ghostline
         internal record Fail2banStatus(DateTime at, List<string> errors, int? failed_now, int? total_failed, int? total_banned,
                                        int? max_retry, int? find_seconds, int? ban_seconds, bool? ban_growth, List<Fail2banBan> banned);
 
-        // On start: the fail2ban settings reach the host without waiting for a save (Asterisk is not
-        // involved, so this needs no AMI and touches no other file).
-        internal static void SyncFail2banFile(Settings s)
+        // On start: the settings for the host helpers (gl-fail2ban, gl-acme) reach the host without
+        // waiting for a save (Asterisk is not involved, so this needs no AMI and touches no other file).
+        internal static void SyncHostFiles(Settings s)
         {
-            try
+            var gw = s.ManagedGateway;
+            if (gw == null || !Directory.Exists(gw.managed?.confDir)) return;
+            var errors = PbxConfig.Validate(s);
+            foreach (var (name, topic) in new[] { (PbxConfig.Fail2banFile, "fail2ban"), (PbxConfig.AcmeFile, "acme") })
             {
-                var gw = s.ManagedGateway;
-                if (gw == null || PbxConfig.Validate(s).Any(e => e.Contains("fail2ban"))) return;
-                string path = Path.Combine(gw.managed.confDir ?? "", PbxConfig.Fail2banFile);
-                if (!Directory.Exists(gw.managed.confDir)) return;
-                string text = PbxConfig.Generate(s)[PbxConfig.Fail2banFile];
-                if (File.Exists(path) && File.ReadAllText(path) == text) return;
-                File.WriteAllText(path + ".tmp", text);
-                File.Move(path + ".tmp", path, overwrite: true);
-                SysLog.Info("pbx", "wrote " + PbxConfig.Fail2banFile);
+                try
+                {
+                    if (errors.Any(e => e.Contains(topic))) continue;
+                    string path = Path.Combine(gw.managed.confDir, name);
+                    string text = PbxConfig.Generate(s)[name];
+                    if (File.Exists(path) && File.ReadAllText(path) == text) continue;
+                    File.WriteAllText(path + ".tmp", text);
+                    File.Move(path + ".tmp", path, overwrite: true);
+                    SysLog.Info("pbx", "wrote " + name);
+                }
+                catch (Exception ex) { SysLog.Warn("pbx", name + " not written: " + ex.Message); }
             }
-            catch (Exception ex) { SysLog.Warn("pbx", "fail2ban settings not written: " + ex.Message); }
         }
 
         // null: no report from the host (gl-fail2ban not installed, or the shared directory is not there).
@@ -476,6 +480,38 @@ namespace ghostline
             return null;
         }
 
+        // ---- Let's Encrypt on the Asterisk host (acme.json from scripts/gl-acme.py) -----------------------
+
+        internal record AcmeStatus(DateTime at, bool enabled, string domain, DateTime? last_try, DateTime? last_ok,
+                                   DateTime? next_renew, string error, DateTime? error_at);
+
+        // null: no report from the host (gl-acme not installed, or the shared directory is not there).
+        internal static AcmeStatus ReadAcme(Settings s)
+        {
+            string confDir = s?.ManagedGateway?.managed?.confDir;
+            if (string.IsNullOrEmpty(confDir)) return null;
+            try
+            {
+                string path = Path.Combine(confDir, "acme.json");
+                return File.Exists(path) ? System.Text.Json.JsonSerializer.Deserialize<AcmeStatus>(File.ReadAllText(path)) : null;
+            }
+            catch { return null; }
+        }
+
+        // Renew now: like unban, a request file for the host.
+        internal static string RequestRenew()
+        {
+            var s = ReadSettingsFile();
+            if (s.ManagedGateway?.managed?.sip?.tls?.acme?.enabled != true) return "sip.tls.acme is off";
+            string confDir = s.ManagedGateway.managed.confDir;
+            if (string.IsNullOrEmpty(confDir) || !Directory.Exists(confDir)) return "no managed.conf_dir";
+            string path = Path.Combine(confDir, "acme_request.json");
+            File.WriteAllText(path + ".tmp", "{\"renew\": true}\n");
+            File.Move(path + ".tmp", path, overwrite: true);
+            SysLog.Info("pbx", "acme: renewal requested");
+            return null;
+        }
+
         // To the common Telegram chats and the common ntfy topic (not a line's): PBX-wide events.
         private static void EnqueueAdminAlert(string title, string text)
         {
@@ -488,7 +524,13 @@ namespace ghostline
 
         // ---- TLS certificate -----------------------------------------------------------------------------
 
-        internal record CertInfo(string subject, DateTime notAfter, int daysLeft);
+        internal record CertInfo(string subject, string issuer, DateTime notAfter, int daysLeft);
+
+        // "self-signed", else the issuer's organization (Let's Encrypt), else its name.
+        static string CertIssuer(X509Certificate2 x) =>
+            x.Issuer == x.Subject ? "self-signed"
+            : System.Text.RegularExpressions.Regex.Match(x.Issuer, @"(?:^|, )O=([^,]+)") is { Success: true } m ? m.Groups[1].Value
+            : x.GetNameInfo(X509NameType.SimpleName, true);
 
         // Only a certificate inside conf_dir can be read here; null otherwise.
         internal static CertInfo PbxCertificate(Settings s)
@@ -501,35 +543,49 @@ namespace ghostline
             try
             {
                 var x = X509Certificate2.CreateFromPemFile(path);
-                return new(x.Subject, x.NotAfter, (int)Math.Floor((x.NotAfter - DateTime.Now).TotalDays));
+                return new(x.Subject, CertIssuer(x), x.NotAfter, (int)Math.Floor((x.NotAfter - DateTime.Now).TotalDays));
             }
             catch
             {
                 try
                 {
                     var x = X509CertificateLoader.LoadCertificateFromFile(path);
-                    return new(x.Subject, x.NotAfter, (int)Math.Floor((x.NotAfter - DateTime.Now).TotalDays));
+                    return new(x.Subject, CertIssuer(x), x.NotAfter, (int)Math.Floor((x.NotAfter - DateTime.Now).TotalDays));
                 }
                 catch { return null; }
             }
         }
 
-        // Once a day: a warning when the certificate expires within 14 days.
+        // Once a day: a warning when the certificate expires within 14 days. Every 5 minutes: a message
+        // when gl-acme reports a new failure (once per failure).
         private static async Task PbxCertWatchLoop()
         {
             await Task.Delay(TimeSpan.FromMinutes(1));
+            DateTime lastExpiryCheck = DateTime.MinValue;
+            DateTime? alertedError = ReadAcme(settings)?.error_at;
             while (true)
             {
                 try
                 {
-                    if (PbxCertificate(ReadSettingsFile()) is { daysLeft: <= 14 } c)
+                    var s = ReadSettingsFile();
+                    if (DateTime.Now - lastExpiryCheck > TimeSpan.FromDays(1))
                     {
-                        SysLog.Warn("pbx", $"the TLS certificate expires in {c.daysLeft} days ({c.notAfter:yyyy-MM-dd})");
-                        EnqueueAdminAlert(L10n.Tg.T("tg.pbx.cert.title"), L10n.Tg.T("tg.pbx.cert.text", c.daysLeft, c.notAfter.ToString("yyyy-MM-dd")));
+                        lastExpiryCheck = DateTime.Now;
+                        if (PbxCertificate(s) is { daysLeft: <= 14 } c)
+                        {
+                            SysLog.Warn("pbx", $"the TLS certificate expires in {c.daysLeft} days ({c.notAfter:yyyy-MM-dd})");
+                            EnqueueAdminAlert(L10n.Tg.T("tg.pbx.cert.title"), L10n.Tg.T("tg.pbx.cert.text", c.daysLeft, c.notAfter.ToString("yyyy-MM-dd")));
+                        }
+                    }
+                    if (ReadAcme(s) is { error.Length: > 0, error_at: { } at } a && at != alertedError)
+                    {
+                        alertedError = at;
+                        SysLog.Warn("pbx", $"acme: {a.domain}: {a.error}");
+                        EnqueueAdminAlert(L10n.Tg.T("tg.pbx.acme.title"), L10n.Tg.T("tg.pbx.acme.failed", a.domain, a.error));
                     }
                 }
                 catch { }
-                await Task.Delay(TimeSpan.FromDays(1));
+                await Task.Delay(TimeSpan.FromMinutes(5));
             }
         }
     }

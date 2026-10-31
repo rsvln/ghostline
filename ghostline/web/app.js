@@ -803,9 +803,34 @@ async function loadStatusPbx() {
     html += `<div class="section"><h3>${esc(t('web.pbx.security'))}</h3>
       <table class="stat-table">${th(['web.pbx.sec.time', 'web.pbx.sec.address', 'web.pbx.sec.account', 'web.pbx.sec.event'])}
       <tbody>${rows || `<tr><td colspan="4" class="muted">${esc(t('web.pbx.sec.none'))}</td></tr>`}</tbody></table></div>`;
+    html += acmeSection(d.gateways.find(g => g.managed)?.cert, d.acme);
     html += fail2banSection(d.fail2ban);
   }
   host.innerHTML = html;
+}
+
+// The SIP certificate and its Let's Encrypt renewal, as gl-acme on the Asterisk host reports it.
+function acmeSection(cert, a) {
+  const head = `<div class="section"><h3>${esc(t('web.acme.title'))}</h3>`;
+  const info = cert ? t('web.acme.cert', cert.subject.replace(/^CN=/, ''), cert.issuer || '', cert.notAfter, t('web.pbx.cert.days', cert.daysLeft))
+    : t('web.acme.no_cert');
+  let html = head + `<p>${esc(info)}</p>`;
+  if (!a) return html + `<p class="muted">${esc(t('web.acme.no_report'))}</p></div>`;
+  if (!a.enabled) return html + `<p class="muted">${esc(t('web.acme.off'))} · ${esc(t('web.f2b.reported', ago(a.at)))}</p></div>`;
+  const parts = [t('web.acme.auto', a.domain)];
+  if (a.next_renew) parts.push(t('web.acme.next', fmtIso(a.next_renew)));
+  if (a.last_ok) parts.push(t('web.acme.last_ok', fmtIso(a.last_ok)));
+  parts.push(t('web.f2b.reported', ago(a.at)));
+  html += `<p class="muted">${esc(parts.join(' · '))}</p>`;
+  if (a.error) html += `<p class="pbx-err">${esc(t('web.acme.error', fmtIso(a.error_at)))}: ${esc(a.error)}</p>`;
+  return html + `<button class="btn" onclick="renewCert()">${esc(t('web.acme.renew'))}</button></div>`;
+}
+
+async function renewCert() {
+  if (!confirm(t('web.acme.renew_confirm'))) return;
+  const d = await (await fetch('/api/pbx/acme/renew', { method: 'POST' })).json();
+  showToast(d.ok ? t('web.acme.renew_sent') : t('web.error', d.error), d.ok ? 'ok' : 'err');
+  if (d.ok) setTimeout(loadStatus, 30000);
 }
 
 // fail2ban on the Asterisk host, as gl-fail2ban there reports it (every 30 s).
@@ -1116,11 +1141,15 @@ function itemNode(listId, key, fields, isNew, clients, saved) {
   if (listId === 'gateways') {
     const managed = fields.filter(f => f.path.includes('].managed.'));
     const fail2ban = managed.filter(f => f.path.includes('].managed.fail2ban.'));
+    const acme = managed.filter(f => f.path.includes('].managed.sip.tls.acme.'));
     item.fields = fields.filter(f => !managed.includes(f));
     item.children = [
-      { id: id + '/managed', title: t('web.config.group.managed'), fields: managed.filter(f => !fail2ban.includes(f)),
+      { id: id + '/managed', title: t('web.config.group.managed'), fields: managed.filter(f => !fail2ban.includes(f) && !acme.includes(f)),
         hintKey: 'web.config.hint.managed', visible: () => gatewayState(key)?.managed,
-        children: [{ id: id + '/fail2ban', title: t('web.config.group.fail2ban'), fields: fail2ban, hintKey: 'web.config.hint.fail2ban' }] },
+        children: [
+          { id: id + '/acme', title: t('web.config.group.acme'), fields: acme, hintKey: 'web.config.hint.acme' },
+          { id: id + '/fail2ban', title: t('web.config.group.fail2ban'), fields: fail2ban, hintKey: 'web.config.hint.fail2ban' },
+        ] },
       { id: id + '/modems', title: t('web.config.group.modems'), fields: [],
         hintKey: saved?.managed ? 'web.config.hint.modems_managed' : 'web.config.hint.modems',
         modems: { gateway: key, managed: !!saved?.managed, list: saved?.modems || [] },
