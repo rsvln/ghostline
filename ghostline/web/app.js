@@ -216,6 +216,13 @@ const ICON_DOWNLOAD = svg('<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d=
 const ICON_TEXT = svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/>');
 const ICON_PENDING = svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>');
 const ICON_ERROR = svg('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.5h.01"/>');
+// A call is a handset (SMS rows have plain arrows), so the two kinds differ at a glance on the PBX tab.
+const PHONE = '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>';
+const ICON_CALL = {
+  in: svg(PHONE + '<path d="M16 2v6h6"/><path d="M22 2l-6 6"/>'),
+  out: svg(PHONE + '<path d="M22 8V2h-6"/><path d="M16 8l6-6"/>'),
+  missed: svg(PHONE + '<path d="M16 2l6 6"/><path d="M22 2l-6 6"/>'),
+};
 const ICON_COPY = svg('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>');
 
 // The web interface usually runs over plain http, where navigator.clipboard is missing:
@@ -382,7 +389,7 @@ function formatSms(r) {
       <span class="call-dir ${esc(r.direction)}" title="${esc(t('web.sms.kind.' + r.direction))}">${r.direction === 'in' ? '↙' : '↗'}</span>
       <span class="call-line">${esc(r.channel)}</span>
       <span class="call-who" title="${esc(r.peerName || '')} ${esc(r.peer)}">${who}</span>
-      <span class="sms-preview">${highlight((r.text || '').replace(/\s+/g, ' '), q)}</span>
+      <span class="row-preview">${highlight((r.text || '').replace(/\s+/g, ' '), q)}</span>
       <span class="call-actions">${origin}${copy}</span>
     </div>
     <div class="call-text" hidden></div>
@@ -400,7 +407,7 @@ function toggleSms(id, forceOpen) {
 
 function formatCall(r) {
   const dirCls = r.missed ? 'missed' : r.direction;
-  const dirIcon = r.missed ? '✕' : (r.direction === 'in' ? '↙' : '↗');
+  const dirIcon = ICON_CALL[r.missed ? 'missed' : r.direction] || ICON_CALL.in;
   const dirTitle = t(r.missed ? (r.direction === 'in' ? 'web.calls.kind.missed' : 'web.calls.kind.no_answer')
                               : (r.direction === 'in' ? 'web.calls.kind.in' : 'web.calls.kind.out'));
   const who = r.peerName
@@ -420,6 +427,7 @@ function formatCall(r) {
       <span class="call-dir ${dirCls}" title="${esc(dirTitle)}">${dirIcon}</span>
       <span class="call-line">${esc(r.channel)}</span>
       <span class="call-who" title="${esc(r.peerName || '')} ${esc(r.peer)}">${who}</span>
+      <span class="row-preview">${callPreview(r)}</span>
       <span class="call-dur">${r.missed ? '' : fmtDur(r.billsec)}</span>
       <span class="call-actions">
         <button class="icon-btn ${rec ? '' : 'off'}" title="${esc(t('web.calls.play'))}" onclick="playCall(${r.id})">${ICON_PLAY}</button>
@@ -431,6 +439,15 @@ function formatCall(r) {
     <div class="call-player"></div>
     <div class="call-text" hidden></div>
   </div>`;
+}
+
+// The transcript in one line for the collapsed row: the turns apart by three spaces.
+function callPreview(r) {
+  if (r.trState !== 'done') return '';
+  let segs = [];
+  try { segs = JSON.parse(r.trSegments || '[]'); } catch { }
+  const text = segs.length ? segs.map(s => s.t.replace(/\s+/g, ' ').trim()).join('   ') : (r.trText || '').replace(/\s+/g, ' ');
+  return highlight(text, parseRoute().q.q);
 }
 
 // A click on the row (not on the buttons) opens or closes the transcript.

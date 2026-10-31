@@ -135,11 +135,12 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .call:hover { background: var(--bg2); }
 .call-main {
   display: grid;
-  grid-template-columns: 96px 22px 60px minmax(160px, 1fr) 56px auto;
+  grid-template-columns: 96px 22px 60px minmax(160px, 280px) minmax(0, 1fr) 56px auto;
   gap: 0 12px; align-items: center; cursor: pointer;
 }
 .call-ts { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 .call-dir { font-size: 15px; text-align: center; }
+.call-dir svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
 .call-dir.in { color: var(--green); }
 .call-dir.out { color: var(--accent); }
 .call-dir.missed { color: var(--red); }
@@ -186,8 +187,8 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 
 /* ---- SMS: the call grid, the text in place of duration and buttons ---- */
 .sms-main { grid-template-columns: 96px 22px 60px minmax(160px, 280px) minmax(0, 1fr) auto; }
-.sms-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.sms-preview mark { background: var(--yellow); color: #000; border-radius: 2px; }
+.row-preview { overflow: hidden; text-overflow: ellipsis; white-space: pre; color: var(--muted); }
+.row-preview mark { background: var(--yellow); color: #000; border-radius: 2px; }
 .sms-origin { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; align-self: center; }
 
 /* ---- system log ---- */
@@ -357,7 +358,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   .list { padding: 4px 8px 24px; }
   .call-main {
     grid-template-columns: 22px 1fr auto;
-    grid-template-areas: "dir who dur" "dir meta actions";
+    grid-template-areas: "dir who dur" "dir text text" "dir meta actions";
     gap: 2px 10px;
   }
   .call-dir { grid-area: dir; align-self: start; }
@@ -368,7 +369,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   .call-actions { grid-area: actions; }
   .call-ts::after { content: attr(data-line); margin-left: 8px; }
   .sms-main { grid-template-columns: 22px 1fr auto; grid-template-areas: "dir who origin" "dir text text" "dir meta meta"; }
-  .sms-preview { grid-area: text; }
+  .row-preview { grid-area: text; }
   .sms-main .call-actions { grid-area: origin; }
   .settings-tree { flex-direction: column; }
   .tree-nav { width: 100%; max-height: 160px; border-right: 0; border-bottom: 1px solid var(--border); }
