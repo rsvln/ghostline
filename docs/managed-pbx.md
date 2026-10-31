@@ -166,4 +166,4 @@ lines:
 This is the layout the call journal reads from FreePBX too, so the journal,
 the transcription and the notifications work unchanged. For CDR without
 MySQL see [cdr-sqlite.md](cdr-sqlite.md). Recordings can be read from a
-shared directory (`calls.recordings_dir`).
+shared directory (`system.calls.recordings_dir`).

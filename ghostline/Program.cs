@@ -58,7 +58,7 @@ namespace ghostline
             try
             {
                 SettingsFile.MigrateFromJson(fs);
-                SettingsFile.MigrateToV2(fs);
+                SettingsFile.Migrate(fs);
                 settings = SettingsFile.Parse(System.IO.File.ReadAllText(fs));
                 SysLog.Configure(settings.logger?.level);
             }
@@ -159,8 +159,8 @@ namespace ghostline
             {
                 if (settings.calls?.CdrConfigured != true || !settings.calls.RecordingsConfigured)
                 {
-                    SysLog.Error("config", "mode \"full\" needs calls.cdr_db or calls.cdr_sqlite, and calls.recordings_url " +
-                                           "or calls.recordings_dir; calls are disabled");
+                    SysLog.Error("config", "mode \"full\" needs system.calls.cdr_db or cdr_sqlite, and recordings_url " +
+                                           "or recordings_dir; calls are disabled");
                 }
                 else
                 {

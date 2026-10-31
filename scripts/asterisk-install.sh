@@ -280,7 +280,7 @@ congestion=yes
 EOF
 
 put_conf cdr_sqlite3_custom.conf <<EOF
-; The call journal of ghostline (calls.cdr_sqlite). See docs/cdr-sqlite.md.
+; The call journal of ghostline (system.calls.cdr_sqlite). See docs/cdr-sqlite.md.
 [$CDR_DIR/cdr.db]
 table => cdr
 columns => calldate, uniqueid, linkedid, src, dst, did, dcontext, channel, dstchannel, lastapp, disposition, duration, billsec, recordingfile
@@ -513,8 +513,8 @@ fi
 cat <<EOF
 
 Next (docs/asterisk-setup.md):
-  - share $CONF_DIR with ghostline (pbx.conf_dir) and $CDR_DIR (calls.cdr_sqlite),
-    and $REC_DIR for the recordings (calls.recordings_dir);
+  - share $CONF_DIR with ghostline (gateways[].managed.conf_dir) and $CDR_DIR (system.calls.cdr_sqlite),
+    and $REC_DIR for the recordings (system.calls.recordings_dir);
   - pass the modems' USB ports into this container if it is one;
   - in ghostline's settings set the gateway's PBX to managed; add modems, lines and phones there.
 EOF

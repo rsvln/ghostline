@@ -954,7 +954,7 @@ function settingsTree(data) {
   const clientFields = { telegram: byId.telegram.fields, ntfy: byId.ntfy.fields };
   // System: mode and languages, with the settings of ghostline itself under it.
   const calls = Object.assign(node('calls'), { children: [node('cdr_db'), node('transcribe')] });
-  const system = Object.assign(node('general'),
+  const system = Object.assign(node('system'),
     { children: [node('web'), node('logger'), node('monitor'), calls, node('goip')] });
   return [system, clientsNode('clients', '', data.clients || [], clientFields), list('gateways'), list('lines')];
 }
@@ -1132,10 +1132,10 @@ function captureFields() {
 function renderSettings(selected) {
   const host = document.getElementById('config-form');
   refreshModemOptions();
-  selected = selected || parseRoute().q.s || 'general';
+  selected = selected || parseRoute().q.s || 'system';
   let shown = false;
   walkShown(n => { if (n.id === selected) shown = true; });
-  if (!shown) selected = 'general';
+  if (!shown) selected = 'system';
   host.innerHTML = `<nav class="tree-nav">${renderTreeNav(formTree, selected, 0)}</nav><div class="tree-main">${renderTreePanes()}</div>`;
   host.querySelectorAll('.tree-item[data-node]').forEach(btn => btn.onclick = () => showConfigNode(btn.dataset.node));
   host.querySelectorAll('[data-add]').forEach(btn => btn.onclick = startAdd);
@@ -1170,7 +1170,7 @@ function showConfigNode(id, fromRoute) {
   const host = document.getElementById('config-form');
   host.querySelectorAll('.tree-item[data-node]').forEach(el => el.classList.toggle('on', el.dataset.node === id));
   host.querySelectorAll('.tree-pane').forEach(el => el.classList.toggle('on', el.dataset.pane === id));
-  if (!fromRoute) history.replaceState(history.state, '', buildUrl('/config', { s: id === 'general' ? '' : id }));
+  if (!fromRoute) history.replaceState(history.state, '', buildUrl('/config', { s: id === 'system' ? '' : id }));
 }
 
 function startAdd(ev) {

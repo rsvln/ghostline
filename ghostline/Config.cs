@@ -203,22 +203,49 @@ namespace ghostline
         public string prompt { get; set; }
     }
 
-    // Settings sections, as in frte2tg: clients, web, logger, ...
-    public class Settings
+    // ghostline itself: what it does, its languages, web interface, log, line monitoring, calls and
+    // the GoIP receiver. The "system" section of the file.
+    public class SystemSettings
     {
         // "sms": SMS only, as before; "full": also calls (journal, recordings,
         // transcription, notifications).
         public string mode { get; set; } = "sms";
         public LocaleSettings locale { get; set; } = new();
-        // Notification channels, both optional: Telegram and ntfy.
-        public ClientsSettings clients { get; set; } = new();
         public WebSettings web { get; set; } = new();
         public LoggerSettings logger { get; set; } = new();
-        public List<Gateway> gateways { get; set; }
-        public List<Channel> lines { get; set; }
+        public MonitorSettings monitor { get; set; } = new();
         public CallsSettings calls { get; set; }
         public GoipSettings goip { get; set; } = new();
-        public MonitorSettings monitor { get; set; } = new();
+    }
+
+    // Settings file sections: system (ghostline itself), clients, gateways, lines.
+    public class Settings
+    {
+        public SystemSettings system { get; set; } = new();
+        // Notification channels, both optional: Telegram and ntfy.
+        public ClientsSettings clients { get; set; } = new();
+        public List<Gateway> gateways { get; set; }
+        public List<Channel> lines { get; set; }
+
+        // The system settings by their old names, for the code.
+        [YamlIgnore] public string mode { get => system.mode; set => system.mode = value; }
+        [YamlIgnore] public LocaleSettings locale { get => system.locale; set => system.locale = value; }
+        [YamlIgnore] public WebSettings web { get => system.web; set => system.web = value; }
+        [YamlIgnore] public LoggerSettings logger { get => system.logger; set => system.logger = value; }
+        [YamlIgnore] public MonitorSettings monitor { get => system.monitor; set => system.monitor = value; }
+        [YamlIgnore] public CallsSettings calls { get => system.calls; set => system.calls = value; }
+        [YamlIgnore] public GoipSettings goip { get => system.goip; set => system.goip = value; }
+
+        // Before 2026-11-01 these were top-level sections; now they are in "system". Moved after parsing
+        // (SettingsFile.Normalize): a "system" section further down the file would replace them otherwise.
+        [YamlIgnore] internal LegacySystem LegacySystemValue { get; } = new();
+        [YamlMember(Alias = "mode")] public string legacyMode { get => null; set => LegacySystemValue.mode = value; }
+        [YamlMember(Alias = "locale")] public LocaleSettings legacyLocale { get => null; set => LegacySystemValue.locale = value; }
+        [YamlMember(Alias = "web")] public WebSettings legacyWeb { get => null; set => LegacySystemValue.web = value; }
+        [YamlMember(Alias = "logger")] public LoggerSettings legacyLogger { get => null; set => LegacySystemValue.logger = value; }
+        [YamlMember(Alias = "monitor")] public MonitorSettings legacyMonitor { get => null; set => LegacySystemValue.monitor = value; }
+        [YamlMember(Alias = "calls")] public CallsSettings legacyCalls { get => null; set => LegacySystemValue.calls = value; }
+        [YamlMember(Alias = "goip")] public GoipSettings legacyGoip { get => null; set => LegacySystemValue.goip = value; }
 
         // Before 2026-10-30: "channels" (now "lines") and a top-level "pbx" section (now in its gateway).
         // Converted after parsing (SettingsFile.Normalize).
@@ -265,6 +292,34 @@ namespace ghostline
 
         [YamlIgnore]
         public bool FullMode => string.Equals(mode, "full", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // The top-level sections that moved into "system"; null: not in the file.
+    internal class LegacySystem
+    {
+        public string mode;
+        public LocaleSettings locale;
+        public WebSettings web;
+        public LoggerSettings logger;
+        public MonitorSettings monitor;
+        public CallsSettings calls;
+        public GoipSettings goip;
+
+        // In the order of SystemSettings, as the file names them.
+        public static readonly string[] Keys = { "mode", "locale", "web", "logger", "monitor", "calls", "goip" };
+
+        public bool Any => mode != null || locale != null || web != null || logger != null || monitor != null || calls != null || goip != null;
+
+        public void MoveTo(SystemSettings s)
+        {
+            if (mode != null) s.mode = mode;
+            if (locale != null) s.locale = locale;
+            if (web != null) s.web = web;
+            if (logger != null) s.logger = logger;
+            if (monitor != null) s.monitor = monitor;
+            if (calls != null) s.calls = calls;
+            if (goip != null) s.goip = goip;
+        }
     }
 
     // A client is on when its section is there (and has a token / url); no section: off.
@@ -356,14 +411,17 @@ namespace ghostline
 
         public Settings ToSettings() => new()
         {
-            mode = mode,
+            system = new SystemSettings
+            {
+                mode = mode,
+                web = new WebSettings { port = webUiPort, user = webUiUser, password = webUiPassword },
+                logger = new LoggerSettings { file = LogToFile },
+                calls = calls,
+                goip = new GoipSettings { smtp = new SmtpSettings { enabled = smtpForGoip } }
+            },
             clients = new ClientsSettings { telegram = new TelegramSettings { token = tgToken, chatIds = tgChatIds ?? new() } },
-            web = new WebSettings { port = webUiPort, user = webUiUser, password = webUiPassword },
-            logger = new LoggerSettings { file = LogToFile },
             gateways = gateways,
             lines = channels,
-            calls = calls,
-            goip = new GoipSettings { smtp = new SmtpSettings { enabled = smtpForGoip } }
         };
     }
 
@@ -380,6 +438,7 @@ namespace ghostline
         public static Settings Parse(string yaml)
         {
             var s = Deserializer.Deserialize<Settings>(yaml) ?? throw new InvalidDataException("empty config");
+            s.system ??= new SystemSettings();
             s.clients ??= new ClientsSettings();
             if (s.LegacyTelegramValue != null)
                 s.clients.telegram ??= s.LegacyTelegramValue;
@@ -397,6 +456,18 @@ namespace ghostline
         internal static void Normalize(Settings s)
         {
             var m = new SettingsMigration();
+            if (s.LegacySystemValue.Any)
+            {
+                m.SystemMoved = true;
+                s.LegacySystemValue.MoveTo(s.system);
+            }
+            var sys = s.system;
+            sys.locale ??= new LocaleSettings();
+            sys.web ??= new WebSettings();
+            sys.logger ??= new LoggerSettings();
+            sys.monitor ??= new MonitorSettings();
+            sys.goip ??= new GoipSettings();
+
             s.gateways ??= new List<Gateway>();
             if (s.LegacyChannelsValue != null)
             {
@@ -502,10 +573,11 @@ namespace ghostline
             return $"line {inner.Start.Line}, column {inner.Start.Column}: {message}";
         }
 
-        // A file of the format before 2026-10-30 is rewritten once, in place (comments kept); the old one
-        // stays next to it as .bak-v2. When the rewritten text does not read back the same, the settings
-        // are written out in full instead (comments lost).
-        public static void MigrateToV2(string yamlPath)
+        // A file of an older format is rewritten once, in place (comments kept); the old one stays next to
+        // it as .bak-v2 (before 2026-10-30) or .bak-v3 (top-level system sections, before 2026-11-01).
+        // When the rewritten text does not read back the same, the settings are written out in full
+        // instead (comments lost).
+        public static void Migrate(string yamlPath)
         {
             if (!File.Exists(yamlPath)) return;
             string yaml = File.ReadAllText(yamlPath);
@@ -524,11 +596,12 @@ namespace ghostline
             if (!same)
                 text = "# ghostline settings. Converted " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + "\n" + expected;
 
-            File.Copy(yamlPath, yamlPath + ".bak-v2", overwrite: true);
+            string backup = yamlPath + (s.Migration.AnyV2 ? ".bak-v2" : ".bak-v3");
+            File.Copy(yamlPath, backup, overwrite: true);
             // In place, not via a temp file: the config keeps its mode (it holds secrets).
             File.WriteAllText(yamlPath, text);
             SysLog.Info("config", $"converted to the current format{(same ? "" : " (written out in full, comments lost)")}: " +
-                                  $"{yamlPath}, the old one is {yamlPath}.bak-v2");
+                                  $"{yamlPath}, the old one is {backup}");
         }
 
         // No ghostline.yaml but a ghostline.json next to it: convert.
@@ -551,13 +624,15 @@ namespace ghostline
     {
         public bool ChannelsRenamed;
         public bool PbxRemoved;
+        public bool SystemMoved;                                        // top-level sections went into system
         public string ManagedGateway;
         public readonly Dictionary<string, string> Merged = new();      // removed gateway id -> kept one
         public readonly List<string> Retyped = new();                   // gateways that became "asterisk"
         public readonly List<string> Regatewayed = new();               // lines moved to the kept gateway
         public readonly Dictionary<string, string> LineKeys = new();    // line -> "modem" / "port"
 
-        public bool Any => ChannelsRenamed || PbxRemoved || Merged.Count > 0 || Retyped.Count > 0 || LineKeys.Count > 0;
+        public bool AnyV2 => ChannelsRenamed || PbxRemoved || Merged.Count > 0 || Retyped.Count > 0 || LineKeys.Count > 0;
+        public bool Any => AnyV2 || SystemMoved;
     }
 
     internal partial class Program

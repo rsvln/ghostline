@@ -94,7 +94,7 @@ and sends nothing to the modems. Per line it shows:
 - the SIM's own number when the SIM reports it, else `lines[].number`.
 
 This is shown on the Status tab and in `/status`. When a line has had no
-network for `monitor.alert_minutes` (default 2), a message goes to the line's
+network for `system.monitor.alert_minutes` (default 2), a message goes to the line's
 Telegram chats and ntfy topic, and another one when the network is back.
 
 The stock driver knows neither the network type nor the LTE signal quality.

@@ -67,7 +67,7 @@ fi
 if [ "$first" = 1 ]; then
   echo "Installed $(cat "$APP/VERSION" 2>/dev/null || true) to $APP"
   echo "Edit $CONF/ghostline.yaml, then: systemctl start ghostline"
-  echo "Web interface: http://<host>:8889 (the port is web.port in the config)"
+  echo "Web interface: http://<host>:8889 (the port is system.web.port in the config)"
   exit 0
 fi
 

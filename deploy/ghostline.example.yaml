@@ -2,15 +2,31 @@
 # An unknown key stops the service at startup, so a typo cannot silently disable an option.
 # After the first start the file can also be edited in the web interface (Settings tab).
 # Files of older versions (channels, gateway types quectel/dongle, a top-level pbx section) are
-# converted once on start; the old file is kept as ghostline.yaml.bak-v2.
+# converted once on start; the old file is kept as ghostline.yaml.bak-v2. Files with mode, locale, web,
+# logger, monitor, calls, goip at the top get them moved into system (old file: ghostline.yaml.bak-v3).
 
-mode: sms                     # sms | full (full also handles calls)
+# ghostline itself.
+system:
+  mode: sms                   # sms | full (full also handles calls)
 
-locale:
-  default: en                 # en | ru
-  web:
-  telegram:
-  transcript:
+  locale:
+    default: en               # en | ru
+    web:
+    telegram:
+    transcript:
+
+  web:                        # empty user and password disable authentication
+    port: 8889
+    user: admin
+    password: change-me
+
+  logger:
+    level: info               # system log: error | warning | info | debug
+    file: false               # also write SMS and calls to /var/log/ghostline/ (text files)
+
+  # A line without network for this many minutes: a message to its chats/topic; 0: none.
+  monitor:
+    alert_minutes: 2
 
 # Notification channels, both optional (at least one to get notifications).
 clients:
@@ -22,15 +38,6 @@ clients:
     url:
     token:
     topic:                    # common topic, for lines without their own
-
-web:                          # empty user and password disable authentication
-  port: 8889
-  user: admin
-  password: change-me
-
-logger:
-  level: info                 # system log: error | warning | info | debug
-  file: false                 # also write SMS and calls to /var/log/ghostline/ (text files)
 
 gateways:
   - id: pbx
@@ -44,10 +51,6 @@ gateways:
     modems:                   # as named in quectel.conf / dongle.conf
       - name: gsm1
         driver: quectel       # quectel | dongle
-
-# A line without network for this many minutes: a message to its chats/topic; 0: none.
-monitor:
-  alert_minutes: 2
 
 lines:
   - name: personal
@@ -75,22 +78,23 @@ lines:
 #   lines:
 #     - { ..., phone: { extension: "11", dial: ru, encryption: sdes } }
 
-# mode: full only
-# calls:
-#   cdr_db:
-#     host: 10.0.0.10
-#     port: 3306
-#     database: asteriskcdrdb
-#     user: ghostline
-#     password: cdr-secret
-#   recordings_url: http://10.0.0.10/ghostline-rec/
-#   # Or, with directories shared with the PBX (these win over the two above):
-#   # cdr_sqlite: /srv/asterisk-cdr/cdr.db     # docs/cdr-sqlite.md
-#   # recordings_dir: /srv/asterisk-rec
-#   poll_seconds: 15
-#   transcribe:
-#     enabled: true
-#     url: http://10.0.0.20:8000/v1/audio/transcriptions
-#     model: deepdml/faster-whisper-large-v3-turbo-ct2
-#     language: ru
-#     prompt: "Names and terms that often occur in your calls."
+# system.calls, mode: full only
+# system:
+#   calls:
+#     cdr_db:
+#       host: 10.0.0.10
+#       port: 3306
+#       database: asteriskcdrdb
+#       user: ghostline
+#       password: cdr-secret
+#     recordings_url: http://10.0.0.10/ghostline-rec/
+#     # Or, with directories shared with the PBX (these win over the two above):
+#     # cdr_sqlite: /srv/asterisk-cdr/cdr.db     # docs/cdr-sqlite.md
+#     # recordings_dir: /srv/asterisk-rec
+#     poll_seconds: 15
+#     transcribe:
+#       enabled: true
+#       url: http://10.0.0.20:8000/v1/audio/transcriptions
+#       model: deepdml/faster-whisper-large-v3-turbo-ct2
+#       language: ru
+#       prompt: "Names and terms that often occur in your calls."

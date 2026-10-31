@@ -1,7 +1,7 @@
-# Call journal from SQLite (`calls.cdr_sqlite`)
+# Call journal from SQLite (`system.calls.cdr_sqlite`)
 
 By default ghostline reads the call journal (CDR) from the FreePBX MySQL
-database (`calls.cdr_db`). Without MySQL, Asterisk can write the CDR into a
+database (`system.calls.cdr_db`). Without MySQL, Asterisk can write the CDR into a
 SQLite file with its stock `cdr_sqlite3_custom` module, and ghostline polls
 that file. Nothing is lost while ghostline is down: it catches up from the
 file, as it does with MySQL.
@@ -49,13 +49,14 @@ journal. [asterisk-setup.md](asterisk-setup.md) does this.
 ## 3. ghostline
 
 ```yaml
-calls:
-  cdr_sqlite: /srv/asterisk-cdr/cdr.db
+system:
+  calls:
+    cdr_sqlite: /srv/asterisk-cdr/cdr.db
 ```
 
 `cdr_sqlite` wins over `cdr_db`, so to go back remove the line. The Status
 tab shows the file as the CDR source.
 
 The recordings can come the same way, from `/var/spool/asterisk/monitor`
-mounted into the ghostline container (`calls.recordings_dir`) instead of HTTP
-(`calls.recordings_url`).
+mounted into the ghostline container (`system.calls.recordings_dir`) instead of HTTP
+(`system.calls.recordings_url`).

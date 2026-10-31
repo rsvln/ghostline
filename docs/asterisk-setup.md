@@ -158,9 +158,10 @@ gateways:
         external_address: sip.example.org
         local_nets: [10.0.0.0/8]
 
-calls:
-  cdr_sqlite: /srv/asterisk-cdr/cdr.db
-  recordings_dir: /srv/asterisk-rec
+system:
+  calls:
+    cdr_sqlite: /srv/asterisk-cdr/cdr.db
+    recordings_dir: /srv/asterisk-rec
 ```
 
 Then in Settings: add the modems ("+ Modem"), the lines on them and their

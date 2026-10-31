@@ -13,6 +13,7 @@ namespace ghostline.Tests
         {
             File.Delete(_path);
             File.Delete(_path + ".bak-v2");
+            File.Delete(_path + ".bak-v3");
         }
 
         // Two PBXs during a move: FreePBX with two modems, the managed Asterisk with a Huawei stick.
@@ -106,7 +107,7 @@ namespace ghostline.Tests
         public void RewritesTheFileKeepingComments()
         {
             File.WriteAllText(_path, Old);
-            SettingsFile.MigrateToV2(_path);
+            SettingsFile.Migrate(_path);
 
             string text = File.ReadAllText(_path);
             Assert.Equal(Old, File.ReadAllText(_path + ".bak-v2"));
@@ -123,7 +124,7 @@ namespace ghostline.Tests
 
             // Once only.
             File.Delete(_path + ".bak-v2");
-            SettingsFile.MigrateToV2(_path);
+            SettingsFile.Migrate(_path);
             Assert.False(File.Exists(_path + ".bak-v2"));
             Assert.Equal(text, File.ReadAllText(_path));
         }
@@ -133,7 +134,7 @@ namespace ghostline.Tests
         {
             File.WriteAllText(_path, Old);
             var before = PbxConfig.Generate(SettingsFile.Parse(Old));
-            SettingsFile.MigrateToV2(_path);
+            SettingsFile.Migrate(_path);
             Assert.Equal(before, PbxConfig.Generate(SettingsFile.Parse(File.ReadAllText(_path))));
         }
 
@@ -170,7 +171,7 @@ namespace ghostline.Tests
                     line: "3"
                 """;
             File.WriteAllText(_path, yaml);
-            SettingsFile.MigrateToV2(_path);
+            SettingsFile.Migrate(_path);
             var s = SettingsFile.Parse(File.ReadAllText(_path));
             Assert.Null(s.Migration);
 
@@ -200,10 +201,85 @@ namespace ghostline.Tests
                     modem: gsm1
                 """;
             File.WriteAllText(_path, yaml);
-            SettingsFile.MigrateToV2(_path);
+            SettingsFile.Migrate(_path);
             Assert.False(File.Exists(_path + ".bak-v2"));
             Assert.Equal(yaml, File.ReadAllText(_path));
             Assert.Null(SettingsFile.Parse(yaml).Migration);
+        }
+        // Before 2026-11-01 the settings of ghostline itself were top-level sections; now they are in "system".
+        const string V2 = """
+            # ghostline settings
+            mode: full                    # sms | full
+
+            locale:
+              default: ru
+
+            clients:
+              telegram:
+                token: 1:abc
+                chat_ids: ["100"]
+
+            # Web interface
+            web:
+              port: 8890                  # the web port
+
+            logger:
+              level: debug
+
+            gateways:
+              - id: pbx
+                type: asterisk
+                ip: 10.0.0.10
+                modems:
+                  - name: gsm1
+                    driver: quectel
+
+            monitor:
+              alert_minutes: 5
+
+            lines:
+              - name: home
+                gateway: pbx
+                pattern: gsm1
+                modem: gsm1
+
+            calls:
+              poll_seconds: 30
+              transcribe:
+                enabled: true
+                language: ru              # whisper language
+            """;
+
+        [Fact]
+        public void MovesSystemSectionsIntoSystem()
+        {
+            File.WriteAllText(_path, V2);
+            var before = SettingsFile.Parse(V2);
+            Assert.NotNull(before.Migration);
+            Assert.Equal(("full", 8890, "debug", 5, 30),
+                (before.mode, before.web.port, before.logger.level, before.monitor.alertMinutes, before.calls.pollSeconds));
+
+            SettingsFile.Migrate(_path);
+            string text = File.ReadAllText(_path).Replace("\r\n", "\n");
+            Assert.Equal(V2, File.ReadAllText(_path + ".bak-v3"));
+            Assert.False(File.Exists(_path + ".bak-v2"));
+            Assert.DoesNotContain("Converted", text);
+            Assert.StartsWith("# ghostline settings\nsystem:\n  mode: full                    # sms | full\n", text);
+            Assert.Contains("\n  # Web interface\n  web:\n    port: 8890                  # the web port\n", text);
+            Assert.Contains("\n      language: ru              # whisper language", text);
+            foreach (var key in new[] { "mode", "locale", "web", "logger", "monitor", "calls" })
+                Assert.DoesNotContain("\n" + key + ":", text);
+
+            var s = SettingsFile.Parse(text);
+            Assert.Null(s.Migration);
+            Assert.Equal(SettingsFile.Serialize(before), SettingsFile.Serialize(s));
+            Assert.Equal(new[] { "system", "clients", "gateways", "lines" },
+                text.Split('\n').Where(l => l.Length > 0 && char.IsLetter(l[0])).Select(l => l.Split(':')[0]));
+
+            // Once only.
+            File.Delete(_path + ".bak-v3");
+            SettingsFile.Migrate(_path);
+            Assert.False(File.Exists(_path + ".bak-v3"));
         }
     }
 }

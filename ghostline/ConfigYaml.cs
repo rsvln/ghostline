@@ -289,7 +289,61 @@ namespace ghostline
             }
             if (m.PbxRemoved)
                 yaml = RemoveTopSection(yaml, "pbx");
+            if (m.SystemMoved)
+                yaml = MoveIntoSection(yaml, LegacySystem.Keys, "system");
             return yaml;
+        }
+
+        // Moves top-level sections under a new top-level section, in place: each with its lines, the comments
+        // inside it and the comment lines right above it, indented by two spaces. The new section goes where
+        // the first of them was; an existing one gets them at its end.
+        public static string MoveIntoSection(string yaml, IEnumerable<string> keys, string parent)
+        {
+            string nl = yaml.Contains("\r\n") ? "\r\n" : "\n";
+            var lines = yaml.Replace("\r\n", "\n").Split('\n').ToList();
+            static bool Top(string l) => l.Length > 0 && l[0] is not (' ' or '#' or '-');
+            static string KeyOf(string l) => Regex.Match(l, @"^([A-Za-z_][A-Za-z0-9_]*):(\s|$)").Groups[1].Value;
+            var wanted = new HashSet<string>(keys);
+            var moved = new List<string>();
+            int at = -1;
+            for (int i = 0; i < lines.Count; i++)
+            {
+                if (!Top(lines[i]) || !wanted.Contains(KeyOf(lines[i]))) continue;
+                int start = i;
+                // Comment lines right above it go with it, unless they open the file.
+                while (start > 0 && lines[start - 1].StartsWith('#')) start--;
+                if (start == 0) start = i;
+                int end = i + 1;
+                while (end < lines.Count && !Top(lines[end])) end++;
+                while (end > i + 1 && (lines[end - 1].Trim().Length == 0 || lines[end - 1].StartsWith('#'))) end--;
+                if (moved.Count > 0) moved.Add("");
+                moved.AddRange(lines.GetRange(start, end - start).Select(l => l.Length == 0 ? l : "  " + l));
+                lines.RemoveRange(start, end - start);
+                // The blank line after it goes too, so no double blank line is left.
+                if (start < lines.Count && lines[start].Trim().Length == 0 && (start == 0 || lines[start - 1].Trim().Length == 0))
+                    lines.RemoveAt(start);
+                if (at < 0) at = start;
+                i = start - 1;
+            }
+            if (moved.Count == 0) return yaml;
+            int existing = lines.FindIndex(l => KeyOf(l) == parent);
+            if (existing >= 0)
+            {
+                int end = existing + 1;
+                while (end < lines.Count && !Top(lines[end])) end++;
+                while (end > existing + 1 && lines[end - 1].Trim().Length == 0) end--;
+                lines[existing] = Regex.Replace(lines[existing], @":\s*\{\s*\}", ":");
+                lines.InsertRange(end, moved);
+            }
+            else
+            {
+                at = Math.Min(at, lines.Count);
+                var block = new List<string> { parent + ":" };
+                block.AddRange(moved);
+                if (at < lines.Count && lines[at].Trim().Length != 0) block.Add("");
+                lines.InsertRange(at, block);
+            }
+            return string.Join(nl, lines);
         }
 
         static int LineStart(string yaml, int pos)
@@ -614,12 +668,12 @@ namespace ghostline
             var c = s.calls;
             var groups = new List<Group>
             {
-                G("general",
-                    F("mode", "select", s.mode ?? "sms", "sms", "full"),
-                    F("locale.default", "select", s.locale?.@default ?? "en", "en", "ru"),
-                    F("locale.web", "select", s.locale?.web ?? "", Locales),
-                    F("locale.telegram", "select", s.locale?.telegram ?? "", Locales),
-                    F("locale.transcript", "select", s.locale?.transcript ?? "", Locales)),
+                G("system",
+                    F("system.mode", "select", s.mode ?? "sms", "sms", "full"),
+                    F("system.locale.default", "select", s.locale?.@default ?? "en", "en", "ru"),
+                    F("system.locale.web", "select", s.locale?.web ?? "", Locales),
+                    F("system.locale.telegram", "select", s.locale?.telegram ?? "", Locales),
+                    F("system.locale.transcript", "select", s.locale?.transcript ?? "", Locales)),
                 G("clients"),
                 G("telegram",
                     F("clients.telegram.token", "text", s.clients?.telegram?.token),
@@ -629,37 +683,37 @@ namespace ghostline
                     F("clients.ntfy.token", "text", s.clients?.ntfy?.token),
                     F("clients.ntfy.topic", "text", s.clients?.ntfy?.topic)),
                 G("web",
-                    F("web.port", "number", n(s.web?.port)),
-                    F("web.user", "text", s.web?.user),
-                    F("web.password", "text", s.web?.password)),
-                G("logger", F("logger.level", "select", string.IsNullOrEmpty(s.logger?.level) ? "info" : s.logger.level, SysLog.Levels),
-                           F("logger.file", "checkbox", b(s.logger?.file ?? false))),
-                G("monitor", F("monitor.alert_minutes", "number", (s.monitor?.alertMinutes ?? 2).ToString(CultureInfo.InvariantCulture))),
+                    F("system.web.port", "number", n(s.web?.port)),
+                    F("system.web.user", "text", s.web?.user),
+                    F("system.web.password", "text", s.web?.password)),
+                G("logger", F("system.logger.level", "select", string.IsNullOrEmpty(s.logger?.level) ? "info" : s.logger.level, SysLog.Levels),
+                           F("system.logger.file", "checkbox", b(s.logger?.file ?? false))),
+                G("monitor", F("system.monitor.alert_minutes", "number", (s.monitor?.alertMinutes ?? 2).ToString(CultureInfo.InvariantCulture))),
                 G("gateways"),
                 G("lines"),
                 G("managed"),
                 G("modems"),
                 G("phone"),
                 G("calls",
-                    F("calls.recordings_url", "text", c?.recordingsUrl),
-                    F("calls.recordings_dir", "text", c?.recordingsDir),
-                    F("calls.cdr_sqlite", "text", c?.cdrSqlite),
-                    F("calls.poll_seconds", "number", n(c?.pollSeconds))),
+                    F("system.calls.recordings_url", "text", c?.recordingsUrl),
+                    F("system.calls.recordings_dir", "text", c?.recordingsDir),
+                    F("system.calls.cdr_sqlite", "text", c?.cdrSqlite),
+                    F("system.calls.poll_seconds", "number", n(c?.pollSeconds))),
                 G("cdr_db",
-                    F("calls.cdr_db.host", "text", c?.cdrDb?.host),
-                    F("calls.cdr_db.port", "number", n(c?.cdrDb?.port)),
-                    F("calls.cdr_db.database", "text", c?.cdrDb?.database),
-                    F("calls.cdr_db.user", "text", c?.cdrDb?.user),
-                    F("calls.cdr_db.password", "text", c?.cdrDb?.password)),
+                    F("system.calls.cdr_db.host", "text", c?.cdrDb?.host),
+                    F("system.calls.cdr_db.port", "number", n(c?.cdrDb?.port)),
+                    F("system.calls.cdr_db.database", "text", c?.cdrDb?.database),
+                    F("system.calls.cdr_db.user", "text", c?.cdrDb?.user),
+                    F("system.calls.cdr_db.password", "text", c?.cdrDb?.password)),
                 G("transcribe",
-                    F("calls.transcribe.enabled", "checkbox", b(c?.transcribe?.enabled ?? false)),
-                    F("calls.transcribe.url", "text", c?.transcribe?.url),
-                    F("calls.transcribe.model", "text", c?.transcribe?.model),
-                    F("calls.transcribe.language", "text", c?.transcribe?.language),
-                    F("calls.transcribe.prompt", "textarea", c?.transcribe?.prompt)),
+                    F("system.calls.transcribe.enabled", "checkbox", b(c?.transcribe?.enabled ?? false)),
+                    F("system.calls.transcribe.url", "text", c?.transcribe?.url),
+                    F("system.calls.transcribe.model", "text", c?.transcribe?.model),
+                    F("system.calls.transcribe.language", "text", c?.transcribe?.language),
+                    F("system.calls.transcribe.prompt", "textarea", c?.transcribe?.prompt)),
                 G("goip",
-                    F("goip.smtp.enabled", "checkbox", b(s.goip?.smtp?.enabled ?? false)),
-                    F("goip.smtp.port", "number", n(s.goip?.smtp?.port))),
+                    F("system.goip.smtp.enabled", "checkbox", b(s.goip?.smtp?.enabled ?? false)),
+                    F("system.goip.smtp.port", "number", n(s.goip?.smtp?.port))),
             };
             return new
             {

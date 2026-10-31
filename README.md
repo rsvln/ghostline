@@ -127,7 +127,7 @@ services:
       - TZ=Europe/Berlin            # your time zone
     ports:
       - "8889:8889"                 # web interface
-      # - "25:25"                   # only for goip.smtp
+      # - "25:25"                   # only for system.goip.smtp
     volumes:
       - /srv/ghostline/config:/etc/ghostline
       - /srv/ghostline/log:/var/log/ghostline
@@ -165,13 +165,47 @@ The configuration can also be edited in the web interface.
 ### Example
 
 ```yaml
-mode: full                    # sms | full
+system:                       # ghostline itself
+  mode: full                  # sms | full
 
-locale:                       # en | ru; empty values fall back to default
-  default: en
-  web:
-  telegram:
-  transcript:                 # language of downloaded transcripts
+  locale:                     # en | ru; empty values fall back to default
+    default: en
+    web:
+    telegram:
+    transcript:               # language of downloaded transcripts
+
+  web:                        # empty user and password disable authentication
+    port: 8889
+    user: admin
+    password: change-me
+
+  logger:
+    level: info               # system log: error | warning | info | debug
+    file: false               # also write SMS and calls to /var/log/ghostline/ (text files)
+
+  monitor:
+    alert_minutes: 2          # no network this long: a message to the line's chats
+
+  calls:                      # mode: full only
+    cdr_db:
+      host: 10.0.0.10
+      port: 3306
+      database: asteriskcdrdb
+      user: ghostline
+      password: cdr-secret
+    recordings_url: http://10.0.0.10/ghostline-rec/
+    poll_seconds: 15
+    transcribe:
+      enabled: true
+      url: http://10.0.0.20:8000/v1/audio/transcriptions
+      model: deepdml/faster-whisper-large-v3-turbo-ct2
+      language: ru
+      prompt: "Names and terms that often occur in your calls."
+
+  goip:
+    smtp:
+      enabled: false
+      port: 25
 
 clients:                      # notification channels, both optional
   telegram:                   # empty token — Telegram is off
@@ -182,15 +216,6 @@ clients:                      # notification channels, both optional
     url: https://ntfy.example.org
     token: tk_exampleaccesstoken
     topic:                    # common topic, for lines without their own
-
-web:                          # empty user and password disable authentication
-  port: 8889
-  user: admin
-  password: change-me
-
-logger:
-  level: info                 # system log: error | warning | info | debug
-  file: false                 # also write SMS and calls to /var/log/ghostline/ (text files)
 
 gateways:
   - id: pbx
@@ -219,47 +244,26 @@ lines:
       transcript: true
       missed: true
       chat_ids: []            # chats for calls only; empty — the line's chats
-
-calls:                        # mode: full only
-  cdr_db:
-    host: 10.0.0.10
-    port: 3306
-    database: asteriskcdrdb
-    user: ghostline
-    password: cdr-secret
-  recordings_url: http://10.0.0.10/ghostline-rec/
-  poll_seconds: 15
-  transcribe:
-    enabled: true
-    url: http://10.0.0.20:8000/v1/audio/transcriptions
-    model: deepdml/faster-whisper-large-v3-turbo-ct2
-    language: ru
-    prompt: "Names and terms that often occur in your calls."
-
-goip:
-  smtp:
-    enabled: false
-    port: 25
 ```
 
 ### Reference
 
 | Key | Description |
 |---|---|
-| `mode` | `sms` (default) or `full` |
-| `locale.default` | `en` (default) or `ru` |
-| `locale.web` / `locale.telegram` / `locale.transcript` | Language of the web interface, Telegram messages and downloaded transcripts; empty — `locale.default` |
+| `system.mode` | `sms` (default) or `full` |
+| `system.locale.default` | `en` (default) or `ru` |
+| `system.locale.web` / `system.locale.telegram` / `system.locale.transcript` | Language of the web interface, Telegram messages and downloaded transcripts; empty — `system.locale.default` |
+| `system.web.port` | Web interface port, default `8889` |
+| `system.web.user` / `system.web.password` | HTTP Basic authentication; both empty — no authentication |
+| `system.logger.level` | System log level: `error`, `warning`, `info` (default) or `debug`. The log goes to journald with the level (`journalctl -p warning -u ghostline`), to `/var/log/ghostline/system-YYYY-MM-DD.log` (14 days) and to the System tab |
+| `system.logger.file` | Also write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log`, text files for other systems. The PBX tab does not need them |
+| `system.goip.smtp.enabled` / `system.goip.smtp.port` | Built-in SMTP server for GoIP gateways that deliver SMS by e-mail |
+| `system.monitor.alert_minutes` | A monitored line without network this long gets a message in its chats/topic, and another when it is back; `0` — no messages. Default `2` |
 | `clients.telegram.token` | Bot token; empty — Telegram is off |
 | `clients.telegram.chat_ids` | Common chats, for lines without their own |
 | `clients.ntfy.url` | ntfy server; empty — ntfy is off |
 | `clients.ntfy.token` | ntfy access token with read and write access to the topics |
 | `clients.ntfy.topic` | Common topic, for lines without their own |
-| `web.port` | Web interface port, default `8889` |
-| `web.user` / `web.password` | HTTP Basic authentication; both empty — no authentication |
-| `logger.level` | System log level: `error`, `warning`, `info` (default) or `debug`. The log goes to journald with the level (`journalctl -p warning -u ghostline`), to `/var/log/ghostline/system-YYYY-MM-DD.log` (14 days) and to the System tab |
-| `logger.file` | Also write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log`, text files for other systems. The PBX tab does not need them |
-| `goip.smtp.enabled` / `goip.smtp.port` | Built-in SMTP server for GoIP gateways that deliver SMS by e-mail |
-| `monitor.alert_minutes` | A monitored line without network this long gets a message in its chats/topic, and another when it is back; `0` — no messages. Default `2` |
 
 A client is on when its section is there (with a token / url); remove the
 section to turn it off. A top-level `telegram` section of older configs is
@@ -267,7 +271,9 @@ still read as `clients.telegram` and is moved there when the config is saved
 from the web interface. Files of versions before the managed PBX (`channels`,
 gateway types `quectel` / `dongle`, a top-level `pbx` section) are converted
 once on start, keeping the comments; the old file stays as
-`ghostline.yaml.bak-v2`.
+`ghostline.yaml.bak-v2`. Likewise, files where `mode`, `locale`, `web`,
+`logger`, `monitor`, `calls` and `goip` are top-level sections get them moved
+into `system` (old file: `ghostline.yaml.bak-v3`).
 
 `gateways[]`:
 
@@ -301,7 +307,7 @@ once on start, keeping the comments; the old file stays as
 | `calls.chat_ids` | Telegram chats for this line's calls only; empty — the line's chats |
 | `phone.extension` / `dial` / `encryption` | A line on the gateway with `pbx: managed` only: the line's SIP phone, see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
 
-`calls` (mode `full`):
+`system.calls` (mode `full`):
 
 | Field | Description |
 |---|---|
