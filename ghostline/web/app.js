@@ -953,11 +953,10 @@ function settingsTree(data) {
   });
   const clientFields = { telegram: byId.telegram.fields, ntfy: byId.ntfy.fields };
   // System: mode and languages, with the settings of ghostline itself under it.
-  const tree = [Object.assign(node('general'), { children: [node('web'), node('logger'), node('monitor')] }),
-                clientsNode('clients', '', data.clients || [], clientFields), list('gateways'), list('lines')];
-  tree.push(Object.assign(node('calls'), { children: [node('cdr_db'), node('transcribe')] }));
-  tree.push(node('goip'));
-  return tree;
+  const calls = Object.assign(node('calls'), { children: [node('cdr_db'), node('transcribe')] });
+  const system = Object.assign(node('general'),
+    { children: [node('web'), node('logger'), node('monitor'), calls, node('goip')] });
+  return [system, clientsNode('clients', '', data.clients || [], clientFields), list('gateways'), list('lines')];
 }
 
 // A gateway or a line. A gateway's managed.* fields and its modems, a line's phone, clients and calls
