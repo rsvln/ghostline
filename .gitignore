@@ -372,3 +372,5 @@ deploy-*.bat
 yetgsms-refactor-spec_1.md
 # Local notes about a specific installation
 docs/incident-*.md
+# Local notes for Claude Code: stand details, never published
+CLAUDE.local.md
