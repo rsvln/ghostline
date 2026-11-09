@@ -83,7 +83,10 @@ namespace ghostline
             var managed = settings.ManagedGateway;
             SysLog.Info("app", "pbx: " + (managed != null ? "managed (" + managed.id + ")" : "freepbx"));
             if (managed != null)
+            {
                 Task.Run(() => PbxCertWatchLoop());
+                Task.Run(() => PbxStorageWatchLoop());
+            }
             if (settings.lines.Any(c => c.phone != null && c.gateway != managed?.id))
                 SysLog.Warn("config", "lines[].phone is used only on a gateway with pbx: managed, ignored");
 

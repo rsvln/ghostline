@@ -65,6 +65,7 @@ is shown only when `manager.conf` is created.
 | `gl-fail2ban` (root; timer every 30 s, path unit on the request files) | builds the fail2ban jail from `<conf-dir>/fail2ban_ghostline.json`, handles unban requests (`fail2ban_request.json`), writes the bans to `<conf-dir>/fail2ban.json` |
 | `gl-acme` (root; timer every 30 s, path unit on the request files), `gl-acme-deploy`, acme.sh in `/root/.acme.sh` | Let's Encrypt for the SIP certificate when ghostline turns it on (`<conf-dir>/acme_ghostline.json`); reports to `<conf-dir>/acme.json`. acme.sh's own cron is removed: gl-acme renews |
 | `gl-usb-inventory` (timer, every 30 s) | writes `<conf-dir>/usb.json`, the USB modems ghostline offers; reads sysfs only |
+| `gl-storage` (asterisk user; timer every 60 s) | checks that Asterisk can write the recordings directory and the CDR (a temp file; a write lock and a rollback), writes `<conf-dir>/storage.json` with the result and the free space |
 | `<conf-dir>/keys/sip.crt`, `sip.key` | self-signed certificate, so TLS starts |
 
 `pjsip_ghostline.conf` and `extensions_ghostline.conf` start as empty
@@ -103,6 +104,21 @@ pct set <ghostline ct> -mp0 /srv/gl-share/conf,mp=/srv/asterisk-conf
 pct set <ghostline ct> -mp1 /srv/gl-share/cdr,mp=/srv/asterisk-cdr,ro=1
 pct set <ghostline ct> -mp2 /srv/gl-share/rec,mp=/srv/asterisk-rec,ro=1
 ```
+
+Directories that an earlier PBX in a **privileged** container (FreePBX, say)
+wrote keep its owner, uid 999 on the host. The unprivileged Asterisk sees them
+as `nobody`, cannot write a single recording or CDR row, and only says so in
+its own log; calls still go through. Give them over recursively when moving:
+
+```
+chown -R 100999:100999 /srv/gl-share/cdr /srv/gl-share/rec
+asterisk -rx "module reload cdr_sqlite3_custom"    # in the Asterisk container
+```
+
+The script installs `gl-storage`, which checks this every minute as the
+`asterisk` user and reports it to ghostline (`<conf-dir>/storage.json`): the
+Status tab shows it, and Telegram gets a message when it breaks and when it
+is fixed.
 
 ghostline writes into the conf directory, so its user must be able to write
 there. Either run ghostline in the same group, or give the directory to the

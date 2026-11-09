@@ -52,6 +52,13 @@ The Asterisk host writes `usb.json` there (`gl-usb-inventory`, every 30 s):
 its USB devices with serial ports and sound cards, and whether Asterisk may
 open them. It reads sysfs only and sends nothing to the modems.
 
+It also writes `storage.json` (`gl-storage`, every 60 s, as the `asterisk`
+user): whether Asterisk can write the recordings and the CDR, and the free
+space. ghostline mounts both read-only and cannot check that itself. The
+Status tab shows it ("Call storage"); Telegram gets a message when writing
+fails, space drops below 500 MB or the report stops, and again when it is
+fixed.
+
 On save ghostline:
 1. writes the files that changed; the previous copies go to `.bak`;
 2. over the gateway's AMI, for what changed:

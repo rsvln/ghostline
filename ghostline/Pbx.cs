@@ -512,6 +512,97 @@ namespace ghostline
             return null;
         }
 
+        // ---- Call storage on the Asterisk host (storage.json from scripts/gl-storage.py) -----------------
+        // ghostline mounts the recordings and the CDR read-only, so it cannot tell by itself that Asterisk
+        // cannot write them. On 2026-10-30 a shared directory with the wrong owner lost ten days of
+        // recordings and journal entries with nothing shown anywhere; this is the report that would have.
+
+        internal record StorageCheck(string path, bool ok, string error, long? free_mb);
+        internal record StorageStatus(DateTime at, StorageCheck recordings, StorageCheck cdr);
+        // part: "recordings" / "cdr" / "report"; kind: "write" / "space" / "stale"; detail: the host's error,
+        // the free megabytes or the report time.
+        internal record StorageProblem(string part, string kind, string detail);
+
+        internal const long StorageLowMb = 500;
+        // gl-storage reports every minute; a report this old means the helper (or the share) stopped.
+        internal static readonly TimeSpan StorageStale = TimeSpan.FromMinutes(10);
+
+        // null: no report from the host (gl-storage not installed, or the shared directory is not there).
+        internal static StorageStatus ReadStorage(Settings s)
+        {
+            string confDir = s?.ManagedGateway?.managed?.confDir;
+            if (string.IsNullOrEmpty(confDir)) return null;
+            try
+            {
+                string path = Path.Combine(confDir, "storage.json");
+                return File.Exists(path) ? System.Text.Json.JsonSerializer.Deserialize<StorageStatus>(File.ReadAllText(path)) : null;
+            }
+            catch { return null; }
+        }
+
+        internal static List<StorageProblem> StorageProblems(StorageStatus st, DateTime nowUtc)
+        {
+            var list = new List<StorageProblem>();
+            if (st == null) return list;
+            if (nowUtc - st.at.ToUniversalTime() > StorageStale)
+            {
+                list.Add(new("report", "stale", st.at.ToLocalTime().ToString("dd.MM HH:mm")));
+                return list;
+            }
+            foreach (var (part, c) in new[] { ("recordings", st.recordings), ("cdr", st.cdr) })
+            {
+                if (c == null) continue;
+                if (!c.ok) list.Add(new(part, "write", c.error ?? ""));
+                else if (c.free_mb is { } mb && mb < StorageLowMb) list.Add(new(part, "space", mb.ToString()));
+            }
+            return list;
+        }
+
+        // Every minute: a message when a storage problem appears or changes, and one when it is gone.
+        // No report at all (gl-storage not installed) is not alerted: there is nothing to compare with.
+        private static async Task PbxStorageWatchLoop()
+        {
+            await Task.Delay(TimeSpan.FromMinutes(1));
+            string alerted = "";
+            while (true)
+            {
+                try
+                {
+                    var report = ReadStorage(ReadSettingsFile());
+                    var problems = StorageProblems(report, DateTime.UtcNow);
+                    // The dot in the header and the card on the Status tab.
+                    if (report != null && problems.Count > 0)
+                    {
+                        HealthStatus.MarkDisconnected("storage");
+                        HealthStatus.MarkError("storage", string.Join("; ", problems.Select(p =>
+                            $"{p.part}: " + (p.kind == "space" ? $"{p.detail} MB free" : p.kind == "stale" ? "no report since " + p.detail : p.detail))));
+                    }
+                    else if (report != null)
+                        HealthStatus.MarkReachable("storage");
+                    string key = string.Join(";", problems.Select(p => p.part + "/" + p.kind));
+                    if (key != alerted)
+                    {
+                        var l = L10n.Tg;
+                        if (problems.Count > 0)
+                        {
+                            foreach (var p in problems)
+                                SysLog.Warn("pbx", $"storage: {p.part} {p.kind}: {p.detail}");
+                            EnqueueAdminAlert(l.T("tg.pbx.storage.title"),
+                                string.Join("\n", problems.Select(p => l.T($"tg.pbx.storage.{p.part}.{p.kind}", p.detail))));
+                        }
+                        else if (alerted != "")
+                        {
+                            SysLog.Info("pbx", "storage: writable again");
+                            EnqueueAdminAlert(l.T("tg.pbx.storage.title"), l.T("tg.pbx.storage.ok"));
+                        }
+                        alerted = key;
+                    }
+                }
+                catch (Exception ex) { SysLog.Error("pbx", "storage check: " + ex.Message); }
+                await Task.Delay(TimeSpan.FromMinutes(1));
+            }
+        }
+
         // To the common Telegram chats and the common ntfy topic (not a line's): PBX-wide events.
         private static void EnqueueAdminAlert(string title, string text)
         {

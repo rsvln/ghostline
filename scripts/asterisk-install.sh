@@ -423,6 +423,33 @@ AccuracySec=5
 WantedBy=timers.target
 EOF
 
+log "Call storage check"
+# ghostline mounts the recordings and the CDR read-only, so only this side can tell that Asterisk
+# cannot write them (a shared directory with the wrong owner). The report: <conf-dir>/storage.json.
+install -m 755 "$(script_file gl-storage.py)" /usr/local/bin/gl-storage
+cat >/etc/systemd/system/gl-storage.service <<EOF
+[Unit]
+Description=Call storage check for ghostline
+
+[Service]
+Type=oneshot
+User=asterisk
+Group=asterisk
+ExecStart=/usr/local/bin/gl-storage $CONF_DIR $REC_DIR $CDR_DIR/cdr.db
+EOF
+cat >/etc/systemd/system/gl-storage.timer <<'EOF'
+[Unit]
+Description=Call storage check for ghostline, every 60 s
+
+[Timer]
+OnBootSec=20
+OnUnitActiveSec=60
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target
+EOF
+
 log "systemd"
 cat >/etc/systemd/system/asterisk.service <<'EOF'
 [Unit]
@@ -465,7 +492,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable asterisk >/dev/null 2>&1
-systemctl enable --now gl-usb-inventory.timer >/dev/null 2>&1
+systemctl enable --now gl-usb-inventory.timer gl-storage.timer >/dev/null 2>&1
 systemctl restart asterisk
 
 log "fail2ban"
@@ -596,6 +623,17 @@ for i in $(seq 1 20); do
   sleep 1
 done
 fail2ban-client status asterisk | sed 's/^/  /'
+systemctl start gl-storage.service || true
+python3 - "$CONF_DIR/storage.json" <<'EOF' || true
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    sys.exit("  WARNING: no storage.json from gl-storage")
+for k in ("recordings", "cdr"):
+    r = d[k]
+    print(f"  {k:<24} {'writable' if r['ok'] else 'NOT WRITABLE: ' + r['error']}")
+EOF
 
 log "Done"
 if [ "$ami_new" = 1 ]; then

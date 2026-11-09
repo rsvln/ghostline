@@ -97,6 +97,9 @@ namespace ghostline
                         if (full)
                         {
                             components.Add(Component("cdr", L10n.Web.T("web.status.cdr"), "cdr", Program.CdrSource(s.calls), true));
+                            // Set by the storage watch once gl-storage on the managed Asterisk's host has reported.
+                            if (HealthStatus.Find("storage") != null)
+                                components.Add(Component("storage", L10n.Web.T("web.storage.title"), "storage", null, true));
                             if (s.calls?.transcribe?.enabled == true)
                                 components.Add(Component("transcribe", L10n.Web.T("web.status.transcribe"), "transcribe", s.calls.transcribe.url, true));
                         }
@@ -250,6 +253,8 @@ namespace ghostline
                             security = managed == null ? null : Program.RecentSecurityEvents.Take(50),
                             fail2ban = managed == null ? null : Program.ReadFail2ban(s),
                             acme = managed == null ? null : Program.ReadAcme(s),
+                            storage = managed == null ? null : Program.ReadStorage(s),
+                            storageProblems = managed == null ? null : Program.StorageProblems(Program.ReadStorage(s), DateTime.UtcNow),
                         });
                     });
 

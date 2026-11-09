@@ -790,6 +790,8 @@ async function loadStatusPbx() {
       ${errs ? `<div class="pbx-usb"><b>${esc(t('web.pbx.problems'))}</b>${errs}</div>` : ''}</div>`;
   }
 
+  if (d.security) html += storageSection(d.storage, d.storageProblems || []);
+
   if (d.phones?.length) {
     const rows = d.phones.map(p => `<tr><td>${settingsLink('ln:' + p.line + '/phone', p.line)}</td><td>${esc(p.extension)}</td>
       <td title="${esc(p.contacts?.[0]?.uri || d.contactsError || '')}">${phoneRegCell(p)}</td></tr>`).join('');
@@ -807,6 +809,29 @@ async function loadStatusPbx() {
     html += fail2banSection(d.fail2ban);
   }
   host.innerHTML = html;
+}
+
+// Whether Asterisk can write the recordings and the CDR, as gl-storage on the Asterisk host reports it.
+// ghostline mounts both read-only, so it cannot check that itself.
+function storageSection(st, problems) {
+  const head = `<div class="section"><h3>${esc(t('web.storage.title'))}</h3>`;
+  if (!st) return head + `<p class="muted">${esc(t('web.storage.no_report'))}</p></div>`;
+  const stale = problems.some(p => p.kind === 'stale');
+  const row = (key, c) => {
+    if (!c) return '';
+    const bad = problems.find(p => p.part === key);
+    const state = stale ? `<span class="muted">${esc(t('web.storage.unknown'))}</span>`
+      : c.ok ? `<span class="hdot ${bad ? 'err' : 'ok'}"></span>${esc(t('web.storage.writable'))}`
+      : `<span class="hdot err"></span><span class="pbx-err">${esc(c.error || '')}</span>`;
+    const free = c.free_mb == null ? '' : c.free_mb >= 1024 ? t('web.storage.free_gb', (c.free_mb / 1024).toFixed(1)) : t('web.storage.free_mb', c.free_mb);
+    return `<tr><td>${esc(t('web.storage.' + key))}</td><td>${esc(c.path)}</td><td>${state}</td>`
+      + `<td class="${bad?.kind === 'space' ? 'pbx-err' : ''}">${esc(free)}</td></tr>`;
+  };
+  const th = ['web.storage.col.what', 'web.storage.col.path', 'web.storage.col.state', 'web.storage.col.free'].map(k => `<th>${esc(t(k))}</th>`).join('');
+  return head + `<table class="stat-table"><thead><tr>${th}</tr></thead><tbody>${row('recordings', st.recordings)}${row('cdr', st.cdr)}</tbody></table>`
+    + (stale ? `<p class="pbx-err">${esc(t('web.storage.stale', fmtIso(st.at)))}</p>` : '')
+    + (problems.some(p => p.kind === 'write') ? `<div class="tree-hint pbx-hint">${esc(t('web.storage.write_hint'))}</div>` : '')
+    + `<p class="muted">${esc(t('web.f2b.reported', ago(st.at)))}</p></div>`;
 }
 
 // The SIP certificate and its Let's Encrypt renewal, as gl-acme on the Asterisk host reports it.
