@@ -16,9 +16,10 @@ namespace ghostline
         private static void EnqueueCallNotifications(CallRecord c, Channel ch)
         {
             var cc = ch.calls ?? new ChannelCalls();
-            // Telegram chats of the line and its ntfy topic (Routing.cs).
+            // Telegram chats of the line, its ntfy topic and its Capy recipients (Routing.cs, Capy.cs).
             var chats = new List<string>(LineCallChats(ch));
             if (LineTopic(ch) is { } topic) chats.Add(NtfyTarget(topic));
+            chats.AddRange(LineCapy(ch).Select(CapyTarget));
             if (chats.Count == 0) return;
 
             if (c.Missed)
@@ -56,6 +57,7 @@ namespace ghostline
                 var call = Store.GetCall(item.CallId);
                 if (call == null || !ChannelOn(item)) { Store.MarkCallTgFinal(item.Id); return; }
                 if (IsNtfyTarget(item.ChatId)) { await SendCallNtfy(item, call); return; }
+                if (IsCapyTarget(item.ChatId)) { await SendCallCapy(item, call); return; }
 
                 bool trFinished = call.TrState is "done" or "error";
                 string head = CallHeader(call);
@@ -133,6 +135,7 @@ namespace ghostline
                 var call = Store.GetCall(item.CallId);
                 if (call == null || !ChannelOn(item)) { Store.MarkCallTgFinal(item.Id); return; }
                 if (IsNtfyTarget(item.ChatId)) { await EditCallNtfy(item, call); return; }
+                if (IsCapyTarget(item.ChatId)) { await EditCallCapy(item, call); return; }
 
                 string full = CallHeader(call) + TranscriptPart(call);
                 bool cut;
@@ -159,7 +162,7 @@ namespace ghostline
         {
             string err = DescribeException(ex);
             Store.MarkCallTgFailed(item.Id, err);
-            string kind = IsNtfyTarget(item.ChatId) ? "ntfy" : "telegram";
+            string kind = TargetKind(item.ChatId);
             HealthStatus.MarkError(kind, err);
             SysLog.Warn("telegram", $"call {item.CallId} {kind} {what} to {item.ChatId} failed (attempt {item.Attempts + 1}): {err}");
             // For example the message was deleted: nothing left to edit.
@@ -168,7 +171,7 @@ namespace ghostline
         }
 
         // A queued row of a channel switched off in the config is not sent.
-        private static bool ChannelOn(CallTgItem item) => IsNtfyTarget(item.ChatId) ? NtfyEnabled : TelegramEnabled;
+        private static bool ChannelOn(CallTgItem item) => ClientOn(TargetKind(item.ChatId));
 
         // ntfy: the title is the first line of the header, the text the rest of it plus the transcript.
         // A call with a recording goes out with the MP3; when the transcript is ready the notification

@@ -13,7 +13,7 @@ namespace ghostline
         public static readonly Regex NameOk = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.CultureInvariant);
 
         // List keys: a comma-separated value in the form, [a, b] in the YAML.
-        static readonly HashSet<string> ListKeys = new(StringComparer.OrdinalIgnoreCase) { "chat_ids", "local_nets", "ignore_ip" };
+        static readonly HashSet<string> ListKeys = new(StringComparer.OrdinalIgnoreCase) { "chat_ids", "local_nets", "ignore_ip", "to" };
 
         // Value at a path: "web.password", "gateways[id=pbx].ami_port", "lines[name=home].calls.voice".
         // A missing key is added (with any missing intermediate sections); a missing list item with
@@ -682,6 +682,10 @@ namespace ghostline
                     F("clients.ntfy.url", "text", s.clients?.ntfy?.url),
                     F("clients.ntfy.token", "text", s.clients?.ntfy?.token),
                     F("clients.ntfy.topic", "text", s.clients?.ntfy?.topic)),
+                G("capy",
+                    F("clients.capy.url", "text", s.clients?.capy?.url),
+                    F("clients.capy.token", "text", s.clients?.capy?.token),
+                    F("clients.capy.to", "text", Csv(s.clients?.capy?.to))),
                 G("web",
                     F("system.web.port", "number", n(s.web?.port)),
                     F("system.web.user", "text", s.web?.user),
@@ -719,11 +723,11 @@ namespace ghostline
             {
                 groups,
                 // Client sections present at the top; the form shows only these and offers to add the rest.
-                clients = Present(s.clients?.telegram != null, s.clients?.ntfy != null),
+                clients = Present(s.clients?.telegram != null, s.clients?.ntfy != null, s.clients?.capy != null),
                 gateways = (s.gateways ?? new()).Where(g => !string.IsNullOrEmpty(g.id))
                     .Select(g => new GatewayItem(g.id, GatewayFields(g.id, g), g.type, g.Managed, g.modems ?? new())).ToList(),
                 lines = (s.lines ?? new()).Where(ch => !string.IsNullOrEmpty(ch.name)).Select(ch => new Item(ch.name, LineFields(ch.name, ch, s),
-                    ch.clients == null ? null : Present(ch.clients.telegram != null, ch.clients.ntfy != null))).ToList(),
+                    ch.clients == null ? null : Present(ch.clients.telegram != null, ch.clients.ntfy != null, ch.clients.capy != null))).ToList(),
                 // For a line: what its gateway is, and the modems to choose from.
                 gatewayInfo = (s.gateways ?? new()).Where(g => !string.IsNullOrEmpty(g.id)).ToDictionary(g => g.id, g => new
                 {
@@ -805,6 +809,7 @@ namespace ghostline
                 F($"{p}.number", "text", ch.number),
                 F($"{p}.clients.telegram.chat_ids", "text", Csv(ch.clients?.telegram?.chatIds)),
                 F($"{p}.clients.ntfy.topic", "text", ch.clients?.ntfy?.topic),
+                F($"{p}.clients.capy.to", "text", Csv(ch.clients?.capy?.to)),
                 F($"{p}.calls.voice", "checkbox", b(calls.voice)),
                 F($"{p}.calls.transcript", "checkbox", b(calls.transcript)),
                 F($"{p}.calls.missed", "checkbox", b(calls.missed)),
@@ -817,16 +822,18 @@ namespace ghostline
             };
         }
 
-        static string[] Present(bool telegram, bool ntfy) =>
-            new[] { telegram ? "telegram" : null, ntfy ? "ntfy" : null }.Where(x => x != null).ToArray();
+        static string[] Present(bool telegram, bool ntfy, bool capy) =>
+            new[] { telegram ? "telegram" : null, ntfy ? "ntfy" : null, capy ? "capy" : null }.Where(x => x != null).ToArray();
 
         // First keys of a client section added from the form (raw YAML).
         public static IList<(string key, string raw)> NewSection(string path) => path switch
         {
             "clients.telegram" => new[] { ("token", "\"\""), ("chat_ids", "[]") },
             "clients.ntfy" => new[] { ("url", "\"\""), ("token", "\"\""), ("topic", "\"\"") },
+            "clients.capy" => new[] { ("url", "\"\""), ("token", "\"\""), ("to", "[]") },
             _ when path.EndsWith(".clients.telegram") => new[] { ("chat_ids", "[]") },
             _ when path.EndsWith(".clients.ntfy") => new[] { ("topic", "\"\"") },
+            _ when path.EndsWith(".clients.capy") => new[] { ("to", "[]") },
             _ => null
         };
 

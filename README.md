@@ -13,7 +13,7 @@ is what runs in the default `sms` mode.
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Configuration](#configuration)
-- [Telegram and ntfy](#telegram-and-ntfy)
+- [Telegram, ntfy and Capy](#telegram-ntfy-and-capy)
 - [Web interface](#web-interface)
 - [Storage and reliability](#storage-and-reliability)
 - [Hardware](#hardware)
@@ -26,13 +26,13 @@ is what runs in the default `sms` mode.
 - Gateways: Yeastar (AMI), GoIP (SMTP + HTTP), Quectel/SIMCom modules
   through `chan_quectel` and Huawei 3G sticks through `chan_dongle` in
   Asterisk/FreePBX (AMI). Several gateways of the same type are supported.
-- Two notification channels, both optional and usable together: Telegram and
+- Three notification channels, all optional and usable together: Telegram,
   [ntfy](https://ntfy.sh) (a self-hosted push server, works without Google
-  services and without access to Telegram). Each line goes to its own
-  chats/topic or to common ones.
+  services and without access to Telegram) and Capy (a self-hosted
+  messenger, through its bot API). Each line goes to its own chats/topic/recipients or to common ones.
 - Incoming SMS are forwarded with the sender's name resolved from a Google
   Contacts export.
-- Outgoing SMS from a Telegram chat, an ntfy topic or the web interface,
+- Outgoing SMS from a Telegram chat, an ntfy topic, a Capy chat or the web interface,
   through a persistent queue.
 - SMS history in SQLite, with search and export.
 - Line monitoring (`quectel`, `dongle`): registration, operator, network type, signal on
@@ -52,7 +52,7 @@ is what runs in the default `sms` mode.
   [speaches](https://github.com/speaches-ai/speaches) (faster-whisper).
   If the PBX records each side of the call separately, the transcript is a
   dialog with speakers and timestamps.
-- Telegram and ntfy: the recording right after the call; the transcript is
+- Telegram, ntfy and Capy: the recording right after the call; the transcript is
   added to the same message when it is ready. Optional notifications about
   missed calls.
 - Transcript download as PDF (same look as in the web interface) or plain
@@ -63,7 +63,7 @@ Interface and messages are available in English and Russian.
 ## How it works
 
 ```
-GSM gateway / Asterisk+chan_quectel ──AMI──▶ ghostline ◀─▶ Telegram, ntfy
+GSM gateway / Asterisk+chan_quectel ──AMI──▶ ghostline ◀─▶ Telegram, ntfy, Capy
                                                  │
 Asterisk CDR (MySQL, read-only) ─────────────────┤
 Recordings (HTTP, read-only) ────────────────────┤──▶ web interface
@@ -77,7 +77,7 @@ SQLite file next to the configuration file.
 
 - A supported gateway: Yeastar, GoIP, or Asterisk/FreePBX with
   `chan_quectel` and a Quectel or SIMCom module.
-- A Telegram bot token and/or an ntfy server (at least one, to get the
+- A Telegram bot token, an ntfy server or a Capy bot (at least one, to get the
   notifications).
 - Linux x64 (systemd service) or Docker.
 - For `mode: full`: FreePBX/Asterisk with call recording enabled, `ffmpeg` on
@@ -207,7 +207,7 @@ system:                       # ghostline itself
       enabled: false
       port: 25
 
-clients:                      # notification channels, both optional
+clients:                      # notification channels, all optional
   telegram:                   # empty token — Telegram is off
     token: 123456789:AAExampleTelegramBotToken
     chat_ids:                 # common chats, for lines without their own
@@ -216,6 +216,10 @@ clients:                      # notification channels, both optional
     url: https://ntfy.example.org
     token: tk_exampleaccesstoken
     topic:                    # common topic, for lines without their own
+  capy:                       # empty url or token — Capy is off
+    url: https://chat.example.com
+    token: rb_examplebottoken
+    to: []                    # @username or chat ids; empty — the bot's owner
 
 gateways:
   - id: pbx
@@ -239,6 +243,8 @@ lines:
         chat_ids: []          # empty — clients.telegram.chat_ids
       ntfy:
         topic: gl-personal    # empty — clients.ntfy.topic
+      capy:
+        to: []                # empty — clients.capy.to
     calls:
       voice: true
       transcript: true
@@ -264,6 +270,8 @@ lines:
 | `clients.ntfy.url` | ntfy server; empty — ntfy is off |
 | `clients.ntfy.token` | ntfy access token with read and write access to the topics |
 | `clients.ntfy.topic` | Common topic, for lines without their own |
+| `clients.capy.url` / `clients.capy.token` | Capy server and the bot's token (`rb_...`); either empty — Capy is off |
+| `clients.capy.to` | Common recipients: `@username` (the direct chat with that person) or a group's chat id; empty — the bot's owner |
 
 A client is on when its section is there (with a token / url); remove the
 section to turn it off. A top-level `telegram` section of older configs is
@@ -303,6 +311,7 @@ into `system` (old file: `ghostline.yaml.bak-v3`).
 | `clients` | Clients of the line: notifications go only to the ones listed. No `clients` section — every client that is on; `clients: {}` — nowhere |
 | `clients.telegram.chat_ids` | Telegram chats of the line (SMS and calls); empty — the common ones |
 | `clients.ntfy.topic` | ntfy topic of the line; empty — the common one |
+| `clients.capy.to` | Capy recipients of the line; empty — the common ones |
 | `calls.voice` / `calls.transcript` / `calls.missed` | What to send for calls on this line |
 | `calls.chat_ids` | Telegram chats for this line's calls only; empty — the line's chats |
 | `phone.extension` / `dial` / `encryption` | A line on the gateway with `pbx: managed` only: the line's SIP phone, see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
@@ -334,16 +343,16 @@ Put a Google Contacts export (Google CSV) at `/etc/ghostline/contacts.csv`.
 Numbers are matched regardless of formatting (`+7`, `8`, spaces, dashes).
 All numbers are shown in E.164 form.
 
-## Telegram and ntfy
+## Telegram, ntfy and Capy
 
-Both channels work the same way. Each line goes to its own Telegram chats and
-ntfy topic, or to the common ones; a chat or a topic can serve one line or
-several.
+The channels work the same way. Each line goes to its own Telegram chats, ntfy
+topic and Capy recipients, or to the common ones; a chat or a topic can serve
+one line or several.
 
 Incoming SMS, sent SMS and calls come to the chats and topics of their line.
 For a call with a recording, the recording comes first and the transcript is
 added to the same message when it is ready (in ntfy the notification is
-replaced).
+replaced, in Capy the message is edited).
 
 To send an SMS, write a message in a chat or topic:
 
@@ -364,14 +373,19 @@ To send an SMS, write a message in a chat or topic:
   ```
 
 Commands: `/help` (the format above for this chat or topic, the lines),
-`/status` (state of gateways, channels and queues). Telegram shows them in the
-bot menu. Only chats and topics of the configured lines are served.
+`/status` (state of gateways, channels and queues). Telegram and Capy show
+them in the bot menu. Only chats and topics of the configured lines are served.
 
 ### ntfy
 
 Setting up the ntfy server (users and access, HTTPS behind a reverse proxy,
 the phone app) and how ghostline uses it is described in
 [docs/ntfy.md](docs/ntfy.md).
+
+### Capy
+
+Creating the bot, recipients and groups, and what ghostline needs from the
+Capy server: [docs/capy.md](docs/capy.md).
 
 ## Web interface
 

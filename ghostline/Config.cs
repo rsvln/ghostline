@@ -165,6 +165,7 @@ namespace ghostline
     {
         public LineTelegram telegram { get; set; }
         public LineNtfy ntfy { get; set; }
+        public LineCapy capy { get; set; }
     }
 
     public class LineTelegram
@@ -175,6 +176,11 @@ namespace ghostline
     public class LineNtfy
     {
         public string topic { get; set; }             // topic of the line; empty: ntfy.topic
+    }
+
+    public class LineCapy
+    {
+        public List<string> to { get; set; }          // recipients of the line: @username or a chat id; empty: capy.to
     }
 
     public class ChannelCalls
@@ -350,6 +356,7 @@ namespace ghostline
     {
         public TelegramSettings telegram { get; set; }
         public NtfySettings ntfy { get; set; }
+        public CapySettings capy { get; set; }
     }
 
     // Languages: files locales/<language>.json next to the app (en, ru). As in frte2tg.
@@ -395,6 +402,17 @@ namespace ghostline
         public string url { get; set; }
         public string token { get; set; }
         public string topic { get; set; }
+    }
+
+    // Capy (a self-hosted messenger, its bot API): SMS and calls go to the recipients as messages from a bot;
+    // a message written to the bot is an SMS to send or a command. Empty url or token: off.
+    public class CapySettings
+    {
+        public string url { get; set; }               // the Capy server, https://chat.example.com
+        public string token { get; set; }             // the bot's token, rb_...
+        // Recipients: @username (the direct chat with that person) or a chat id (a group the bot is in).
+        // Empty: the bot's owner.
+        public List<string> to { get; set; } = new();
     }
 
     // Line monitoring (gateways[].monitor): a message to the line's chats and topic when the line has

@@ -603,7 +603,7 @@ namespace ghostline
             }
         }
 
-        // To the common Telegram chats and the common ntfy topic (not a line's): PBX-wide events.
+        // To the common Telegram chats, ntfy topic and Capy recipients (not a line's): PBX-wide events.
         private static void EnqueueAdminAlert(string title, string text)
         {
             if (TelegramEnabled)
@@ -611,6 +611,9 @@ namespace ghostline
                     Store.EnqueueTelegramMessage(chat, title + "\n" + text);
             if (NtfyEnabled && !string.IsNullOrWhiteSpace(settings.clients.ntfy.topic))
                 EnqueueNtfyTopic(settings.clients.ntfy.topic, title, text);
+            if (CapyEnabled)
+                foreach (var to in CapyCommonTo())
+                    Store.EnqueueTelegramMessage(CapyTarget(to), title + "\n" + text);
         }
 
         // ---- TLS certificate -----------------------------------------------------------------------------

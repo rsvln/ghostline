@@ -13,7 +13,24 @@ namespace ghostline
         // A line uses the clients of its "clients" section; a line without that section (older configs)
         // uses every client that is on. Inside a client section empty chats / topic mean the common ones.
         private static bool LineUses(Channel ch, string client) =>
-            ch.clients == null || (client == "telegram" ? ch.clients.telegram != null : ch.clients.ntfy != null);
+            ch.clients == null || client switch
+            {
+                "telegram" => ch.clients.telegram != null,
+                "ntfy" => ch.clients.ntfy != null,
+                "capy" => ch.clients.capy != null,
+                _ => false
+            };
+
+        // The client a queued target goes to: "ntfy:<topic>", "capy:<recipient>", otherwise a Telegram chat.
+        internal static string TargetKind(string target) =>
+            IsNtfyTarget(target) ? "ntfy" : IsCapyTarget(target) ? "capy" : "telegram";
+
+        internal static bool ClientOn(string kind) => kind switch
+        {
+            "ntfy" => NtfyEnabled,
+            "capy" => CapyEnabled,
+            _ => TelegramEnabled
+        };
 
         internal static List<string> LineChats(Channel ch) =>
             !TelegramEnabled || !LineUses(ch, "telegram") ? new List<string>()

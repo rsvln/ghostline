@@ -133,7 +133,7 @@ namespace ghostline
                 }
             }
 
-            // Notification channels, both optional: Telegram (telegram.token) and ntfy (ntfy.url).
+            // Notification channels, all optional: Telegram (telegram.token), ntfy (ntfy.url), Capy (capy.url + token).
             if (TelegramEnabled)
             {
                 HealthStatus.MarkConfigured("telegram");
@@ -152,7 +152,13 @@ namespace ghostline
                 HealthStatus.MarkConfigured("ntfy");
                 Task.Run(() => NtfyListenLoop());
             }
-            SysLog.Info("app", $"clients: telegram={(TelegramEnabled ? "on" : "off")}, ntfy={(NtfyEnabled ? "on" : "off")}");
+            if (CapyEnabled)
+            {
+                HealthStatus.MarkConfigured("capy");
+                Task.Run(() => CapyHealthLoop());
+                Task.Run(() => CapyPollLoop());
+            }
+            SysLog.Info("app", $"clients: telegram={(TelegramEnabled ? "on" : "off")}, ntfy={(NtfyEnabled ? "on" : "off")}, capy={(CapyEnabled ? "on" : "off")}");
             Task.Run(() => TelegramOutboxWorker());
             Task.Run(() => SmsOutboxWorker());
 

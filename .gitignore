@@ -374,3 +374,6 @@ yetgsms-refactor-spec_1.md
 docs/incident-*.md
 # Local notes for Claude Code: stand details, never published
 CLAUDE.local.md
+
+# Local bot tokens (never publish)
+.capy*

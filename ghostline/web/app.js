@@ -1141,7 +1141,7 @@ let gatewayInfo = {};
 let phoneSecrets = [];
 
 // The tree follows the hardware: a gateway -> its PBX settings and modems; a line -> its phone,
-// clients (telegram, ntfy) and calls.
+// clients (telegram, ntfy, capy) and calls.
 function settingsTree(data) {
   const byId = Object.fromEntries((data.groups || []).map(g => [g.id, g]));
   const node = id => ({ id, title: byId[id].title, fields: byId[id].fields || [] });
@@ -1149,7 +1149,7 @@ function settingsTree(data) {
     id, title: byId[id].title, fields: [], list: id,
     children: (data[id] || []).map(it => itemNode(id, it.key, it.fields, false, it.clients, it))
   });
-  const clientFields = { telegram: byId.telegram.fields, ntfy: byId.ntfy.fields };
+  const clientFields = { telegram: byId.telegram.fields, ntfy: byId.ntfy.fields, capy: byId.capy.fields };
   // System: mode and languages, with the settings of ghostline itself under it.
   const calls = Object.assign(node('calls'), { children: [node('cdr_db'), node('transcribe')] });
   const system = Object.assign(node('system'),
@@ -1183,14 +1183,14 @@ function itemNode(listId, key, fields, isNew, clients, saved) {
     return item;
   }
   const sub = (part) => fields.filter(f => f.path.includes(']' + '.' + part + '.'));
-  const telegram = sub('clients.telegram'), ntfy = sub('clients.ntfy'), calls = sub('calls'), phone = sub('phone');
-  item.fields = fields.filter(f => ![telegram, ntfy, calls, phone].some(x => x.includes(f)));
+  const telegram = sub('clients.telegram'), ntfy = sub('clients.ntfy'), capy = sub('clients.capy'), calls = sub('calls'), phone = sub('phone');
+  item.fields = fields.filter(f => ![telegram, ntfy, capy, calls, phone].some(x => x.includes(f)));
   const base = `lines[name=${key}].`;
   item.children = [
     { id: id + '/phone', title: t('web.config.group.phone'), fields: phone, hintKey: 'web.config.hint.phone',
       phone: { line: key, isNew, hasSecret: phoneSecrets.includes(key) },
       visible: () => gatewayState(lineGateway(item))?.managed },
-    clientsNode(id + '/clients', base, clients || [], { telegram, ntfy }, clients == null),
+    clientsNode(id + '/clients', base, clients || [], { telegram, ntfy, capy }, clients == null),
     { id: id + '/calls', title: t('web.config.group.calls'), fields: calls, hintKey: 'web.config.hint.line_calls' }
   ];
   return item;
@@ -1242,8 +1242,8 @@ function walkShown(fn, nodes = formTree, parent = null) {
 // "Clients": Telegram and ntfy as optional subsections, added and removed like list items.
 // base: '' at the top, 'lines[name=…].' in a line. unset: a line without a "clients" section,
 // which goes to every client that is on.
-const CLIENTS = ['telegram', 'ntfy'];
-const CLIENT_TITLES = { telegram: 'Telegram', ntfy: 'ntfy' };
+const CLIENTS = ['telegram', 'ntfy', 'capy'];
+const CLIENT_TITLES = { telegram: 'Telegram', ntfy: 'ntfy', capy: 'Capy' };
 
 function clientsNode(id, base, present, fieldsOf, unset) {
   const line = base !== '';

@@ -249,6 +249,20 @@ namespace ghostline
             return chunks.Select(c => (Math.Max(0, c.s - Pad), Math.Min(total, c.e + Pad))).ToList();
         }
 
+        // A voice note's waveform for Capy: 64 bars, each the peak of its slice scaled to 0..255 against the
+        // loudest one, base64. null: not 16-bit mono PCM (the note then has no waveform).
+        public static string Waveform(byte[] wav, int bars = 64)
+        {
+            if (!TryPcm16(wav, out int off, out int len) || len < bars * 2) return null;
+            int samples = len / 2, per = samples / bars;
+            var peaks = new int[bars];
+            for (int b = 0; b < bars; b++)
+                for (int i = b * per; i < (b + 1) * per; i++)
+                    peaks[b] = Math.Max(peaks[b], Math.Abs((int)(short)(wav[off + i * 2] | (wav[off + i * 2 + 1] << 8))));
+            int max = Math.Max(1, peaks.Max());
+            return Convert.ToBase64String(peaks.Select(p => (byte)(p * 255 / max)).ToArray());
+        }
+
         // Piece of a WAV from s to e seconds: the same header with other sizes.
         public static byte[] Slice(byte[] wav, double s, double e)
         {

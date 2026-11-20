@@ -297,7 +297,7 @@
   "tg.sms.wrong.many": "This doesn't look like an SMS to send. Write three lines: the line, the recipient's number and the text.\n\n<b>Lines:</b>\n{0}\n\n/help — more",
   "web.field.ntfy.topic": "Common topic (for lines without their own)",
   "web.config.group.clients": "Clients",
-  "web.config.hint.clients": "Where notifications go and where SMS can be sent from. Telegram and ntfy are optional: a client that is not here is off. A line can have its own chats and topic (Lines → line → Clients).",
+  "web.config.hint.clients": "Where notifications go and where SMS can be sent from. Telegram, ntfy and Capy are optional: a client that is not here is off. A line can have its own chats and topic (Lines → line → Clients).",
   "web.config.hint.line_clients": "Clients of this line: notifications go only to the ones listed here. Empty chats / topic inside a client: the common ones.",
   "web.config.hint.line_telegram": "Telegram chats of this line (SMS and calls). Empty: the common chats.",
   "web.config.hint.line_ntfy": "ntfy topic of this line. Empty: the common topic.",
@@ -441,5 +441,12 @@
   "tg.pbx.storage.recordings.space": "Little space left for the recordings: {0} MB.",
   "tg.pbx.storage.cdr.space": "Little space left for the call journal: {0} MB.",
   "tg.pbx.storage.report.stale": "No fresh report from gl-storage on the Asterisk host (the last one: {0}).",
-  "tg.pbx.storage.ok": "Asterisk writes the recordings and the call journal again."
+  "tg.pbx.storage.ok": "Asterisk writes the recordings and the call journal again.",
+  "web.config.group.capy": "Capy",
+  "web.config.hint.capy": "Capy messenger, as a bot (create one in Capy: Settings → Bots and API, copy its token). Empty address or token: off. SMS, calls (a voice note, the transcript added later) and alerts go to the recipients: @username or a group's chat id (the bot must be in the group); empty: the bot's owner. A message written to the bot is sent as an SMS: two lines (number, text) when the chat has one line, three (line, number, text) when several. Commands: /status, /help.",
+  "web.field.capy.url": "Server address (https://...)",
+  "web.field.capy.token": "Bot token (rb_...)",
+  "web.field.capy.to": "Recipients (@username or chat id; empty — the bot's owner)",
+  "web.config.hint.line_capy": "Capy recipients of this line. Empty: the common ones.",
+  "web.field.lines.clients.capy.to": "Recipients (empty — common)"
 }

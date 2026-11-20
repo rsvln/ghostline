@@ -94,6 +94,8 @@ namespace ghostline
                             components.Add(Component("telegram", "Telegram", "telegram", null, true));
                         if (Program.NtfyEnabled)
                             components.Add(Component("ntfy", "ntfy", "ntfy", s.clients.ntfy.url, true));
+                        if (Program.CapyEnabled)
+                            components.Add(Component("capy", "Capy", "capy", s.clients.capy.url, true));
                         if (full)
                         {
                             components.Add(Component("cdr", L10n.Web.T("web.status.cdr"), "cdr", Program.CdrSource(s.calls), true));

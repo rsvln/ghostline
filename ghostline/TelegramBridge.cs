@@ -6,21 +6,23 @@ namespace ghostline
 {
     internal partial class Program
     {
-        // Puts the text into the persistent queue for sending to every Telegram chat of the line.
-        // The queue is stored in SQLite (the same DB as the SMS history) and survives a process
-        // restart, so a temporary Telegram API outage does not silently drop notifications.
+        // Puts the text into the persistent queue for sending to every Telegram chat of the line,
+        // and to its Capy recipients (Capy gets the same plain text). The queue is stored in SQLite
+        // (the same DB as the SMS history) and survives a process restart, so a temporary API
+        // outage does not silently drop notifications.
         private static void EnqueueTelegramForLine(Channel line, string text)
         {
             foreach (string chat in LineChats(line))
                 Store.EnqueueTelegramMessage(chat, text);
+            EnqueueCapyForLine(line, text);
         }
 
         // Background worker of the persistent queue: every 5 s takes the pending messages
         // and tries to send them. Success removes them from the queue; failure records the
         // attempt and keeps them for the next cycle. Attempts are unlimited: a message
         // stays queued until it goes out (and survives a restart, since the queue lives in
-        // the DB, not in memory). Targets "ntfy:<topic>" go to ntfy, the rest are Telegram chats;
-        // rows of a channel that is switched off in the config are dropped.
+        // the DB, not in memory). Targets "ntfy:<topic>" go to ntfy, "capy:<recipient>" to Capy, the
+        // rest are Telegram chats; rows of a channel that is switched off in the config are dropped.
         private static async Task TelegramOutboxWorker()
         {
             while (true)
@@ -28,17 +30,18 @@ namespace ghostline
                 var pending = Store.GetPendingTelegramMessages(50);
                 foreach (var item in pending)
                 {
-                    bool ntfy = IsNtfyTarget(item.ChatId);
-                    string kind = ntfy ? "ntfy" : "telegram";
+                    string kind = TargetKind(item.ChatId);
                     try
                     {
-                        if (ntfy ? !NtfyEnabled : !TelegramEnabled)
+                        if (!ClientOn(kind))
                         {
                             Store.DeleteTelegramMessage(item.Id);
                             continue;
                         }
-                        if (ntfy)
+                        if (kind == "ntfy")
                             await NtfySendQueued(item.ChatId, item.Text);
+                        else if (kind == "capy")
+                            await CapySendQueued(item.Id, item.ChatId, item.Text);
                         else
                             await bot.SendMessage(item.ChatId, item.Text);
                         Store.DeleteTelegramMessage(item.Id);
@@ -127,6 +130,7 @@ namespace ghostline
                 rows.Add(Row(gw.id, gw.id, Modems.IsAmi(gw.type)));
             if (TelegramEnabled) rows.Add(Row("telegram", "Telegram", true));
             if (NtfyEnabled) rows.Add(Row("ntfy", "ntfy", true));
+            if (CapyEnabled) rows.Add(Row("capy", "Capy", true));
             if (settings.FullMode)
             {
                 rows.Add(Row("cdr", l.T("tg.status.cdr"), true));
