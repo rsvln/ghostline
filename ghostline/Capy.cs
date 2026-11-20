@@ -34,12 +34,14 @@ namespace ghostline
         private static Guid? _capyOwnerId;
         private static string _capyOwnerName;
 
-        // "@Alice" and "alice" are the same person; a chat id stays as it is.
+        // "@Alice" and "alice" are the same person; a chat id stays as it is; a chat's number (the one in its
+        // link, capy.example.com/chat/13) becomes "#13".
         internal static string CapyRecipient(string to)
         {
             to = (to ?? "").Trim();
             if (to.Length == 0) return null;
             if (Guid.TryParse(to, out var id)) return id.ToString();
+            if (to.TrimStart('#').All(char.IsAsciiDigit) && to.TrimStart('#').Length > 0) return "#" + long.Parse(to.TrimStart('#'));
             if (to.Equals(CapyOwner, StringComparison.OrdinalIgnoreCase)) return CapyOwner;
             return "@" + to.TrimStart('@').ToLowerInvariant();
         }
@@ -57,14 +59,14 @@ namespace ghostline
             : CapyList(ch.clients?.capy?.to) is { Count: > 0 } own ? own
             : CapyCommonTo();
 
-        // Lines a chat serves: a group by its id; a direct chat by the person in it (@username, or the owner).
-        internal static List<Channel> LinesOfCapyChat(Guid chatId, bool direct, string username, bool isOwner)
+        // Lines a chat serves: any chat by its id or number; a direct chat by the person in it (@username, or the owner).
+        internal static List<Channel> LinesOfCapyChat(Guid chatId, long number, bool direct, string username, bool isOwner)
         {
             string user = username == null ? null : CapyRecipient(username);
             return AllLines.Where(c =>
             {
                 var to = LineCapy(c);
-                return to.Contains(chatId.ToString())
+                return to.Contains(chatId.ToString()) || (number > 0 && to.Contains("#" + number))
                     || (direct && ((user != null && to.Contains(user)) || (isOwner && to.Contains(CapyOwner))));
             }).ToList();
         }
@@ -100,12 +102,32 @@ namespace ghostline
         internal static Guid CapyMsgId(string key) =>
             new(MD5.HashData(Encoding.UTF8.GetBytes("ghostline:" + key)));
 
-        // A recipient for /bot/send: @username or a chat id; the owner by name.
+        // Chat number -> chat id, from the chat list (filled by the poll loop, refreshed when a number is missing).
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, Guid> _capyChatNumbers = new();
+
+        private static void RememberCapyChats(JArray chats)
+        {
+            foreach (var c in chats)
+                if ((long?)c["number"] is > 0 and var n)
+                    _capyChatNumbers[n] = (Guid)c["id"];
+        }
+
+        // A recipient for /bot/send: @username or a chat id; the owner by name, a chat number by its id.
         private static async Task<string> CapyTo(string to)
         {
-            if (to != CapyOwner) return to;
-            if (_capyOwnerName == null) await CapyWhoAmI();
-            return "@" + _capyOwnerName;
+            if (to == CapyOwner)
+            {
+                if (_capyOwnerName == null) await CapyWhoAmI();
+                return "@" + _capyOwnerName;
+            }
+            if (to.StartsWith('#') && long.TryParse(to.AsSpan(1), out long number))
+            {
+                if (!_capyChatNumbers.ContainsKey(number))
+                    RememberCapyChats((JArray)await CapyRequest(HttpMethod.Get, "/chats"));
+                return _capyChatNumbers.TryGetValue(number, out var id) ? id.ToString()
+                    : throw new InvalidOperationException($"the bot is not in Capy chat {number}");
+            }
+            return to;
         }
 
         // (chat id, message id) of the sent message.
@@ -278,6 +300,7 @@ namespace ghostline
                 {
                     if (_capyBotId == null) await CapyWhoAmI();
                     var chats = (JArray)await CapyRequest(HttpMethod.Get, "/chats");
+                    RememberCapyChats(chats);
                     foreach (var chat in chats)
                     {
                         Guid chatId = (Guid)chat["id"];
@@ -300,8 +323,8 @@ namespace ghostline
                                 if (msg == null || (Guid?)msg["senderId"] is not { } sender || sender == _capyBotId) continue;
                                 if (!users.TryGetValue(sender, out var name))
                                     users[sender] = name = (string)(await CapyRequest(HttpMethod.Get, $"/users/{sender}"))["username"];
-                                HandleCapyMessage(chatId, (string)chat["type"] == "Direct", name, sender == _capyOwnerId,
-                                    (string)msg["text"] ?? "");
+                                HandleCapyMessage(chatId, (long?)chat["number"] ?? 0, (string)chat["type"] == "Direct", name,
+                                    sender == _capyOwnerId, (string)msg["text"] ?? "");
                             }
                             Store.SetKv(key, seen.ToString());
                             if (events.Count == 0 || page["hasMore"]?.Value<bool>() != true) break;
@@ -322,14 +345,18 @@ namespace ghostline
 
         // A message to the bot: a command, or an SMS to send ("number / text" in a chat of one line,
         // "line / number / text" in a chat of several). Replies go into the same chat.
-        private static void HandleCapyMessage(Guid chatId, bool direct, string username, bool isOwner, string message)
+        private static void HandleCapyMessage(Guid chatId, long chatNumber, bool direct, string username, bool isOwner, string message)
         {
             string reply = CapyTarget(chatId.ToString());
-            var lines = LinesOfCapyChat(chatId, direct, username, isOwner);
+            var lines = LinesOfCapyChat(chatId, chatNumber, direct, username, isOwner);
             var l = L10n.Tg;
             if (lines.Count == 0)
             {
-                // Group chats are not answered: the bot may sit in a group for other reasons.
+                // Group chats are not answered: the bot may sit in a group for other reasons. The log says
+                // which recipient would make the chat a line's.
+                SysLog.Info("capy", direct
+                    ? $"message from @{username}, who is not a recipient of any line: refused"
+                    : $"message in group {chatNumber} ({chatId}), which is not a recipient of any line: ignored (add {chatNumber} to clients.capy.to)");
                 if (direct) Store.EnqueueTelegramMessage(reply, l.T("tg.sms.go_away"));
                 return;
             }

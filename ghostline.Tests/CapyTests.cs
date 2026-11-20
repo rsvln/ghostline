@@ -35,7 +35,7 @@ namespace ghostline.Tests
                   telegram:
                     chat_ids: []
                   capy:
-                    to: ["@Alice", "{Group}"]
+                    to: ["@Alice", "{Group}", 13]
               - name: test
                 gateway: pbx
                 modem: hw1
@@ -54,7 +54,7 @@ namespace ghostline.Tests
             var c = Program.settings.clients.capy;
             Assert.Equal("rb_test", c.token);
             Assert.True(Program.CapyEnabled);
-            Assert.Equal(new[] { "@Alice", Group.ToString() }, Line("work").clients.capy.to);
+            Assert.Equal(new[] { "@Alice", Group.ToString(), "13" }, Line("work").clients.capy.to);
         }
 
         [Fact]
@@ -64,6 +64,9 @@ namespace ghostline.Tests
             Assert.Equal("@bob", Program.CapyRecipient("bob"));
             Assert.Equal(Group.ToString(), Program.CapyRecipient(Group.ToString().ToUpperInvariant()));
             Assert.Null(Program.CapyRecipient(" "));
+            // The number in a chat's link: capy.example.com/chat/13.
+            Assert.Equal("#13", Program.CapyRecipient("13"));
+            Assert.Equal("#13", Program.CapyRecipient("#013"));
         }
 
         // No common recipients: the bot's owner; a line with its own list: that list; a line whose
@@ -72,19 +75,21 @@ namespace ghostline.Tests
         public void LineRecipients()
         {
             Assert.Equal(new[] { Program.CapyOwner }, Program.LineCapy(Line("home")));
-            Assert.Equal(new[] { "@alice", Group.ToString() }, Program.LineCapy(Line("work")));
+            Assert.Equal(new[] { "@alice", Group.ToString(), "#13" }, Program.LineCapy(Line("work")));
             Assert.Empty(Program.LineCapy(Line("test")));
         }
 
         [Fact]
         public void ChatsServeTheirLines()
         {
-            Assert.Equal(new[] { "home" }, Program.LinesOfCapyChat(Guid.NewGuid(), true, "owner_name", isOwner: true).Select(c => c.name));
-            Assert.Equal(new[] { "work" }, Program.LinesOfCapyChat(Guid.NewGuid(), true, "ALICE", isOwner: false).Select(c => c.name));
-            Assert.Equal(new[] { "work" }, Program.LinesOfCapyChat(Group, false, "mallory", isOwner: false).Select(c => c.name));
+            Assert.Equal(new[] { "home" }, Program.LinesOfCapyChat(Guid.NewGuid(), 5, true, "owner_name", isOwner: true).Select(c => c.name));
+            Assert.Equal(new[] { "work" }, Program.LinesOfCapyChat(Guid.NewGuid(), 5, true, "ALICE", isOwner: false).Select(c => c.name));
+            Assert.Equal(new[] { "work" }, Program.LinesOfCapyChat(Group, 5, false, "mallory", isOwner: false).Select(c => c.name));
+            // A group by its number, as the user copies it from the link.
+            Assert.Equal(new[] { "work" }, Program.LinesOfCapyChat(Guid.NewGuid(), 13, false, "someone", isOwner: true).Select(c => c.name));
             // A stranger in a direct chat, and a username in a group, serve nothing.
-            Assert.Empty(Program.LinesOfCapyChat(Guid.NewGuid(), true, "mallory", isOwner: false));
-            Assert.Empty(Program.LinesOfCapyChat(Guid.NewGuid(), false, "alice", isOwner: false));
+            Assert.Empty(Program.LinesOfCapyChat(Guid.NewGuid(), 5, true, "mallory", isOwner: false));
+            Assert.Empty(Program.LinesOfCapyChat(Guid.NewGuid(), 5, false, "alice", isOwner: false));
         }
 
         [Fact]

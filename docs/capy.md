@@ -22,7 +22,8 @@ clients:
 `to` lists the recipients:
 
 - `@username`: the direct chat with that person (the bot opens it itself);
-- a chat id: a group the bot has been added to.
+- a group the bot has been added to: its number from the link
+  (`chat.example.com/chat/13` → `13`) or its id.
 
 Empty `to`: the bot's owner only. A line can have its own recipients
 (`lines[].clients.capy.to`); empty, it uses the common ones. As with Telegram

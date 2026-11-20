@@ -271,7 +271,7 @@ lines:
 | `clients.ntfy.token` | ntfy access token with read and write access to the topics |
 | `clients.ntfy.topic` | Common topic, for lines without their own |
 | `clients.capy.url` / `clients.capy.token` | Capy server and the bot's token (`rb_...`); either empty — Capy is off |
-| `clients.capy.to` | Common recipients: `@username` (the direct chat with that person) or a group's chat id; empty — the bot's owner |
+| `clients.capy.to` | Common recipients: `@username` (the direct chat with that person) or a group's number from its link (`/chat/13` → `13`); empty — the bot's owner |
 
 A client is on when its section is there (with a token / url); remove the
 section to turn it off. A top-level `telegram` section of older configs is
