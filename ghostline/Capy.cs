@@ -353,10 +353,12 @@ namespace ghostline
             if (lines.Count == 0)
             {
                 // Group chats are not answered: the bot may sit in a group for other reasons. The log says
-                // which recipient would make the chat a line's.
-                SysLog.Info("capy", direct
-                    ? $"message from @{username}, who is not a recipient of any line: refused"
-                    : $"message in group {chatNumber} ({chatId}), which is not a recipient of any line: ignored (add {chatNumber} to clients.capy.to)");
+                // what would make the chat a line's: a line that uses Capy at all, or the chat as a recipient.
+                string who = direct ? $"@{username}" : $"group {chatNumber} ({chatId})";
+                string fix = !AllLines.Any(c => LineUses(c, "capy"))
+                    ? "no line has capy in its clients (add it to lines[].clients)"
+                    : direct ? "not a recipient of any line" : $"not a recipient of any line (add {chatNumber} to clients.capy.to)";
+                SysLog.Info("capy", $"message from {who}: {fix}; " + (direct ? "refused" : "ignored"));
                 if (direct) Store.EnqueueTelegramMessage(reply, l.T("tg.sms.go_away"));
                 return;
             }
