@@ -450,6 +450,31 @@ AccuracySec=5
 WantedBy=timers.target
 EOF
 
+# CDR tools: a daily copy of the CDR (<cdr-dir>/backup, 14 days), and gl-cdr recover for calls that
+# were recorded while Asterisk could not write its CDR.
+install -m 755 "$(script_file gl-cdr.py)" /usr/local/bin/gl-cdr
+cat >/etc/systemd/system/gl-cdr-backup.service <<EOF
+[Unit]
+Description=Daily copy of the ghostline CDR
+
+[Service]
+Type=oneshot
+User=asterisk
+Group=asterisk
+ExecStart=/usr/local/bin/gl-cdr backup $CDR_DIR/cdr.db
+EOF
+cat >/etc/systemd/system/gl-cdr-backup.timer <<'EOF'
+[Unit]
+Description=Daily copy of the ghostline CDR
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 log "systemd"
 cat >/etc/systemd/system/asterisk.service <<'EOF'
 [Unit]
@@ -492,7 +517,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable asterisk >/dev/null 2>&1
-systemctl enable --now gl-usb-inventory.timer gl-storage.timer >/dev/null 2>&1
+systemctl enable --now gl-usb-inventory.timer gl-storage.timer gl-cdr-backup.timer >/dev/null 2>&1
 systemctl restart asterisk
 
 log "fail2ban"

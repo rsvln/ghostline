@@ -327,6 +327,12 @@ namespace ghostline
                         return Results.Ok(new { ok = true, applyErrors = applied.errors, applied.output });
                     });
 
+                    app.MapPost("/api/pbx/alert-test", () =>
+                    {
+                        var to = Program.SendTestAlert();
+                        return Results.Ok(new { ok = to.Count > 0, to });
+                    });
+
                     app.MapPost("/api/pbx/acme/renew", () =>
                     {
                         string error = Program.RequestRenew();
@@ -476,6 +482,11 @@ namespace ghostline
                     });
 
                     app.Run();
+                    // The web host takes SIGTERM over from the runtime and only stops itself; Main sleeps
+                    // forever, so without this the process stayed and systemd killed it after its stop
+                    // timeout (SIGKILL on every restart and deploy).
+                    SysLog.Info("app", "stopping");
+                    Environment.Exit(0);
                 }
                 catch (Exception ex)
                 {

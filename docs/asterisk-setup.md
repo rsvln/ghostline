@@ -127,6 +127,21 @@ when it is fixed. Besides the write test it checks the mode of Asterisk's own
 handle on the CDR (`/proc/<pid>/fdinfo`), and that every mixed recording of
 the last 24 hours has its call in the CDR.
 
+The Asterisk host must be in the same time zone as ghostline (`TZ` in
+ghostline's unit): the CDR keeps the call start in Asterisk's local time and
+ghostline reads it as its own. A container left in UTC shifts every call in
+the journal. Set it before the first call and restart Asterisk:
+
+```
+ln -sf /usr/share/zoneinfo/Europe/Moscow /etc/localtime && echo Europe/Moscow > /etc/timezone
+systemctl restart asterisk
+```
+
+Calls recorded but missing from the CDR are put back with
+`gl-cdr recover <conf-dir> <recordings-dir> <cdr-db> <from> [<to>]` (a dry
+run; add `--apply`). `gl-cdr-backup.timer` keeps a daily copy of the CDR in
+`<cdr-dir>/backup` for 14 days.
+
 ghostline writes into the conf directory, so its user must be able to write
 there. Either run ghostline in the same group, or give the directory to the
 ghostline user and add `asterisk` to its group. Asterisk only reads it.

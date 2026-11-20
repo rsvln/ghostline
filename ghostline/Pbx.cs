@@ -603,6 +603,20 @@ namespace ghostline
             }
         }
 
+        // A test message along the same path as a real alert, from the Status tab: an alert that never
+        // arrives is found before it is needed. Returns the channels it went to (none: nothing is set up).
+        internal static List<string> SendTestAlert()
+        {
+            var l = L10n.Tg;
+            EnqueueAdminAlert(l.T("tg.pbx.test.title"), l.T("tg.pbx.test.text"));
+            var to = new List<string>();
+            if (TelegramEnabled && (settings.clients.telegram.chatIds?.Count ?? 0) > 0) to.Add("telegram");
+            if (NtfyEnabled && !string.IsNullOrWhiteSpace(settings.clients.ntfy.topic)) to.Add("ntfy");
+            if (CapyEnabled && CapyCommonTo().Any()) to.Add("capy");
+            SysLog.Info("pbx", "test alert sent to: " + (to.Count > 0 ? string.Join(", ", to) : "nobody"));
+            return to;
+        }
+
         // To the common Telegram chats, ntfy topic and Capy recipients (not a line's): PBX-wide events.
         private static void EnqueueAdminAlert(string title, string text)
         {
