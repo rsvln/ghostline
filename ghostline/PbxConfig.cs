@@ -16,6 +16,18 @@ namespace ghostline
     //   phone channel for outgoing ones, as in FreePBX (Transcriber.LegSpeakers relies on it).
     public static class PbxConfig
     {
+        // Clients that can register on one phone account at once (a desk phone and a mobile app);
+        // one more replaces the oldest (remove_existing).
+        internal const int PhoneContacts = 2;
+
+        // Rings every client registered on the account: Dial(PJSIP/ext) only takes its first contact.
+        // With none registered the plain endpoint is dialed, so the call ends as unanswered as before.
+        // ExecIf with LEN: the contacts contain colons, which IF would take as its separator.
+        private static string DialPhone(string ext) =>
+            $" same => n,Set(GL_DEV=${{PJSIP_DIAL_CONTACTS({ext})}})\n" +
+            $" same => n,ExecIf($[${{LEN(${{GL_DEV}})}}=0]?Set(GL_DEV=PJSIP/{ext}))\n" +
+            " same => n,Dial(${GL_DEV},60)\n";
+
         public const string PjsipFile = "pjsip_ghostline.conf";
         public const string DialplanFile = "extensions_ghostline.conf";
         public const string QuectelFile = "quectel_ghostline.conf";
@@ -281,7 +293,7 @@ namespace ghostline
                 sb.Append("direct_media=no\nrtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n");
                 sb.Append("dtmf_mode=rfc4733\ntrust_id_inbound=no\nsend_pai=no\nallow_subscribe=no\n");
                 sb.Append($"\n[{ext}]\ntype=auth\nauth_type=userpass\nusername={ext}\npassword={l.Phone.secret}\n");
-                sb.Append($"\n[{ext}]\ntype=aor\nmax_contacts=1\nremove_existing=yes\nqualify_frequency=60\n");
+                sb.Append($"\n[{ext}]\ntype=aor\nmax_contacts={PhoneContacts}\nremove_existing=yes\nqualify_frequency=60\n");
             }
             return sb.ToString();
         }
@@ -329,7 +341,7 @@ namespace ghostline
                 sb.Append($"\n[gl-ring-{dev}]\n");
                 sb.Append($"exten => {ext},1,Set(CALLERID(name)=${{CALLERID(num)}})\n");
                 sb.Append($" same => n,Gosub(gl-record,s,1(in-{ext}))\n");
-                sb.Append($" same => n,Dial(PJSIP/{ext},60)\n");
+                sb.Append(DialPhone(ext));
                 sb.Append(" same => n,Hangup()\n");
 
                 // Phone -> the other phones by extension (not recorded), the rest out through the SIM.
@@ -338,7 +350,7 @@ namespace ghostline
                 sb.Append($"\n; phone {ext} calls out through SIM {dev}\n");
                 sb.Append($"[gl-out-{dev}]\n");
                 foreach (var other in lines.Where(o => o != l))
-                    sb.Append($"exten => {other.Phone.extension},1,Dial(PJSIP/{other.Phone.extension},60)\n same => n,Hangup()\n");
+                    sb.Append($"exten => {other.Phone.extension},1,NoOp()\n").Append(DialPhone(other.Phone.extension)).Append(" same => n,Hangup()\n");
                 var set = l.Phone.dial == "ru+intl" ? DialRu.Concat(DialIntl) : DialRu;
                 foreach (var (pattern, number) in set)
                     sb.Append($"exten => {pattern},1,Set(GL_NUM={number})\n same => n,Goto(gl-call-{dev},${{EXTEN}},1)\n");

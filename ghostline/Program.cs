@@ -86,6 +86,7 @@ namespace ghostline
             {
                 Task.Run(() => PbxCertWatchLoop());
                 Task.Run(() => PbxStorageWatchLoop());
+                Task.Run(() => PbxApplyOnStart());
             }
             if (settings.lines.Any(c => c.phone != null && c.gateway != managed?.id))
                 SysLog.Warn("config", "lines[].phone is used only on a gateway with pbx: managed, ignored");

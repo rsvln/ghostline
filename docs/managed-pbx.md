@@ -170,6 +170,11 @@ lines:
 - **`ru+intl`** adds `+…`, `00…` and `810…`.
 - **Phone to phone:** a phone can call the others by extension. These calls
   are not recorded.
+- **Two clients per account:** up to two clients can be registered on one
+  extension at once (say, a desk phone and a mobile app); a call rings both,
+  the first to answer takes it. A third registration replaces the oldest.
+  The generated files are rewritten at ghostline's start, so a new version
+  needs no save.
 
 ## Security
 

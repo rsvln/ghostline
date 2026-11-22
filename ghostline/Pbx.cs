@@ -77,6 +77,28 @@ namespace ghostline
             return r;
         }
 
+        // At start: the generated files are rewritten from the settings, so a new version's generator
+        // reaches Asterisk without a save in the web interface (2.4.24: two clients per phone account).
+        // AMI first: written files with a failed reload would look up to date on the next try.
+        internal static async Task PbxApplyOnStart()
+        {
+            var gw = settings.ManagedGateway;
+            if (gw == null) return;
+            for (int i = 0; i < 60; i++)
+            {
+                try
+                {
+                    await AmiCommand(gw.id, "core show uptime");
+                    var r = await ApplyPbx();
+                    if (r.errors.Count > 0) SysLog.Warn("pbx", "config at start: " + string.Join("; ", r.errors));
+                    else if (r.changed.Count == 0) SysLog.Info("pbx", "config at start: up to date");
+                    return;
+                }
+                catch (Exception) { await Task.Delay(TimeSpan.FromSeconds(5)); }
+            }
+            SysLog.Warn("pbx", "config at start: AMI did not come up in 5 minutes, not applied");
+        }
+
         private static async Task<PbxApplyResult> ApplyPbxLocked()
         {
             await _pbxApplyLock.WaitAsync();
