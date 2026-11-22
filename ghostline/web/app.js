@@ -756,10 +756,14 @@ function modemStateCell(m, connected) {
 
 function phoneRegCell(p) {
   if (!p.contacts) return `<span class="muted">${esc(t('web.pbx.no_ami'))}</span>`;
-  const c = p.contacts[0];
-  if (!c) return `<span class="hdot err"></span>${esc(t('web.pbx.not_registered'))}`;
-  return `<span class="hdot ${/avail|reachable/i.test(c.status) ? 'ok' : 'err'}"></span>${esc(c.status)}`
-    + (c.rttMs != null ? ` <span class="muted">${esc(c.rttMs.toFixed(0))} ms</span>` : '');
+  if (!p.contacts.length) return `<span class="hdot err"></span>${esc(t('web.pbx.not_registered'))}`;
+  // Every registered client (up to two per account), each with the address it registered from.
+  return p.contacts.map(c => {
+    const addr = (/@([^;>\s]+)/.exec(c.uri || '') || [])[1] || '';
+    return `<div title="${esc(c.uri || '')}"><span class="hdot ${/avail|reachable/i.test(c.status) ? 'ok' : 'err'}"></span>${esc(c.status)}`
+      + (c.rttMs != null ? ` <span class="muted">${esc(c.rttMs.toFixed(0))} ms</span>` : '')
+      + (addr ? ` <span class="muted">· ${esc(addr)}</span>` : '') + '</div>';
+  }).join('');
 }
 
 async function loadStatusPbx() {
@@ -797,7 +801,7 @@ async function loadStatusPbx() {
 
   if (d.phones?.length) {
     const rows = d.phones.map(p => `<tr><td>${settingsLink('ln:' + p.line + '/phone', p.line)}</td><td>${esc(p.extension)}</td>
-      <td title="${esc(p.contacts?.[0]?.uri || d.contactsError || '')}">${phoneRegCell(p)}</td></tr>`).join('');
+      <td title="${esc(d.contactsError || '')}">${phoneRegCell(p)}</td></tr>`).join('');
     html += `<div class="section"><h3>${esc(t('web.pbx.phones'))}</h3>
       <table class="stat-table">${th(['web.status.col.line', 'web.pbx.col.ext', 'web.pbx.col.reg'])}<tbody>${rows}</tbody></table></div>`;
   }
