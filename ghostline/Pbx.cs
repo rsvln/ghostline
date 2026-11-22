@@ -160,6 +160,15 @@ namespace ghostline
         }
 
         // A new secret for the line's phone, written into the config. Returns it once; it is not logged.
+        // The current secret of a line's phone, for the eye and copy buttons of the settings form (asked for
+        // by a click, never sent with the form). Null: no such phone or no secret yet.
+        internal static string PhoneSecret(string lineName)
+        {
+            var ch = ReadSettingsFile().lines?.FirstOrDefault(c => c.name == lineName);
+            string secret = ch?.phone?.secret;
+            return string.IsNullOrEmpty(secret) ? null : secret;
+        }
+
         internal static string NewPhoneSecret(string lineName)
         {
             var s = ReadSettingsFile();

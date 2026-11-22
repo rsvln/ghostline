@@ -223,6 +223,9 @@ const ICON_CALL = {
   out: svg(PHONE + '<path d="M22 8V2h-6"/><path d="M16 8l6-6"/>'),
   missed: svg(PHONE + '<path d="M16 2l6 6"/><path d="M22 2l-6 6"/>'),
 };
+const ICON_EYE = svg('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>');
+const ICON_EYE_OFF = svg('<path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.2 3.1"/><path d="M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M2 2l20 20"/>');
+const ICON_RESET = svg('<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/>');
 const ICON_COPY = svg('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>');
 
 // The web interface usually runs over plain http, where navigator.clipboard is missing:
@@ -1063,12 +1066,47 @@ async function modemRequest(body, question) {
 
 // ---- A line's phone, in the settings ----
 
-// The secret is not a form field: one more grid cell shows whether it is set, with "New secret" beside it.
+// The secret is not a form field: one more grid cell shows whether it is set, with show, copy and
+// "New secret" beside it. The secret itself is asked for only by a click on show or copy.
+const SECRET_DOTS = '••••••••••••';
 function phoneSecretCell(n) {
   const set = !n.phone.isNew && n.phone.hasSecret;
-  const button = set ? `<button type="button" class="btn" data-new-secret="${esc(n.phone.line)}">${esc(t('web.pbx.new_secret'))}</button>` : '';
-  return `<label>${esc(t('web.pbx.secret'))}<span class="input-row"><input type="text" readonly tabindex="-1"
-    value="${esc(set ? '••••••••••••' : t('web.pbx.secret_on_save_short'))}">${button}</span></label>`;
+  const line = esc(n.phone.line);
+  const buttons = set
+    ? `<button type="button" class="icon-btn" data-secret-show="${line}" title="${esc(t('web.pbx.secret_show'))}">${ICON_EYE}</button>`
+      + `<button type="button" class="icon-btn" data-secret-copy="${line}" title="${esc(t('web.pbx.secret_copy'))}">${ICON_COPY}</button>`
+      + `<button type="button" class="icon-btn" data-new-secret="${line}" title="${esc(t('web.pbx.new_secret'))}">${ICON_RESET}</button>`
+    : '';
+  return `<label>${esc(t('web.pbx.secret'))}<span class="input-row"><input type="text" readonly tabindex="-1" class="secret-value"
+    data-secret-of="${line}" value="${esc(set ? SECRET_DOTS : t('web.pbx.secret_on_save_short'))}">${buttons}</span></label>`;
+}
+
+async function fetchSecret(line) {
+  const r = await (await fetch('/api/pbx/secret/show', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ line })
+  })).json();
+  if (!r.ok) { showToast(t('web.error', r.error), 'err'); return null; }
+  return r.secret;
+}
+
+async function toggleSecret(btn) {
+  const input = btn.closest('.input-row').querySelector('[data-secret-of]');
+  const shown = input.classList.contains('shown');
+  if (shown) {
+    input.value = SECRET_DOTS;
+  } else {
+    const secret = await fetchSecret(btn.dataset.secretShow);
+    if (secret == null) return;
+    input.value = secret;
+  }
+  input.classList.toggle('shown', !shown);
+  btn.innerHTML = shown ? ICON_EYE : ICON_EYE_OFF;
+  btn.title = t(shown ? 'web.pbx.secret_show' : 'web.pbx.secret_hide');
+}
+
+async function copySecret(line) {
+  const secret = await fetchSecret(line);
+  if (secret != null) await copyText(secret);
 }
 
 async function newSecret(line) {
@@ -1365,6 +1403,8 @@ function renderSettings(selected) {
     if (n.modems && pane) bindModemPane(pane, n);
   });
   host.querySelectorAll('[data-new-secret]').forEach(b => b.onclick = () => newSecret(b.dataset.newSecret));
+  host.querySelectorAll('[data-secret-show]').forEach(b => b.onclick = () => toggleSecret(b));
+  host.querySelectorAll('[data-secret-copy]').forEach(b => b.onclick = () => copySecret(b.dataset.secretCopy));
   showConfigNode(selected, true);
 }
 

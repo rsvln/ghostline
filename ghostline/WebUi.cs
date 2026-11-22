@@ -346,6 +346,16 @@ namespace ghostline
                         return Results.Ok(new { ok = error == null, error });
                     });
 
+                    // Behind the same login as the rest; each look is logged with the line name (not the secret).
+                    app.MapPost("/api/pbx/secret/show", async (HttpRequest req) =>
+                    {
+                        var data = await ReadJson<SecretPayload>(req);
+                        string secret = Program.PhoneSecret(data?.line);
+                        if (secret == null) return Results.Ok(new { ok = false, error = "the line has no phone secret yet" });
+                        SysLog.Info("pbx", $"phone secret of line {data.line} shown in the web interface ({req.HttpContext.Connection.RemoteIpAddress})");
+                        return Results.Ok(new { ok = true, secret });
+                    });
+
                     app.MapPost("/api/pbx/secret", async (HttpRequest req) =>
                     {
                         var data = await ReadJson<SecretPayload>(req);

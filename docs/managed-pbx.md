@@ -163,7 +163,9 @@ lines:
     expiry is still shown and warned about.
 - **Secret:** 24 letters and digits, generated on save (or by "New secret")
   and shown once.
-  It is not in the form, and the preview masks it.
+  It is not sent with the form: the eye and copy buttons beside it ask for
+  it on a click (each look is logged with the line name), and the preview
+  masks it.
 - **`dial: ru`:**
   - `+7…`, `8…`, `7…` (11 digits) and `9…` (10 digits) go out as +7…;
   - 3–4 digit service numbers go out as dialed.
