@@ -214,6 +214,7 @@
   "web.pbx.security": "Failed SIP attempts",
   "web.pbx.problems": "To fix before Apply",
   "web.pbx.no_ami": "no AMI",
+  "web.pbx.via": "(registered from {0})",
   "web.pbx.not_registered": "not registered",
   "web.pbx.secret_show": "Show the password",
   "web.pbx.secret_hide": "Hide the password",

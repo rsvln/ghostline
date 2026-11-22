@@ -757,13 +757,18 @@ function modemStateCell(m, connected) {
 function phoneRegCell(p) {
   if (!p.contacts) return `<span class="muted">${esc(t('web.pbx.no_ami'))}</span>`;
   if (!p.contacts.length) return `<span class="hdot err"></span>${esc(t('web.pbx.not_registered'))}`;
-  // Every registered client (up to two per account), each with the address it registered from.
+  // Every registered client (up to two per account). The address is the Contact, where calls go; the
+  // source of the REGISTER is added when its host differs (a client behind NAT or a routed docker network).
+  const host = a => (a || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
   return p.contacts.map(c => {
-    const addr = c.address || (/@([^;>\s]+)/.exec(c.uri || '') || [])[1] || '';
+    const contact = (/@([^;>\s]+)/.exec(c.uri || '') || [])[1] || '';
+    const addr = contact || c.address || '';
+    const via = c.address && contact && host(c.address) !== host(contact) ? c.address : '';
     return `<div title="${esc(c.uri || '')}"><span class="hdot ${/avail|reachable/i.test(c.status) ? 'ok' : 'err'}"></span>${esc(c.status)}`
       + (c.rttMs != null ? ` <span class="muted">${esc(c.rttMs.toFixed(0))} ms</span>` : '')
       + (c.userAgent ? ` · ${esc(c.userAgent)}` : '')
-      + (addr ? ` <span class="muted">· ${esc(addr)}</span>` : '') + '</div>';
+      + (addr ? ` <span class="muted">· ${esc(addr)}</span>` : '')
+      + (via ? ` <span class="muted">${esc(t('web.pbx.via', via))}</span>` : '') + '</div>';
   }).join('');
 }
 

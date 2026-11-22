@@ -214,6 +214,7 @@
   "web.pbx.security": "Неудачные попытки SIP",
   "web.pbx.problems": "Исправить перед применением",
   "web.pbx.no_ami": "нет AMI",
+  "web.pbx.via": "(регистрация с {0})",
   "web.pbx.not_registered": "не зарегистрирован",
   "web.pbx.secret_show": "Показать пароль",
   "web.pbx.secret_hide": "Скрыть пароль",
