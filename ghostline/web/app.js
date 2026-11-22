@@ -759,9 +759,10 @@ function phoneRegCell(p) {
   if (!p.contacts.length) return `<span class="hdot err"></span>${esc(t('web.pbx.not_registered'))}`;
   // Every registered client (up to two per account), each with the address it registered from.
   return p.contacts.map(c => {
-    const addr = (/@([^;>\s]+)/.exec(c.uri || '') || [])[1] || '';
+    const addr = c.address || (/@([^;>\s]+)/.exec(c.uri || '') || [])[1] || '';
     return `<div title="${esc(c.uri || '')}"><span class="hdot ${/avail|reachable/i.test(c.status) ? 'ok' : 'err'}"></span>${esc(c.status)}`
       + (c.rttMs != null ? ` <span class="muted">${esc(c.rttMs.toFixed(0))} ms</span>` : '')
+      + (c.userAgent ? ` · ${esc(c.userAgent)}` : '')
       + (addr ? ` <span class="muted">· ${esc(addr)}</span>` : '') + '</div>';
   }).join('');
 }

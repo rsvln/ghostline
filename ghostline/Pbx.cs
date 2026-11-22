@@ -357,21 +357,45 @@ namespace ghostline
 
         // ---- Registrations -------------------------------------------------------------------------------
 
-        internal record PhoneContact(string extension, string uri, string status, double? rttMs);
+        // address: where the client registered from (ip:port of the REGISTER, not the Contact it claims).
+        internal record PhoneContact(string extension, string uri, string status, double? rttMs,
+            string userAgent = null, string address = null);
 
         // "  Contact:  11/sip:11@203.0.113.5:46334;transport=TLS 3a2dbee345 Avail       270.036"
-        private static readonly Regex ContactLine = new(@"^\s*Contact:\s+([^/\s]+)/(\S+)\s+\S+\s+(\S+)\s+([\d.]+|nan)?", RegexOptions.Multiline);
+        // The URI is cut to the column width; the hash is the start of the contact id's hash.
+        private static readonly Regex ContactLine = new(@"^\s*Contact:\s+([^/\s]+)/(\S+)\s+(\S+)\s+(\S+)\s+([\d.]+|nan)?", RegexOptions.Multiline);
+
+        // "/registrar/contact/11;@2f0cef9b...: {"via_addr":"203.0.113.5","via_port":"42074","uri":"sip:...","user_agent":"..."}"
+        // The registrar keeps every contact in AstDB with the fields "pjsip show contacts" lacks; read with
+        // the command right AMI already has (the PJSIP list action would need the system write class).
+        private static readonly Regex RegistrarLine = new(@"^/registrar/contact/([^;\s]+);@(\w+)\s*:\s*(\{.*\})\s*$", RegexOptions.Multiline);
 
         internal static async Task<List<PhoneContact>> PhoneContacts(string gatewayId)
         {
             string text = await AmiCommand(gatewayId, "pjsip show contacts");
+            var details = new Dictionary<string, (string ua, string addr, string uri)>();
+            try
+            {
+                foreach (Match m in RegistrarLine.Matches(await AmiCommand(gatewayId, "database show registrar/contact")))
+                {
+                    var j = Newtonsoft.Json.Linq.JObject.Parse(m.Groups[3].Value);
+                    string addr = (string)j["via_addr"];
+                    if (!string.IsNullOrEmpty(addr) && !string.IsNullOrEmpty((string)j["via_port"]))
+                        addr = (addr.Contains(':') ? $"[{addr}]" : addr) + ":" + (string)j["via_port"];
+                    details[m.Groups[1].Value + "/" + m.Groups[2].Value] = ((string)j["user_agent"], addr, (string)j["uri"]);
+                }
+            }
+            catch (Exception ex) { SysLog.Debug("pbx", "registrar contacts: " + ex.Message); }
+
             var list = new List<PhoneContact>();
             foreach (Match m in ContactLine.Matches(text))
             {
                 if (m.Groups[1].Value.StartsWith("<")) continue;   // the header line
-                double? rtt = double.TryParse(m.Groups[4].Value, System.Globalization.NumberStyles.Float,
+                double? rtt = double.TryParse(m.Groups[5].Value, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : null;
-                list.Add(new(m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value, rtt));
+                string ext = m.Groups[1].Value, hash = m.Groups[3].Value;
+                var d = details.FirstOrDefault(kv => kv.Key.StartsWith(ext + "/" + hash)).Value;
+                list.Add(new(ext, d.uri ?? m.Groups[2].Value, m.Groups[4].Value, rtt, d.ua, d.addr));
             }
             return list;
         }
