@@ -45,7 +45,7 @@ clients:
     topics: []                # - { topic: gl-personal, sms: [personal], calls: [personal], alerts: false }
   capy:                       # empty url: Capy is off (docs/capy.md)
     url:
-    token:                    # the main bot's token, rb_...
+    token:                    # the main bot's token, rb_...; optional when the targets have their own
     targets: []               # - { name: me, to: "", sms: ["*"], alerts: true }   (to empty: the bot's owner)
                               # - { name: personal-phone, token: rb_..., transcripts: [personal] }   (a phone line's bot)
 

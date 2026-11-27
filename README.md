@@ -275,8 +275,8 @@ lines:
 | `clients.ntfy.url` | ntfy server; empty — ntfy is off |
 | `clients.ntfy.token` | ntfy access token with read and write access to the topics |
 | `clients.ntfy.topics[]` | The topics: `topic`, `sms`, `calls`, `alerts`, as for Telegram chats |
-| `clients.capy.url` / `clients.capy.token` | Capy server and the main bot's token (`rb_...`); empty url — Capy is off |
-| `clients.capy.targets[]` | The recipients: `name`; `to` — `@username` (the direct chat with that person), a chat id or a group's number from its link (`/chat/13` → `#13`), empty — the bot's owner; `sms`, `alerts`; `token` and `transcripts` — a phone line's bot, see [docs/capy.md](docs/capy.md) |
+| `clients.capy.url` / `clients.capy.token` | Capy server and the main bot's token (`rb_...`), optional when the targets have their own bots; empty url — Capy is off |
+| `clients.capy.targets[]` | The recipients: `name`; `to` — `@username` (the direct chat with that person), a chat id or a group's number from its link (`/chat/13` → `#13`), empty — the bot's owner; `sms`, `alerts`; `token` — the target's own bot (`transcripts` — a phone line's bot), see [docs/capy.md](docs/capy.md) |
 
 What goes where is set on the chat: SMS of some lines, calls of some lines,
 alerts, in any combination, so one chat can get everything and another only

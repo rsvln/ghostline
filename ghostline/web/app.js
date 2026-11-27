@@ -635,13 +635,14 @@ function exact(iso) {
 function stateText(c) {
   if (c.state === 'ok') return t('web.status.state.ok');
   if (c.state === 'err') return t('web.status.state.err');
+  if (c.state === 'warn') return t('web.status.state.warn');
   return t(c.kind === 'transcribe' ? 'web.status.state.idle' : 'web.status.state.unknown');
 }
 
 function componentCard(c) {
   // An error is shown in red only while the component is down; an older one, after a success, in grey.
   const err = c.lastError
-    ? `<div class="row ${c.state === 'err' ? 'err' : 'old'}" title="${esc(exact(c.lastErrorAt))}">${esc(t('web.status.error_at', ago(c.lastErrorAt)))} ${esc(c.lastError)}</div>`
+    ? `<div class="row ${c.state === 'err' ? 'err' : c.state === 'warn' ? 'warn' : 'old'}" title="${esc(exact(c.lastErrorAt))}">${esc(t('web.status.error_at', ago(c.lastErrorAt)))} ${esc(c.lastError)}</div>`
     : '';
   return `<div class="status-card">
     <h3><span class="hdot ${c.state}"></span>${esc(c.title)}<span class="state ${c.state}">${esc(stateText(c))}</span></h3>
@@ -700,7 +701,7 @@ async function loadStatus(headerOnly) {
   } catch { return; }
 
   document.getElementById('header-status').innerHTML = data.components.map(c =>
-    `<div class="hstat" title="${esc(stateText(c) + (c.state === 'err' && c.lastError ? ': ' + c.lastError : ''))}"><span class="hdot ${c.state}"></span>${esc(c.title)}</div>`
+    `<div class="hstat" title="${esc(stateText(c) + ((c.state === 'err' || c.state === 'warn') && c.lastError ? ': ' + c.lastError : ''))}"><span class="hdot ${c.state}"></span>${esc(c.title)}</div>`
   ).join('');
 
   if (headerOnly || parseRoute().view !== 'status') return;

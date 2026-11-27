@@ -116,12 +116,12 @@ namespace ghostline
         private static string StatusText()
         {
             var l = L10n.Tg;
-            string Dot(string state) => state switch { "ok" => "🟢", "err" => "🔴", _ => "⚪" };
+            string Dot(string state) => state switch { "ok" => "🟢", "warn" => "🟡", "err" => "🔴", _ => "⚪" };
             string Row(string kind, string title, bool connectionBased)
             {
                 string state = HealthStatus.State(kind, connectionBased);
                 var h = HealthStatus.Find(kind);
-                string err = state == "err" && h?.LastError != null ? " — " + Html(Trim(h.LastError, 120)) : "";
+                string err = state is "err" or "warn" && h?.LastError != null ? " — " + Html(Trim(h.LastError, 120)) : "";
                 return $"{Dot(state)} {Html(title)}: {l.T("tg.status." + state)}{err}";
             }
 

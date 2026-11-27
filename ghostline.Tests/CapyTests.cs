@@ -41,6 +41,9 @@ namespace ghostline.Tests
                   - name: home-phone
                     token: rb_phone
                     transcripts: [home]
+                  - name: sms-bot
+                    token: rb_sms
+                    sms: [test]
             gateways:
               - id: pbx
                 type: asterisk
@@ -89,7 +92,7 @@ namespace ghostline.Tests
         {
             Assert.Equal(new[] { "owner" }, Program.LineCapy(Line("home")));
             Assert.Equal(new[] { "alice", "group", "g13" }, Program.LineCapy(Line("work")));
-            Assert.Empty(Program.LineCapy(Line("test")));
+            Assert.Equal(new[] { "sms-bot" }, Program.LineCapy(Line("test")));
             Assert.Equal(new[] { "home-phone" }, Program.LineCapyTranscripts(Line("home")));
             Assert.Empty(Program.LineCapyTranscripts(Line("work")));
             Assert.Equal(new[] { "owner" }, Program.CapyAlertTargets);
@@ -120,6 +123,19 @@ namespace ghostline.Tests
             // A stranger in a direct chat, and a username in a group, serve nothing.
             Assert.Empty(Program.LinesOfCapyChat(Guid.NewGuid(), 5, true, "mallory", isOwner: false));
             Assert.Empty(Program.LinesOfCapyChat(Guid.NewGuid(), 5, false, "alice", isOwner: false));
+        }
+
+        // A target's own ordinary bot serves its own owner's direct chat, for the lines of its targets only.
+        [Fact]
+        public void OwnBotServesItsChats()
+        {
+            Assert.Equal(new[] { "test" }, Program.LinesOfCapyChat(Guid.NewGuid(), 5, true, "x", isOwner: true, token: "rb_sms").Select(c => c.name));
+            Assert.Empty(Program.LinesOfCapyChat(Guid.NewGuid(), 5, true, "alice", isOwner: false, token: "rb_sms"));
+            Assert.Empty(Program.LinesOfCapyChat(Guid.NewGuid(), 5, true, "x", isOwner: true, token: "rb_phone"));
+            // Without the main bot's token the other bots still work.
+            Program.settings.clients.capy.token = "";
+            Assert.Equal(new[] { "sms-bot" }, Program.LineCapy(Line("test")));
+            Assert.Equal(new[] { "test" }, Program.LinesOfCapyChat(Guid.NewGuid(), 5, true, "x", isOwner: true, token: "rb_sms").Select(c => c.name));
         }
 
         // Without the main bot's token only the phone line bots work: no SMS, transcripts still.

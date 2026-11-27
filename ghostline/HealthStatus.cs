@@ -10,6 +10,8 @@ namespace ghostline
         public DateTime? LastActivityAt { get; set; }
         public DateTime? LastErrorAt { get; set; }
         public string LastError { get; set; }
+        // Up, but a part of it is not (one bot of several): LastError says which.
+        public bool Partial { get; set; }
     }
 
     // Current state of gateways and Telegram, in memory only, not a history.
@@ -32,9 +34,21 @@ namespace ghostline
             var h = Get(kind);
             h.Configured = true;
             h.Connected = true;
+            h.Partial = false;
             h.LastActivityAt = DateTime.Now;
             h.LastError = null;
             h.LastErrorAt = null;
+        }
+
+        // Up, but a part of it fails: "warn" (yellow) until the next MarkConnected or MarkDisconnected.
+        public static void MarkPartial(string kind, string error)
+        {
+            var h = Get(kind);
+            h.Configured = true;
+            h.Connected = true;
+            h.Partial = true;
+            if (h.LastError != error) h.LastErrorAt = DateTime.Now;
+            h.LastError = error;
         }
 
         // A health check passed: the service is up, but nothing was done, so the last activity stays.
@@ -43,13 +57,16 @@ namespace ghostline
             var h = Get(kind);
             h.Configured = true;
             h.Connected = true;
+            h.Partial = false;
             h.LastError = null;
             h.LastErrorAt = null;
         }
 
         public static void MarkDisconnected(string kind)
         {
-            Get(kind).Connected = false;
+            var h = Get(kind);
+            h.Connected = false;
+            h.Partial = false;
         }
 
         public static void MarkActivity(string kind)
@@ -69,7 +86,7 @@ namespace ghostline
 
         public static ChannelHealth Find(string kind) => _health.TryGetValue(kind, out var h) ? h : null;
 
-        // "ok", "err" or "unknown". Components with a permanent connection (AMI gateways, Telegram,
+        // "ok", "warn" (up, but a part of it is not), "err" or "unknown". Components with a permanent connection (AMI gateways, Telegram,
         // the CDR database, the transcription service) go by that connection, so an old transient
         // error does not paint a working component red. Stateless ones (goip over HTTP/SMTP) go by
         // whichever is newer: the last activity or the last error.
@@ -78,7 +95,7 @@ namespace ghostline
             var h = Find(kind);
             if (h == null) return "unknown";
             if (connectionBased)
-                return h.Connected ? "ok" : h.LastErrorAt != null ? "err" : "unknown";
+                return h.Connected ? (h.Partial ? "warn" : "ok") : h.LastErrorAt != null ? "err" : "unknown";
             if (h.LastErrorAt != null && (h.LastActivityAt == null || h.LastErrorAt > h.LastActivityAt)) return "err";
             return h.LastActivityAt != null ? "ok" : "unknown";
         }

@@ -15,7 +15,7 @@ The person who created the bot is its owner.
 clients:
   capy:
     url: https://chat.example.com     # the Capy server
-    token: rb_...                     # the main bot's token
+    token: rb_...                     # the main bot's token; optional when every target has its own
     targets:
       - name: me
         to: ""                        # empty: the bot's owner
@@ -82,19 +82,28 @@ above the message box.
 A direct chat is served when its person is a target with lines in `sms` (or
 is the owner, with empty `to`). A stranger who writes to the bot gets a
 refusal. A group is served when it is such a target; other groups are
-ignored. Only the main bot is polled; a phone line's bot only adds
-transcripts.
+ignored.
+
+A target may have its own bot (`token`): it then writes from that bot, and
+the bot is polled too when the target has lines in `sms`, so SMS and commands
+written to it work the same way; its own owner is its `to` when `to` is empty.
+The main token is optional then. A phone line's bot that only adds
+transcripts is not polled.
 
 ## How ghostline talks to Capy
 
 Only outgoing HTTPS from ghostline to the Capy server (`/api/v1`, the bot
 token in `Authorization: Bearer`). No webhook is used: ghostline polls the
-bot's chats every 3 seconds (`GET /chats`, then
+bots' chats every 3 seconds, one bot after another (`GET /chats`, then
 `GET /chats/{id}/events?after=<seq>` for chats with new events), so it needs
 no address the Capy server can reach. The last seen `seq` of each chat is kept
 in the database, so messages written while ghostline was down are handled
 after its start; a chat seen for the first time starts from its current state,
 its history is not replayed.
 
-Capy is "connected" on the Status tab while `GET /bot/me` (once a minute, for
-the main bot and every phone line's bot) and the polling work.
+Every bot is checked once a minute, all of them in one window: one request
+at a time, spaced evenly over the minute (a bot whose polling works is asked
+`GET /bot/me` only every 10 minutes). Capy is "connected" on the Status tab
+while every bot works, "partly connected" (yellow, the failing bots named)
+while some do, "no connection" while none does. A bot whose polling fails is
+polled again after 30 seconds.

@@ -12,9 +12,9 @@ namespace ghostline
     //  - calls: Capy posts its own call records (its SIP bridge is a phone of the line); a phone line's bot
     //    (a target with its own token) adds the transcript under the record, found by the PBX call id
     //    (X-Asterisk-CallId);
-    //  - in: the bot's chats are polled (GET /chats, then /chats/{id}/events?after=seq), so ghostline needs
-    //    no address reachable from the Capy server. A message written to the bot is an SMS to send
-    //    (ParseSmsCommand) or a command (/status, /help).
+    //  - in: the chats of the main bot and of every target's own bot with lines in sms are polled (GET /chats,
+    //    then /chats/{id}/events?after=seq), so ghostline needs no address reachable from the Capy server. A
+    //    message written to such a bot is an SMS to send (ParseSmsCommand) or a command (/status, /help).
     internal partial class Program
     {
         private const string CapyPrefix = "capy:";
@@ -37,10 +37,44 @@ namespace ghostline
         private static string CapyTarget(string to) => CapyPrefix + to;
         private static bool IsCapyTarget(string target) => target != null && target.StartsWith(CapyPrefix);
 
-        // Who the bot is, from /bot/me (the health loop); null until the first answer.
-        private static Guid? _capyBotId;
-        private static Guid? _capyOwnerId;
-        private static string _capyOwnerName;
+        // A bot ghostline acts as: the main one (clients.capy.token) or a target's own. What /bot/me tells
+        // about it (who it is, its owner, a phone line bot's chat) and the chat numbers it knows.
+        private sealed class CapyBot
+        {
+            public Guid? Id, OwnerId, ChatId;
+            public string OwnerName;
+            public bool CommandsSet;
+            public readonly System.Collections.Concurrent.ConcurrentDictionary<long, Guid> Numbers = new();
+            // Health: the last check's or poll's error (null: fine), when /bot/me was last asked, when the
+            // last poll went through, and when a failing bot is polled again.
+            public string Error;
+            public DateTime WhoAmIAt, PolledAt, PollAgainAt;
+        }
+
+        // By token; a token is never logged or queued, the queue names a bot by its target's name.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, CapyBot> _capyBots = new();
+
+        private static string MainCapyToken => (settings.clients.capy.token ?? "").Trim();
+        private static string TokenOf(CapyChat t) => OwnBot(t) ? t.token.Trim() : MainCapyToken;
+        private static CapyBot BotOf(string token) => _capyBots.GetOrAdd((token ?? MainCapyToken).Trim(), _ => new CapyBot());
+
+        // The bots: the main one and every target's own, each once.
+        private static List<string> CapyTokens =>
+            (CapyMainBot ? new[] { MainCapyToken } : Array.Empty<string>())
+                .Concat(CapyChats.Where(OwnBot).Select(t => t.token.Trim())).Distinct().ToList();
+
+        // The bots whose chats are polled: the main one, and the ones with lines in sms (a phone line bot
+        // only adding transcripts is not).
+        private static List<string> CapyPolledTokens =>
+            CapyTokens.Where(k => k == MainCapyToken || CapyChats.Any(t => TokenOf(t) == k && t.sms is { Count: > 0 })).ToList();
+
+        // A phone line bot (a target with transcripts) has to have its chat.
+        private static bool NeedsBotChat(string token) =>
+            CapyChats.Any(t => OwnBot(t) && TokenOf(t) == token && t.transcripts is { Count: > 0 });
+
+        // The name the queue knows a bot by: "" for the main one, else the first target with that token.
+        private static string BotKey(string token) =>
+            token == MainCapyToken ? "" : CapyChats.First(t => OwnBot(t) && TokenOf(t) == token).name.Trim();
 
         // "@Alice" and "alice" are the same person; a chat id stays as it is; a chat's number (the one in its
         // link, capy.example.com/chat/13) becomes "#13".
@@ -70,23 +104,35 @@ namespace ghostline
 
         internal static List<string> CapyAlertTargets => CapyChats.Where(t => t.alerts).Select(t => t.name.Trim()).Distinct().ToList();
 
-        // A queued "capy:<key>": a target by its name (its bot's token, its recipient), or else a recipient
-        // of the main bot (a reply into the chat a message came from, rows queued before 2026-11-27).
+        // A queued "capy:<key>": a target by its name (its bot's token, its recipient); "<recipient>|<bot>"
+        // a reply into the chat a message came from, through the bot it came to (<bot>: a target's name, empty
+        // for the main bot); else a recipient of the main bot (rows queued before 2026-11-27).
         private static (string token, string to) CapyRoute(string key)
         {
-            var t = (settings.clients.capy.targets ?? new()).FirstOrDefault(x => x.name?.Trim() == key);
-            if (t == null) return (settings.clients.capy.token, CapyRecipient(key) ?? CapyOwner);
+            var targets = settings.clients.capy.targets ?? new();
+            int bar = key.LastIndexOf('|');
+            if (bar >= 0 && !targets.Any(x => x.name?.Trim() == key))
+            {
+                string bot = key[(bar + 1)..];
+                var owner = bot.Length == 0 ? null : targets.FirstOrDefault(x => x.name?.Trim() == bot && OwnBot(x));
+                return (owner?.token.Trim() ?? MainCapyToken, CapyRecipient(key[..bar]) ?? CapyOwner);
+            }
+            var t = targets.FirstOrDefault(x => x.name?.Trim() == key);
+            if (t == null) return (MainCapyToken, CapyRecipient(key) ?? CapyOwner);
             return OwnBot(t)
-                ? (t.token, CapyRecipient(t.to) ?? CapyBotChat)
-                : (settings.clients.capy.token, CapyRecipient(t.to) ?? CapyOwner);
+                ? (t.token.Trim(), CapyRecipient(t.to) ?? CapyBotChat)
+                : (MainCapyToken, CapyRecipient(t.to) ?? CapyOwner);
         }
 
-        // Lines a chat of the main bot serves: the targets that are that chat (its id or number; a direct chat
-        // by the person in it: @username, or the owner), and the lines they get SMS of.
-        internal static List<Channel> LinesOfCapyChat(Guid chatId, long number, bool direct, string username, bool isOwner)
+        // Lines a chat of a bot serves (token: the bot's, null: the main one): the bot's targets that are that
+        // chat (its id or number; a direct chat by the person in it: @username, or the owner), and the lines
+        // they get SMS of. A bot's own target without "to" is its owner too.
+        internal static List<Channel> LinesOfCapyChat(Guid chatId, long number, bool direct, string username, bool isOwner,
+                                                      string token = null)
         {
+            token = (token ?? MainCapyToken).Trim();
             string user = username == null ? null : CapyRecipient(username);
-            var mine = CapyChats.Where(t => !OwnBot(t)).Where(t =>
+            var mine = CapyChats.Where(t => TokenOf(t) == token).Where(t =>
             {
                 string to = CapyRecipient(t.to) ?? CapyOwner;
                 return to == chatId.ToString() || (number > 0 && to == "#" + number)
@@ -127,43 +173,57 @@ namespace ghostline
         internal static Guid CapyMsgId(string key) =>
             new(MD5.HashData(Encoding.UTF8.GetBytes("ghostline:" + key)));
 
-        // Chat number -> chat id, from the chat list (filled by the poll loop, refreshed when a number is missing).
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, Guid> _capyChatNumbers = new();
-
-        private static void RememberCapyChats(JArray chats)
+        // Chat number -> chat id, from the bot's chat list (filled by the poll loop, refreshed when a number is
+        // missing).
+        private static void RememberCapyChats(CapyBot bot, JArray chats)
         {
             foreach (var c in chats)
                 if ((long?)c["number"] is > 0 and var n)
-                    _capyChatNumbers[n] = (Guid)c["id"];
+                    bot.Numbers[n] = (Guid)c["id"];
+        }
+
+        // /bot/me: who the bot is, its owner (by name, for "to" empty) and a phone line bot's chat.
+        private static async Task<CapyBot> CapyWhoAmI(string token)
+        {
+            var bot = BotOf(token);
+            var me = await CapyRequest(HttpMethod.Get, "/bot/me", token: token);
+            bot.WhoAmIAt = DateTime.UtcNow;
+            bot.Id = (Guid)me["id"];
+            bot.ChatId = (Guid?)me["chatId"];
+            var owner = (Guid)me["ownerId"];
+            if (owner != bot.OwnerId || bot.OwnerName == null)
+            {
+                var user = await CapyRequest(HttpMethod.Get, $"/users/{owner}", token: token);
+                bot.OwnerName = ((string)user["username"])?.ToLowerInvariant();
+                bot.OwnerId = owner;
+            }
+            return bot;
+        }
+
+        private static async Task<CapyBot> CapyKnown(string token)
+        {
+            var bot = BotOf(token);
+            return bot.Id == null ? await CapyWhoAmI(token) : bot;
         }
 
         // The chat of a phone line's bot, by its token (GET /bot/me gives chatId).
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Guid> _capyBotChats = new();
+        private static async Task<Guid> CapyBotChatOf(string token) =>
+            (await CapyKnown(token)).ChatId ?? throw new InvalidOperationException("this Capy bot is not a phone line's bot (no chatId)");
 
-        private static async Task<Guid> CapyBotChatOf(string token)
-        {
-            if (_capyBotChats.TryGetValue(token, out var id)) return id;
-            var me = await CapyRequest(HttpMethod.Get, "/bot/me", token: token);
-            id = (Guid?)me["chatId"] ?? throw new InvalidOperationException("this Capy bot is not a phone line's bot (no chatId)");
-            _capyBotChats[token] = id;
-            return id;
-        }
-
-        // A recipient for /bot/send: @username or a chat id; the owner by name, a chat number by its id.
+        // A recipient for /bot/send: @username or a chat id; the owner by name, a chat number by its id; a
+        // bot's own chat (an ordinary bot has none: its owner).
         private static async Task<string> CapyTo(string to, string token = null)
         {
+            var bot = await CapyKnown(token);
             if (to == CapyBotChat)
-                return (await CapyBotChatOf(token)).ToString();
+                return bot.ChatId?.ToString() ?? "@" + bot.OwnerName;
             if (to == CapyOwner)
-            {
-                if (_capyOwnerName == null) await CapyWhoAmI();
-                return "@" + _capyOwnerName;
-            }
+                return "@" + bot.OwnerName;
             if (to.StartsWith('#') && long.TryParse(to.AsSpan(1), out long number))
             {
-                if (!_capyChatNumbers.ContainsKey(number))
-                    RememberCapyChats((JArray)await CapyRequest(HttpMethod.Get, "/chats"));
-                return _capyChatNumbers.TryGetValue(number, out var id) ? id.ToString()
+                if (!bot.Numbers.ContainsKey(number))
+                    RememberCapyChats(bot, (JArray)await CapyRequest(HttpMethod.Get, "/chats", token: token));
+                return bot.Numbers.TryGetValue(number, out var id) ? id.ToString()
                     : throw new InvalidOperationException($"the bot is not in Capy chat {number}");
             }
             return to;
@@ -335,121 +395,161 @@ namespace ghostline
 
         // ---- who the bot is; health ----
 
-        private static async Task CapyWhoAmI()
+        // The health of every bot in one window: a minute, the bots one after another, evenly spaced, one
+        // request at a time, so Capy gets a steady trickle rather than a burst. A bot whose poll went through
+        // within the window counts as checked (its /bot/me is asked every 10 minutes then, for its owner);
+        // a phone line bot, not polled, is asked every round. A bot with transcripts and no chat of its own
+        // is not a phone line's bot.
+        private static readonly TimeSpan CapyHealthWindow = TimeSpan.FromMinutes(1);
+        private static readonly TimeSpan CapyWhoAmIEvery = TimeSpan.FromMinutes(10);
+
+        private static async Task CapyHealthLoop()
         {
-            var me = await CapyRequest(HttpMethod.Get, "/bot/me");
-            _capyBotId = (Guid)me["id"];
-            var owner = (Guid)me["ownerId"];
-            if (owner != _capyOwnerId || _capyOwnerName == null)
+            while (true)
             {
-                var user = await CapyRequest(HttpMethod.Get, $"/users/{owner}");
-                _capyOwnerName = ((string)user["username"])?.ToLowerInvariant();
-                _capyOwnerId = owner;
+                var tokens = CapyTokens;
+                var polled = CapyPolledTokens;
+                var gap = tokens.Count > 0 ? CapyHealthWindow / tokens.Count : CapyHealthWindow;
+                foreach (string token in tokens)
+                {
+                    var bot = BotOf(token);
+                    try
+                    {
+                        var now = DateTime.UtcNow;
+                        bool pollFresh = polled.Contains(token) && bot.Error == null && now - bot.PolledAt < CapyHealthWindow;
+                        if (!pollFresh || now - bot.WhoAmIAt >= CapyWhoAmIEvery)
+                            await CapyWhoAmI(token);
+                        if (bot.ChatId == null && NeedsBotChat(token))
+                            throw new InvalidOperationException("has transcripts, but its token is not a phone line's bot (no chatId)");
+                        if (!bot.CommandsSet && polled.Contains(token))
+                        {
+                            await CapyRequest(HttpMethod.Put, "/bot/commands", new[]
+                            {
+                                new { command = "status", description = L10n.Tg.T("tg.cmd.status") },
+                                new { command = "help", description = L10n.Tg.T("tg.cmd.help") },
+                            }, token: token);
+                            bot.CommandsSet = true;
+                        }
+                        // A poll failing now keeps its error: /bot/me answering does not make the chats work.
+                        if (!(polled.Contains(token) && DateTime.UtcNow < bot.PollAgainAt)) bot.Error = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        bot.Error = DescribeException(ex);
+                    }
+                    UpdateCapyHealth();
+                    await Task.Delay(gap);
+                }
+                if (tokens.Count == 0) await Task.Delay(gap);
             }
         }
 
-        // /bot/me once a minute, like Telegram's getMe: Capy is "connected" while that works.
-        private static async Task CapyHealthLoop()
+        // One state for all the bots: every one fine, connected; some failing, partly (yellow, the failing
+        // ones named); all failing, disconnected.
+        private static void UpdateCapyHealth()
         {
-            bool commandsSet = false;
-            while (true)
+            var tokens = CapyTokens;
+            var failing = tokens.Where(t => BotOf(t).Error != null).ToList();
+            string Name(string t) { string k = BotKey(t); return k.Length == 0 ? "main bot" : k; }
+            string errors = string.Join("; ", failing.Select(t => $"{Name(t)}: {BotOf(t).Error}"));
+            if (failing.Count == 0)
+                HealthStatus.MarkConnected("capy");
+            else if (failing.Count < tokens.Count)
+                HealthStatus.MarkPartial("capy", errors);
+            else
             {
-                try
-                {
-                    // Every phone line bot's token is checked too: a revoked one would lose transcripts silently.
-                    foreach (var t in CapyChats.Where(OwnBot).Select(t => t.token.Trim()).Distinct())
-                        _capyBotChats[t] = (Guid?)(await CapyRequest(HttpMethod.Get, "/bot/me", token: t))["chatId"]
-                            ?? throw new InvalidOperationException("a target's token is not a phone line's bot (no chatId)");
-                    if (!CapyMainBot)
-                    {
-                        HealthStatus.MarkConnected("capy");
-                        await Task.Delay(TimeSpan.FromMinutes(1));
-                        continue;
-                    }
-                    await CapyWhoAmI();
-                    HealthStatus.MarkConnected("capy");
-                    if (!commandsSet)
-                    {
-                        await CapyRequest(HttpMethod.Put, "/bot/commands", new[]
-                        {
-                            new { command = "status", description = L10n.Tg.T("tg.cmd.status") },
-                            new { command = "help", description = L10n.Tg.T("tg.cmd.help") },
-                        });
-                        commandsSet = true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    HealthStatus.MarkDisconnected("capy");
-                    HealthStatus.MarkError("capy", DescribeException(ex));
-                }
-                await Task.Delay(TimeSpan.FromMinutes(1));
+                HealthStatus.MarkDisconnected("capy");
+                HealthStatus.MarkError("capy", errors);
             }
         }
 
         // ---- incoming: messages written to the bot ----
 
-        // Every few seconds: the bot's chats, and the new events of those with a newer seq. The cursor per
+        // Every few seconds: the bots' chats, and the new events of those with a newer seq. The cursor per
         // chat is kept in the DB, so messages written while ghostline was down are handled after the start.
         // A chat seen for the first time starts at its current seq: its history is not replayed.
+        // The polled bots (CapyPolledTokens) one after another, one request at a time; a failing bot is left
+        // alone for 30 s and does not hold up the others. The main bot's cursors keep their old keys;
+        // another bot's are per bot, as two bots may sit in one chat.
+        private static readonly TimeSpan CapyPollFailedPause = TimeSpan.FromSeconds(30);
+
         private static async Task CapyPollLoop()
         {
             var users = new Dictionary<Guid, string>();
             while (true)
             {
-                try
+                foreach (string token in CapyPolledTokens)
                 {
-                    if (_capyBotId == null) await CapyWhoAmI();
-                    var chats = (JArray)await CapyRequest(HttpMethod.Get, "/chats");
-                    RememberCapyChats(chats);
-                    foreach (var chat in chats)
+                    var bot = BotOf(token);
+                    if (DateTime.UtcNow < bot.PollAgainAt) continue;
+                    try
                     {
-                        Guid chatId = (Guid)chat["id"];
-                        long last = (long)chat["lastSeq"];
-                        string key = KvCapySeq + chatId;
-                        if (!long.TryParse(Store.GetKv(key), out long seen))
-                        {
-                            Store.SetKv(key, last.ToString());
-                            continue;
-                        }
-                        while (seen < last)
-                        {
-                            var page = await CapyRequest(HttpMethod.Get, $"/chats/{chatId}/events?after={seen}&limit=100");
-                            var events = (JArray)page["events"];
-                            foreach (var e in events)
-                            {
-                                seen = Math.Max(seen, (long)e["seq"]);
-                                if ((string)e["type"] != "MessageNew") continue;
-                                var msg = e["payload"]?["message"];
-                                if (msg == null || (Guid?)msg["senderId"] is not { } sender || sender == _capyBotId) continue;
-                                if (!users.TryGetValue(sender, out var name))
-                                    users[sender] = name = (string)(await CapyRequest(HttpMethod.Get, $"/users/{sender}"))["username"];
-                                HandleCapyMessage(chatId, (long?)chat["number"] ?? 0, (string)chat["type"] == "Direct", name,
-                                    sender == _capyOwnerId, (string)msg["text"] ?? "");
-                            }
-                            Store.SetKv(key, seen.ToString());
-                            if (events.Count == 0 || page["hasMore"]?.Value<bool>() != true) break;
-                        }
+                        await CapyPollBot(token, users);
+                        bot.PolledAt = DateTime.UtcNow;
+                        if (bot.Error != null) { bot.Error = null; UpdateCapyHealth(); }
                     }
-                    HealthStatus.MarkConnected("capy");
-                    await Task.Delay(TimeSpan.FromSeconds(3));
+                    catch (Exception ex)
+                    {
+                        bool first = bot.Error == null;
+                        bot.Error = DescribeException(ex);
+                        bot.PollAgainAt = DateTime.UtcNow + CapyPollFailedPause;
+                        UpdateCapyHealth();
+                        string k = BotKey(token);
+                        if (first)
+                            SysLog.Warn("capy", $"poll failed ({(k.Length == 0 ? "main bot" : k)}): {bot.Error}, retrying every {CapyPollFailedPause.TotalSeconds:0} s");
+                    }
                 }
-                catch (Exception ex)
+                await Task.Delay(TimeSpan.FromSeconds(3));
+            }
+        }
+
+        private static async Task CapyPollBot(string token, Dictionary<Guid, string> users)
+        {
+            var bot = await CapyKnown(token);
+            bool main = token == MainCapyToken;
+            var chats = (JArray)await CapyRequest(HttpMethod.Get, "/chats", token: token);
+            RememberCapyChats(bot, chats);
+            // Our other bots write into shared chats too: their messages are not commands.
+            var ours = _capyBots.Values.Select(b => b.Id).ToHashSet();
+            foreach (var chat in chats)
+            {
+                Guid chatId = (Guid)chat["id"];
+                long last = (long)chat["lastSeq"];
+                string key = KvCapySeq + (main ? "" : bot.Id + ".") + chatId;
+                if (!long.TryParse(Store.GetKv(key), out long seen))
                 {
-                    HealthStatus.MarkDisconnected("capy");
-                    HealthStatus.MarkError("capy", DescribeException(ex));
-                    SysLog.Warn("capy", "poll failed: " + DescribeException(ex) + ", retrying in 10 s");
-                    await Task.Delay(TimeSpan.FromSeconds(10));
+                    Store.SetKv(key, last.ToString());
+                    continue;
+                }
+                while (seen < last)
+                {
+                    var page = await CapyRequest(HttpMethod.Get, $"/chats/{chatId}/events?after={seen}&limit=100", token: token);
+                    var events = (JArray)page["events"];
+                    foreach (var e in events)
+                    {
+                        seen = Math.Max(seen, (long)e["seq"]);
+                        if ((string)e["type"] != "MessageNew") continue;
+                        var msg = e["payload"]?["message"];
+                        if (msg == null || (Guid?)msg["senderId"] is not { } sender || ours.Contains(sender)) continue;
+                        if (!users.TryGetValue(sender, out var name))
+                            users[sender] = name = (string)(await CapyRequest(HttpMethod.Get, $"/users/{sender}", token: token))["username"];
+                        HandleCapyMessage(token, chatId, (long?)chat["number"] ?? 0, (string)chat["type"] == "Direct", name,
+                            sender == bot.OwnerId, (string)msg["text"] ?? "");
+                    }
+                    Store.SetKv(key, seen.ToString());
+                    if (events.Count == 0 || page["hasMore"]?.Value<bool>() != true) break;
                 }
             }
         }
 
-        // A message to the bot: a command, or an SMS to send ("number / text" in a chat of one line,
-        // "line / number / text" in a chat of several). Replies go into the same chat.
-        private static void HandleCapyMessage(Guid chatId, long chatNumber, bool direct, string username, bool isOwner, string message)
+        // A message to a bot: a command, or an SMS to send ("number / text" in a chat of one line,
+        // "line / number / text" in a chat of several). Replies go into the same chat, from the same bot.
+        private static void HandleCapyMessage(string token, Guid chatId, long chatNumber, bool direct, string username, bool isOwner,
+                                              string message)
         {
-            string reply = CapyTarget(chatId.ToString());
-            var lines = LinesOfCapyChat(chatId, chatNumber, direct, username, isOwner);
+            string botKey = BotKey(token);
+            string reply = CapyTarget(botKey.Length == 0 ? chatId.ToString() : chatId + "|" + botKey);
+            var lines = LinesOfCapyChat(chatId, chatNumber, direct, username, isOwner, token);
             var l = L10n.Tg;
             if (lines.Count == 0)
             {
