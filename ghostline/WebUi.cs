@@ -605,11 +605,15 @@ namespace ghostline
         private static void RestartSoon() =>
             _ = Task.Run(async () => { await Task.Delay(500); Environment.Exit(0); });
 
+        // Items the form may remove: gateways, lines, and the chats of the clients.
         private static readonly System.Text.RegularExpressions.Regex RemovablePath =
-            new(@"^(gateways\[id=|lines\[name=)[A-Za-z0-9][A-Za-z0-9_.-]*\]$");
+            new(@"^((gateways\[id=|lines\[name=)[A-Za-z0-9][A-Za-z0-9_.-]*\]"
+                + @"|clients\.telegram\.chats\[id=-?[0-9]+\]"
+                + @"|clients\.ntfy\.topics\[topic=[A-Za-z0-9_-]+\]"
+                + @"|clients\.capy\.targets\[name=[@#]?[A-Za-z0-9][A-Za-z0-9_.-]*\])$");
 
         private static readonly System.Text.RegularExpressions.Regex ClientSectionPath =
-            new(@"^(lines\[name=[A-Za-z0-9][A-Za-z0-9_.-]*\]\.)?clients\.(telegram|ntfy)$");
+            new(@"^clients\.(telegram|ntfy|capy)$");
 
         private static async Task<T> ReadJson<T>(HttpRequest req)
         {

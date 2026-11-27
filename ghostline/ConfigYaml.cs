@@ -13,7 +13,8 @@ namespace ghostline
         public static readonly Regex NameOk = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.CultureInvariant);
 
         // List keys: a comma-separated value in the form, [a, b] in the YAML.
-        static readonly HashSet<string> ListKeys = new(StringComparer.OrdinalIgnoreCase) { "chat_ids", "local_nets", "ignore_ip", "to" };
+        static readonly HashSet<string> ListKeys = new(StringComparer.OrdinalIgnoreCase)
+            { "chat_ids", "local_nets", "ignore_ip", "sms", "calls", "transcripts" };
 
         // Value at a path: "web.password", "gateways[id=pbx].ami_port", "lines[name=home].calls.voice".
         // A missing key is added (with any missing intermediate sections); a missing list item with
@@ -291,6 +292,42 @@ namespace ghostline
                 yaml = RemoveTopSection(yaml, "pbx");
             if (m.SystemMoved)
                 yaml = MoveIntoSection(yaml, LegacySystem.Keys, "system");
+            if (m.RoutingMoved)
+                yaml = MigrateRouting(yaml, s, m);
+            return yaml;
+        }
+
+        // Routes on the lines (before 2026-11-27) to subscriptions on the chats: the new lists are added first
+        // (so no section is left empty in between), then the old keys go.
+        static string MigrateRouting(string yaml, Settings s, SettingsMigration m)
+        {
+            static string Csv(List<string> v) => v == null ? null : string.Join(", ", v);
+            string Sub(string yaml, string at, Subscription x, (string key, List<string> v)[] lists)
+            {
+                foreach (var (key, v) in lists)
+                    if (v != null) yaml = Set(yaml, at + "." + key, Csv(v));
+                if (x.sms != null) yaml = Set(yaml, at + ".sms", Csv(x.sms));
+                if (x.alerts) yaml = Set(yaml, at + ".alerts", "true");
+                return yaml;
+            }
+            var c = s.clients;
+            foreach (var x in c.telegram?.chats ?? new())
+                yaml = Sub(yaml, $"clients.telegram.chats[id={x.id}]", x, new[] { ("calls", x.calls) });
+            foreach (var x in c.ntfy?.topics ?? new())
+                yaml = Sub(yaml, $"clients.ntfy.topics[topic={x.topic}]", x, new[] { ("calls", x.calls) });
+            foreach (var x in c.capy?.targets ?? new())
+            {
+                string at = $"clients.capy.targets[name={x.name}]";
+                if (!string.IsNullOrEmpty(x.to)) yaml = Set(yaml, at + ".to", x.to);
+                yaml = Sub(yaml, at, x, new[] { ("transcripts", x.transcripts) });
+            }
+            yaml = RemoveSection(yaml, "clients.telegram.chat_ids");
+            yaml = RemoveSection(yaml, "clients.ntfy.topic");
+            yaml = RemoveSection(yaml, "clients.capy.to");
+            foreach (var name in m.LegacyClientLines)
+                yaml = RemoveSection(yaml, $"lines[name={name}].clients");
+            foreach (var name in m.LegacyCallChatLines)
+                yaml = RemoveSection(yaml, $"lines[name={name}].calls.chat_ids");
             return yaml;
         }
 
@@ -654,8 +691,7 @@ namespace ghostline
     {
         public record Field(string path, string type, string value, string label, string[] options = null);
         public record Group(string id, string title, List<Field> fields);
-        // clients: the client sections of a line, null when the line has no "clients" section at all.
-        public record Item(string key, List<Field> fields, string[] clients = null);
+        public record Item(string key, List<Field> fields);
         // An Asterisk gateway: its modems (edited with their own form), whether ghostline writes its config.
         public record GatewayItem(string key, List<Field> fields, string type, bool managed, List<PbxModem> modems);
 
@@ -676,16 +712,13 @@ namespace ghostline
                     F("system.locale.transcript", "select", s.locale?.transcript ?? "", Locales)),
                 G("clients"),
                 G("telegram",
-                    F("clients.telegram.token", "text", s.clients?.telegram?.token),
-                    F("clients.telegram.chat_ids", "text", Csv(s.clients?.telegram?.chatIds))),
+                    F("clients.telegram.token", "text", s.clients?.telegram?.token)),
                 G("ntfy",
                     F("clients.ntfy.url", "text", s.clients?.ntfy?.url),
-                    F("clients.ntfy.token", "text", s.clients?.ntfy?.token),
-                    F("clients.ntfy.topic", "text", s.clients?.ntfy?.topic)),
+                    F("clients.ntfy.token", "text", s.clients?.ntfy?.token)),
                 G("capy",
                     F("clients.capy.url", "text", s.clients?.capy?.url),
-                    F("clients.capy.token", "text", s.clients?.capy?.token),
-                    F("clients.capy.to", "text", Csv(s.clients?.capy?.to))),
+                    F("clients.capy.token", "text", s.clients?.capy?.token)),
                 G("web",
                     F("system.web.port", "number", n(s.web?.port)),
                     F("system.web.user", "text", s.web?.user),
@@ -726,8 +759,17 @@ namespace ghostline
                 clients = Present(s.clients?.telegram != null, s.clients?.ntfy != null, s.clients?.capy != null),
                 gateways = (s.gateways ?? new()).Where(g => !string.IsNullOrEmpty(g.id))
                     .Select(g => new GatewayItem(g.id, GatewayFields(g.id, g), g.type, g.Managed, g.modems ?? new())).ToList(),
-                lines = (s.lines ?? new()).Where(ch => !string.IsNullOrEmpty(ch.name)).Select(ch => new Item(ch.name, LineFields(ch.name, ch, s),
-                    ch.clients == null ? null : Present(ch.clients.telegram != null, ch.clients.ntfy != null, ch.clients.capy != null))).ToList(),
+                lines = (s.lines ?? new()).Where(ch => !string.IsNullOrEmpty(ch.name)).Select(ch => new Item(ch.name, LineFields(ch.name, ch, s))).ToList(),
+                // The chats of each client and what each gets (subscriptions), and the empty forms of new ones.
+                telegramChats = (s.clients?.telegram?.chats ?? new()).Where(x => !string.IsNullOrEmpty(x.id))
+                    .Select(x => new Item(x.id, TelegramChatFields(x.id, x))).ToList(),
+                ntfyTopics = (s.clients?.ntfy?.topics ?? new()).Where(x => !string.IsNullOrEmpty(x.topic))
+                    .Select(x => new Item(x.topic, NtfyTopicFields(x.topic, x))).ToList(),
+                capyTargets = (s.clients?.capy?.targets ?? new()).Where(x => !string.IsNullOrEmpty(x.name))
+                    .Select(x => new Item(x.name, CapyTargetFields(x.name, x))).ToList(),
+                telegramChatTemplate = TelegramChatFields("{key}"),
+                ntfyTopicTemplate = NtfyTopicFields("{key}"),
+                capyTargetTemplate = CapyTargetFields("{key}"),
                 // For a line: what its gateway is, and the modems to choose from.
                 gatewayInfo = (s.gateways ?? new()).Where(g => !string.IsNullOrEmpty(g.id)).ToDictionary(g => g.id, g => new
                 {
@@ -807,18 +849,56 @@ namespace ghostline
                 F($"{p}.port", "text", ch.port),
                 F($"{p}.pattern", "text", ch.pattern),
                 F($"{p}.number", "text", ch.number),
-                F($"{p}.clients.telegram.chat_ids", "text", Csv(ch.clients?.telegram?.chatIds)),
-                F($"{p}.clients.ntfy.topic", "text", ch.clients?.ntfy?.topic),
-                F($"{p}.clients.capy.to", "text", Csv(ch.clients?.capy?.to)),
                 F($"{p}.calls.voice", "checkbox", b(calls.voice)),
                 F($"{p}.calls.transcript", "checkbox", b(calls.transcript)),
                 F($"{p}.calls.missed", "checkbox", b(calls.missed)),
-                F($"{p}.calls.chat_ids", "text", Csv(calls.chatIds)),
                 // The phone (gateway with pbx: managed). The secret is not a form field: it is generated on save.
                 F($"{p}.phone.extension", "text", ch.phone?.extension),
                 // Empty for a line without a phone, so saving the form does not add a phone section to it.
                 F($"{p}.phone.dial", "select", ch.phone == null ? "" : ch.phone.dial ?? "ru", new[] { "" }.Concat(PbxConfig.DialSets).ToArray()),
                 F($"{p}.phone.encryption", "select", ch.phone == null ? "" : ch.phone.encryption ?? "sdes", new[] { "" }.Concat(PbxConfig.Encryptions).ToArray()),
+            };
+        }
+
+        // A chat's subscriptions: lists of line names ("*": every line), drawn as line checkboxes.
+        static List<Field> TelegramChatFields(string id, TelegramChat x = null)
+        {
+            string p = $"clients.telegram.chats[id={id}]";
+            x ??= new TelegramChat { id = id };
+            return new List<Field>
+            {
+                F($"{p}.id", "text", x.id),
+                F($"{p}.sms", "lines", Csv(x.sms)),
+                F($"{p}.calls", "lines", Csv(x.calls)),
+                F($"{p}.alerts", "checkbox", b(x.alerts)),
+            };
+        }
+
+        static List<Field> NtfyTopicFields(string topic, NtfyTopic x = null)
+        {
+            string p = $"clients.ntfy.topics[topic={topic}]";
+            x ??= new NtfyTopic { topic = topic };
+            return new List<Field>
+            {
+                F($"{p}.topic", "text", x.topic),
+                F($"{p}.sms", "lines", Csv(x.sms)),
+                F($"{p}.calls", "lines", Csv(x.calls)),
+                F($"{p}.alerts", "checkbox", b(x.alerts)),
+            };
+        }
+
+        static List<Field> CapyTargetFields(string name, CapyChat x = null)
+        {
+            string p = $"clients.capy.targets[name={name}]";
+            x ??= new CapyChat { name = name };
+            return new List<Field>
+            {
+                F($"{p}.name", "text", x.name),
+                F($"{p}.to", "text", x.to),
+                F($"{p}.token", "text", x.token),
+                F($"{p}.sms", "lines", Csv(x.sms)),
+                F($"{p}.transcripts", "lines", Csv(x.transcripts)),
+                F($"{p}.alerts", "checkbox", b(x.alerts)),
             };
         }
 
@@ -828,12 +908,9 @@ namespace ghostline
         // First keys of a client section added from the form (raw YAML).
         public static IList<(string key, string raw)> NewSection(string path) => path switch
         {
-            "clients.telegram" => new[] { ("token", "\"\""), ("chat_ids", "[]") },
-            "clients.ntfy" => new[] { ("url", "\"\""), ("token", "\"\""), ("topic", "\"\"") },
-            "clients.capy" => new[] { ("url", "\"\""), ("token", "\"\""), ("to", "[]") },
-            _ when path.EndsWith(".clients.telegram") => new[] { ("chat_ids", "[]") },
-            _ when path.EndsWith(".clients.ntfy") => new[] { ("topic", "\"\"") },
-            _ when path.EndsWith(".clients.capy") => new[] { ("to", "[]") },
+            "clients.telegram" => new[] { ("token", "\"\""), ("chats", "[]") },
+            "clients.ntfy" => new[] { ("url", "\"\""), ("token", "\"\""), ("topics", "[]") },
+            "clients.capy" => new[] { ("url", "\"\""), ("token", "\"\""), ("targets", "[]") },
             _ => null
         };
 

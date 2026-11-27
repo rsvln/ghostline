@@ -24,24 +24,30 @@ system:
     level: info               # system log: error | warning | info | debug
     file: false               # also write SMS and calls to /var/log/ghostline/ (text files)
 
-  # A line without network for this many minutes: a message to its chats/topic; 0: none.
+  # A line without network for this many minutes: an alert; 0: none.
   monitor:
     alert_minutes: 2
 
 # Notification channels, all optional (at least one to get notifications).
+# Each chat (topic, Capy recipient) gets what it subscribes to: sms and calls of some lines ("*": every
+# line), alerts (no network on a line, PBX attacks, storage, the certificate).
 clients:
   telegram:                   # empty token: Telegram is off
     token: 123456789:AAExampleTelegramBotToken
-    chat_ids:                 # common chats, for lines without their own
-      - "100000001"
+    chats:
+      - id: "100000001"
+        sms: ["*"]
+        calls: ["*"]
+        alerts: true
   ntfy:                       # empty url: ntfy is off
     url:
     token:
-    topic:                    # common topic, for lines without their own
-  capy:                       # empty url or token: Capy is off (docs/capy.md)
+    topics: []                # - { topic: gl-personal, sms: [personal], calls: [personal], alerts: false }
+  capy:                       # empty url: Capy is off (docs/capy.md)
     url:
-    token:                    # the bot's token, rb_...
-    to: []                    # @username or chat ids; empty: the bot's owner
+    token:                    # the main bot's token, rb_...
+    targets: []               # - { name: me, to: "", sms: ["*"], alerts: true }   (to empty: the bot's owner)
+                              # - { name: personal-phone, token: rb_..., transcripts: [personal] }   (a phone line's bot)
 
 gateways:
   - id: pbx

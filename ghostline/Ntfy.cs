@@ -29,15 +29,14 @@ namespace ghostline
         private static string NtfyTarget(string topic) => NtfyPrefix + topic;
         private static bool IsNtfyTarget(string target) => target != null && target.StartsWith(NtfyPrefix);
 
-        // Queues a notification for the line's topic (persistent, retried, like Telegram messages).
-        // When the topic is shared by several lines, the line name goes into the title.
+        // Queues a notification for the topics that get the line's SMS (persistent, retried, like Telegram
+        // messages). When a topic serves several lines, the line name goes into the title.
         private static void EnqueueNtfy(Channel line, string title, string text)
         {
-            string topic = LineTopic(line);
-            if (topic == null) return;
-            if (LinesOfTopic(topic).Count > 1)
-                title = string.IsNullOrEmpty(title) ? line.name : $"{line.name} · {title}";
-            EnqueueNtfyTopic(topic, title, text);
+            foreach (string topic in LineTopics(line))
+                EnqueueNtfyTopic(topic, LinesOfTopic(topic).Count > 1
+                    ? (string.IsNullOrEmpty(title) ? line.name : $"{line.name} · {title}")
+                    : title, text);
         }
 
         private static void EnqueueNtfyTopic(string topic, string title, string text) =>
@@ -134,10 +133,11 @@ namespace ghostline
 
         private static async Task NtfyListenLoop()
         {
-            var topicList = AllLines.Select(LineTopic).Where(t => t != null).Distinct().ToList();
+            // Topics that serve a line: messages written there are SMS to send or commands.
+            var topicList = NtfyTopics.Select(t => t.topic.Trim()).Distinct().Where(t => LinesOfTopic(t).Count > 0).ToList();
             if (topicList.Count == 0)
             {
-                SysLog.Warn("ntfy", "no topics (set clients.ntfy.topic or lines[].clients.ntfy.topic)");
+                SysLog.Warn("ntfy", "no topics with lines (clients.ntfy.topics[].sms / calls)");
                 return;
             }
             string topics = string.Join(",", topicList.Select(Uri.EscapeDataString));

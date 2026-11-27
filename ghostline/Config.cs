@@ -47,10 +47,10 @@ namespace ghostline
         // transcripts. A number the SIM itself reports (quectel / dongle, AT+CNUM) wins; many SIMs
         // report none, then this one is used; neither: the line name.
         public string number { get; set; }
-        // Where this line goes; no section: the common clients.telegram.chat_ids / clients.ntfy.topic.
+        // Before 2026-11-27: where this line goes (its own chats / topic / Capy recipients). Now each chat
+        // subscribes to lines itself (clients.*.chats / topics / targets); converted by SettingsFile.Normalize.
         public LineClients clients { get; set; }
-        // What to send for calls on this line (mode "full" only).
-        // No section: everything on, the line's chats.
+        // What to send for calls on this line (mode "full" only). No section: everything on.
         public ChannelCalls calls { get; set; }
         // The SIP phone of this line (a line on the managed gateway only): the SIM rings it, and it calls out
         // through the SIM.
@@ -188,7 +188,39 @@ namespace ghostline
         public bool voice { get; set; } = true;       // voice message with the call recording
         public bool transcript { get; set; } = true;  // transcript, added to the caption later
         public bool missed { get; set; } = true;      // notification about a missed incoming call
-        public List<string> chatIds { get; set; }     // Telegram chats for calls only; empty: the line's chats
+        public List<string> chatIds { get; set; }     // before 2026-11-27: Telegram chats for calls only (Normalize)
+    }
+
+    // What a chat (a Telegram chat, an ntfy topic, a Capy recipient) gets. Lists of line names; "*": every line.
+    public class Subscription
+    {
+        public List<string> sms { get; set; }         // incoming and outgoing SMS of these lines
+        public bool alerts { get; set; }              // alerts: no network on a line, PBX attacks, storage, certificate
+
+        internal static bool Covers(List<string> lines, Channel ch) =>
+            ch != null && lines != null && lines.Any(x => x == "*" || string.Equals(x?.Trim(), ch.name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public class TelegramChat : Subscription
+    {
+        public string id { get; set; }                // chat id; a group's is negative
+        public List<string> calls { get; set; }       // calls of these lines: recording, transcript added later
+    }
+
+    public class NtfyTopic : Subscription
+    {
+        public string topic { get; set; }
+        public List<string> calls { get; set; }
+    }
+
+    // A Capy recipient. With its own token it is a phone line's bot (@<chat>_phonebot): it writes into its
+    // chat, and only it may add the transcript to the call records Capy posts there itself.
+    public class CapyChat : Subscription
+    {
+        public string name { get; set; }              // how the form and the queue refer to it
+        public string to { get; set; }                // @username, a chat id or #number; empty: the bot's owner (own token: its chat)
+        public string token { get; set; }             // a phone line's bot; empty: clients.capy.token
+        public List<string> transcripts { get; set; } // transcripts of these lines' calls, under the call record (own token only)
     }
 
     public class CallsSettings
@@ -371,9 +403,11 @@ namespace ghostline
     public class TelegramSettings
     {
         public string token { get; set; }
-        // Where SMS go (and calls, unless a line has its own chats). The bot accepts
-        // commands to send SMS only from these chats.
-        public List<string> chatIds { get; set; } = new();
+        // The chats and what each of them gets. The bot accepts commands to send SMS from a chat on the
+        // lines it has in sms or calls.
+        public List<TelegramChat> chats { get; set; } = new();
+        // Before 2026-11-27: the common chats (SMS, calls, alerts); converted by SettingsFile.Normalize.
+        public List<string> chatIds { get; set; }
     }
 
     // Web interface; empty user and password: no authentication.
@@ -401,7 +435,8 @@ namespace ghostline
     {
         public string url { get; set; }
         public string token { get; set; }
-        public string topic { get; set; }
+        public List<NtfyTopic> topics { get; set; } = new();
+        public string topic { get; set; }             // before 2026-11-27: the common topic (Normalize)
     }
 
     // Capy (a self-hosted messenger, its bot API): SMS and calls go to the recipients as messages from a bot;
@@ -410,9 +445,10 @@ namespace ghostline
     {
         public string url { get; set; }               // the Capy server, https://chat.example.com
         public string token { get; set; }             // the bot's token, rb_...
-        // Recipients: @username (the direct chat with that person) or a chat id (a group the bot is in).
-        // Empty: the bot's owner.
-        public List<string> to { get; set; } = new();
+        // Recipients and what each gets: @username (the direct chat with that person), a chat id (a group the
+        // bot is in), or a phone line's bot with its own token.
+        public List<CapyChat> targets { get; set; } = new();
+        public List<string> to { get; set; }          // before 2026-11-27: the common recipients (Normalize)
     }
 
     // Line monitoring (gateways[].monitor): a message to the line's chats and topic when the line has
@@ -592,7 +628,115 @@ namespace ghostline
                 }
             }
 
+            ConvertRouting(s, m);
             s.Migration = m.Any ? m : null;
+        }
+
+        // Before 2026-11-27 a line went to its own chats (lines[].clients, calls.chat_ids) or to the common ones
+        // (clients.telegram.chat_ids, clients.ntfy.topic, clients.capy.to), and alerts to the common ones. Now each
+        // chat lists the lines it gets SMS and calls of, and whether it gets alerts. The same routes, written the
+        // new way; a chat that got every line gets "*". Capy no longer gets calls: it posts call records itself.
+        internal static void ConvertRouting(Settings s, SettingsMigration m)
+        {
+            var c = s.clients;
+            var lines = s.lines.Where(l => !string.IsNullOrEmpty(l.name)).ToList();
+            m.LegacyClientLines.AddRange(lines.Where(l => l.clients != null).Select(l => l.name));
+            m.LegacyCallChatLines.AddRange(lines.Where(l => l.calls?.chatIds != null).Select(l => l.name));
+            bool legacy = c.telegram?.chatIds != null || c.ntfy?.topic != null || c.capy?.to != null
+                          || m.LegacyClientLines.Count > 0 || m.LegacyCallChatLines.Count > 0;
+            if (!legacy) return;
+            m.RoutingMoved = true;
+            var all = lines.Select(l => l.name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            static List<string> Clean(IEnumerable<string> v) =>
+                (v ?? Enumerable.Empty<string>()).Select(x => x?.Trim()).Where(x => !string.IsNullOrEmpty(x)).Distinct().ToList();
+            static List<string> With(List<string> list, string name)
+            {
+                list ??= new List<string>();
+                if (!list.Contains(name)) list.Add(name);
+                return list;
+            }
+            List<string> Star(List<string> list) => list != null && all.Count > 0 && all.SetEquals(list) ? new List<string> { "*" } : list;
+
+            if (c.telegram != null)
+            {
+                var common = Clean(c.telegram.chatIds);
+                var chats = c.telegram.chats ?? new List<TelegramChat>();
+                TelegramChat Chat(string id)
+                {
+                    var x = chats.FirstOrDefault(t => t.id == id);
+                    if (x == null) chats.Add(x = new TelegramChat { id = id });
+                    return x;
+                }
+                foreach (var l in lines.Where(l => l.clients == null || l.clients.telegram != null))
+                {
+                    var sms = Clean(l.clients?.telegram?.chatIds) is { Count: > 0 } own ? own : common;
+                    var calls = Clean(l.calls?.chatIds) is { Count: > 0 } cc ? cc : sms;
+                    foreach (var id in sms) { var x = Chat(id); x.sms = With(x.sms, l.name); }
+                    foreach (var id in calls) { var x = Chat(id); x.calls = With(x.calls, l.name); }
+                }
+                foreach (var id in common) Chat(id).alerts = true;
+                foreach (var x in chats.Where(x => common.Contains(x.id))) { x.sms = Star(x.sms); x.calls = Star(x.calls); }
+                c.telegram.chats = chats;
+                c.telegram.chatIds = null;
+            }
+            if (c.ntfy != null)
+            {
+                string common = string.IsNullOrWhiteSpace(c.ntfy.topic) ? null : c.ntfy.topic.Trim();
+                var topics = c.ntfy.topics ?? new List<NtfyTopic>();
+                NtfyTopic Topic(string t)
+                {
+                    var x = topics.FirstOrDefault(y => y.topic == t);
+                    if (x == null) topics.Add(x = new NtfyTopic { topic = t });
+                    return x;
+                }
+                foreach (var l in lines.Where(l => l.clients == null || l.clients.ntfy != null))
+                {
+                    string t = !string.IsNullOrWhiteSpace(l.clients?.ntfy?.topic) ? l.clients.ntfy.topic.Trim() : common;
+                    if (t == null) continue;
+                    var x = Topic(t);
+                    x.sms = With(x.sms, l.name);
+                    x.calls = With(x.calls, l.name);
+                }
+                if (common != null)
+                {
+                    var x = Topic(common);
+                    x.alerts = true;
+                    x.sms = Star(x.sms);
+                    x.calls = Star(x.calls);
+                }
+                c.ntfy.topics = topics;
+                c.ntfy.topic = null;
+            }
+            if (c.capy != null)
+            {
+                var common = Clean(c.capy.to) is { Count: > 0 } list ? list : new List<string> { "owner" };
+                var targets = c.capy.targets ?? new List<CapyChat>();
+                CapyChat Target(string to)
+                {
+                    var x = targets.FirstOrDefault(t => t.name == to);
+                    if (x == null) targets.Add(x = new CapyChat { name = to, to = to == "owner" ? null : to });
+                    return x;
+                }
+                foreach (var l in lines.Where(l => l.clients == null || l.clients.capy != null))
+                    foreach (var to in Clean(l.clients?.capy?.to) is { Count: > 0 } own ? own : common)
+                    {
+                        var x = Target(to);
+                        x.sms = With(x.sms, l.name);
+                    }
+                foreach (var to in common)
+                {
+                    var x = Target(to);
+                    x.alerts = true;
+                    x.sms = Star(x.sms);
+                }
+                c.capy.targets = targets;
+                c.capy.to = null;
+            }
+            foreach (var l in lines)
+            {
+                l.clients = null;
+                if (l.calls != null) l.calls.chatIds = null;
+            }
         }
 
         public static string Serialize(Settings s) => new SerializerBuilder()
@@ -615,7 +759,8 @@ namespace ghostline
         }
 
         // A file of an older format is rewritten once, in place (comments kept); the old one stays next to
-        // it as .bak-v2 (before 2026-10-30) or .bak-v3 (top-level system sections, before 2026-11-01).
+        // it as .bak-v2 (before 2026-10-30), .bak-v3 (top-level system sections, before 2026-11-01) or .bak-v4
+        // (routes on the lines, before 2026-11-27).
         // When the rewritten text does not read back the same, the settings are written out in full
         // instead (comments lost).
         public static void Migrate(string yamlPath)
@@ -637,7 +782,7 @@ namespace ghostline
             if (!same)
                 text = "# ghostline settings. Converted " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + "\n" + expected;
 
-            string backup = yamlPath + (s.Migration.AnyV2 ? ".bak-v2" : ".bak-v3");
+            string backup = yamlPath + (s.Migration.AnyV2 ? ".bak-v2" : s.Migration.SystemMoved ? ".bak-v3" : ".bak-v4");
             File.Copy(yamlPath, backup, overwrite: true);
             // In place, not via a temp file: the config keeps its mode (it holds secrets).
             File.WriteAllText(yamlPath, text);
@@ -671,9 +816,12 @@ namespace ghostline
         public readonly List<string> Retyped = new();                   // gateways that became "asterisk"
         public readonly List<string> Regatewayed = new();               // lines moved to the kept gateway
         public readonly Dictionary<string, string> LineKeys = new();    // line -> "modem" / "port"
+        public bool RoutingMoved;                                       // routes went from the lines to the chats
+        public readonly List<string> LegacyClientLines = new();         // lines with a "clients" section
+        public readonly List<string> LegacyCallChatLines = new();       // lines with calls.chat_ids
 
         public bool AnyV2 => ChannelsRenamed || PbxRemoved || Merged.Count > 0 || Retyped.Count > 0 || LineKeys.Count > 0;
-        public bool Any => AnyV2 || SystemMoved;
+        public bool Any => AnyV2 || SystemMoved || RoutingMoved;
     }
 
     internal partial class Program

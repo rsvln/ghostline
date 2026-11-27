@@ -665,24 +665,22 @@ namespace ghostline
             var l = L10n.Tg;
             EnqueueAdminAlert(l.T("tg.pbx.test.title"), l.T("tg.pbx.test.text"));
             var to = new List<string>();
-            if (TelegramEnabled && (settings.clients.telegram.chatIds?.Count ?? 0) > 0) to.Add("telegram");
-            if (NtfyEnabled && !string.IsNullOrWhiteSpace(settings.clients.ntfy.topic)) to.Add("ntfy");
-            if (CapyEnabled && CapyCommonTo().Any()) to.Add("capy");
+            if (AlertChats.Count > 0) to.Add("telegram");
+            if (AlertTopics.Count > 0) to.Add("ntfy");
+            if (CapyAlertTargets.Count > 0) to.Add("capy");
             SysLog.Info("pbx", "test alert sent to: " + (to.Count > 0 ? string.Join(", ", to) : "nobody"));
             return to;
         }
 
-        // To the common Telegram chats, ntfy topic and Capy recipients (not a line's): PBX-wide events.
-        private static void EnqueueAdminAlert(string title, string text)
+        // To the chats, topics and Capy recipients with alerts: on. Line radio notices, attacks, storage, certificate.
+        internal static void EnqueueAdminAlert(string title, string text)
         {
-            if (TelegramEnabled)
-                foreach (var chat in settings.clients.telegram.chatIds ?? new())
-                    Store.EnqueueTelegramMessage(chat, title + "\n" + text);
-            if (NtfyEnabled && !string.IsNullOrWhiteSpace(settings.clients.ntfy.topic))
-                EnqueueNtfyTopic(settings.clients.ntfy.topic, title, text);
-            if (CapyEnabled)
-                foreach (var to in CapyCommonTo())
-                    Store.EnqueueTelegramMessage(CapyTarget(to), title + "\n" + text);
+            foreach (var chat in AlertChats)
+                Store.EnqueueTelegramMessage(chat, title + "\n" + text);
+            foreach (var topic in AlertTopics)
+                EnqueueNtfyTopic(topic, title, text);
+            foreach (var to in CapyAlertTargets)
+                Store.EnqueueTelegramMessage(CapyTarget(to), title + "\n" + text);
         }
 
         // ---- TLS certificate -----------------------------------------------------------------------------

@@ -22,6 +22,8 @@ namespace ghostline
         public string TrText { get; set; }
         public string TrError { get; set; }
         public string TrSegments { get; set; }   // JSON: [{s, e, who, t}], who = "me"/"them"/null
+        // The id the PBX and Capy share (X-Asterisk-CallId): CDR userfield (a call from Capy) or linkedid.
+        public string PbxCallId { get; set; }
 
         public bool Missed => Billsec == 0;
         public bool HasRecording => !string.IsNullOrEmpty(RecPath) && RecSize > Store.MinRecordingBytes;
@@ -32,7 +34,7 @@ namespace ghostline
         public long Id { get; set; }
         public long CallId { get; set; }
         public string ChatId { get; set; }
-        public string Kind { get; set; }         // "voice" / "text"
+        public string Kind { get; set; }         // "voice" / "text" / "transcript" (Capy: under its call record)
         public bool WantTranscript { get; set; }
         public long MessageId { get; set; }
         public int Attempts { get; set; }
@@ -138,6 +140,20 @@ namespace ghostline
                     ALTER TABLE call_tg ADD COLUMN ext TEXT;
                     PRAGMA user_version = 4;";
                 cmd.ExecuteNonQuery();
+                version = 4;
+            }
+
+            if (version < 5)
+            {
+                // The PBX call id Capy keeps on its call record, and when a row may be tried again (Capy
+                // posts the record when the call ends, possibly after our CDR poll).
+                using var cmd = db.CreateCommand();
+                cmd.CommandText = @"
+                    ALTER TABLE calls ADD COLUMN pbx_call_id TEXT;
+                    ALTER TABLE call_tg ADD COLUMN retry_at TEXT;
+                    PRAGMA user_version = 5;";
+                cmd.ExecuteNonQuery();
+                version = 5;
             }
         }
 
@@ -180,8 +196,8 @@ namespace ghostline
             using var cmd = db.CreateCommand();
             cmd.CommandText = @"
                 INSERT OR IGNORE INTO calls (uniqueid, ts, channel, device, direction, peer, peer_name, ext,
-                                             disposition, duration, billsec, rec_path, rec_size, tr_state)
-                VALUES ($u, $ts, $ch, $dev, $dir, $peer, $name, $ext, $disp, $dur, $bill, $rp, $rs, $tr);
+                                             disposition, duration, billsec, rec_path, rec_size, tr_state, pbx_call_id)
+                VALUES ($u, $ts, $ch, $dev, $dir, $peer, $name, $ext, $disp, $dur, $bill, $rp, $rs, $tr, $pbx);
                 SELECT CASE WHEN changes() > 0 THEN last_insert_rowid() ELSE 0 END;";
             cmd.Parameters.AddWithValue("$u", c.UniqueId);
             cmd.Parameters.AddWithValue("$ts", c.Ts);
@@ -197,10 +213,11 @@ namespace ghostline
             cmd.Parameters.AddWithValue("$rp", (object)c.RecPath ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$rs", c.RecSize);
             cmd.Parameters.AddWithValue("$tr", c.TrState ?? "none");
+            cmd.Parameters.AddWithValue("$pbx", (object)c.PbxCallId ?? DBNull.Value);
             return (long)cmd.ExecuteScalar();
         }
 
-        private const string CallColumns = "id, uniqueid, ts, channel, device, direction, peer, peer_name, ext, disposition, duration, billsec, rec_path, rec_size, tr_state, tr_text, tr_error, tr_segments";
+        private const string CallColumns = "id, uniqueid, ts, channel, device, direction, peer, peer_name, ext, disposition, duration, billsec, rec_path, rec_size, tr_state, tr_text, tr_error, tr_segments, pbx_call_id";
 
         private static CallRecord ReadCall(SqliteDataReader r) => new CallRecord
         {
@@ -221,7 +238,8 @@ namespace ghostline
             TrState = r.GetString(14),
             TrText = r.IsDBNull(15) ? null : r.GetString(15),
             TrError = r.IsDBNull(16) ? null : r.GetString(16),
-            TrSegments = r.IsDBNull(17) ? null : r.GetString(17)
+            TrSegments = r.IsDBNull(17) ? null : r.GetString(17),
+            PbxCallId = r.IsDBNull(18) ? null : r.GetString(18)
         };
 
         public static CallRecord GetCall(long id)
@@ -357,8 +375,8 @@ namespace ghostline
             cmd.CommandText = @"UPDATE calls SET tr_state = 'pending', tr_error = NULL, tr_attempts = 0,
                                                  tr_requested_at = $now
                                 WHERE id = $id AND rec_path IS NOT NULL;
-                                UPDATE call_tg SET state = 'sent', attempts = 0
-                                WHERE call_id = $id AND message_id > 0 AND want_transcript = 1 AND changes() > 0;";
+                                UPDATE call_tg SET state = 'sent', attempts = 0, retry_at = NULL
+                                WHERE call_id = $id AND (message_id > 0 OR kind = 'transcript') AND want_transcript = 1 AND changes() > 0;";
             cmd.Parameters.AddWithValue("$id", id);
             cmd.Parameters.AddWithValue("$now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             cmd.ExecuteNonQuery();
@@ -462,9 +480,23 @@ namespace ghostline
             using var db = Open();
             using var cmd = db.CreateCommand();
             cmd.CommandText = $@"SELECT {TgColumns} FROM call_tg t JOIN calls c ON c.id = t.call_id
-                                 WHERE t.state = 'sent' AND c.tr_state IN ('done', 'error') ORDER BY t.id LIMIT $l;";
+                                 WHERE t.state = 'sent' AND c.tr_state IN ('done', 'error')
+                                   AND (t.retry_at IS NULL OR t.retry_at <= $now) ORDER BY t.id LIMIT $l;";
             cmd.Parameters.AddWithValue("$l", limit);
+            cmd.Parameters.AddWithValue("$now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             return ReadTg(cmd);
+        }
+
+        // Not now: tried again after the delay (counts as an attempt).
+        public static void DeferCallTg(long id, string error, TimeSpan delay)
+        {
+            using var db = Open();
+            using var cmd = db.CreateCommand();
+            cmd.CommandText = "UPDATE call_tg SET attempts = attempts + 1, last_error = $e, retry_at = $at WHERE id = $id;";
+            cmd.Parameters.AddWithValue("$e", error);
+            cmd.Parameters.AddWithValue("$at", DateTime.Now.Add(delay).ToString("yyyy-MM-dd HH:mm:ss"));
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.ExecuteNonQuery();
         }
 
         public static void MarkCallTgSent(long id, long messageId, bool final, string ext = null)

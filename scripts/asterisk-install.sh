@@ -284,10 +284,22 @@ put_conf cdr_sqlite3_custom.conf <<EOF
 ; The call journal of ghostline (system.calls.cdr_sqlite). See docs/cdr-sqlite.md.
 [$CDR_DIR/cdr.db]
 table => cdr
-columns => calldate, uniqueid, linkedid, src, dst, did, dcontext, channel, dstchannel, lastapp, disposition, duration, billsec, recordingfile
-values => '\${CDR(start)}','\${CDR(uniqueid)}','\${CDR(linkedid)}','\${CDR(src)}','\${CDR(dst)}','\${CDR(did)}','\${CDR(dcontext)}','\${CDR(channel)}','\${CDR(dstchannel)}','\${CDR(lastapp)}','\${CDR(disposition)}','\${CDR(duration)}','\${CDR(billsec)}','\${CDR(recordingfile)}'
+columns => calldate, uniqueid, linkedid, src, dst, did, dcontext, channel, dstchannel, lastapp, disposition, duration, billsec, recordingfile, userfield
+values => '\${CDR(start)}','\${CDR(uniqueid)}','\${CDR(linkedid)}','\${CDR(src)}','\${CDR(dst)}','\${CDR(did)}','\${CDR(dcontext)}','\${CDR(channel)}','\${CDR(dstchannel)}','\${CDR(lastapp)}','\${CDR(disposition)}','\${CDR(duration)}','\${CDR(billsec)}','\${CDR(recordingfile)}','\${CDR(userfield)}'
 busy_timeout => 5000
 EOF
+
+# Before 2026-11-27 the journal had no userfield: the call id a phone sent (X-Asterisk-CallId, a call
+# placed from Capy), which ghostline needs to add the transcript to Capy's call record. Added to the
+# config and to the table; Asterisk must be restarted to pick it up (module reload is not enough).
+if ! grep -q userfield cdr_sqlite3_custom.conf; then
+  sed -i -e 's/, recordingfile$/, recordingfile, userfield/' \
+         -e "s/'\\\${CDR(recordingfile)}'\$/'\\\${CDR(recordingfile)}','\\\${CDR(userfield)}'/" cdr_sqlite3_custom.conf
+  echo "  added userfield to cdr_sqlite3_custom.conf (restart Asterisk)"
+fi
+if [ -f "$CDR_DIR/cdr.db" ] && ! sqlite3 "$CDR_DIR/cdr.db" "PRAGMA table_info(cdr)" | grep -q '|userfield|'; then
+  sqlite3 "$CDR_DIR/cdr.db" "ALTER TABLE cdr ADD COLUMN userfield TEXT" && echo "  added userfield to $CDR_DIR/cdr.db"
+fi
 
 put_conf rtp.conf <<'EOF'
 [general]

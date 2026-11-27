@@ -1181,12 +1181,21 @@ async function loadConfigYaml() {
   (await getConfigEditor()).setValue(data.content);
 }
 
-// Lists in the tree: gateways and lines. A list item is the node "<prefix><key>", its fields use a path with a selector.
+// Lists in the tree: gateways, lines and each client's chats. A list item is the node "<prefix><key>", its fields
+// use a path with a selector (path: the list in the YAML; re: what a new item's key may be).
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 const LISTS = {
   gateways: { prefix: 'gw:', sel: 'id', add: 'web.config.add_gateway', remove: 'web.config.remove_gateway_confirm', hint: 'web.config.gateways_hint' },
   lines: { prefix: 'ln:', sel: 'name', add: 'web.config.add_line', remove: 'web.config.remove_line_confirm', hint: 'web.config.lines_hint' },
+  telegramChats: { prefix: 'tgc:', sel: 'id', path: 'clients.telegram.chats', re: /^-?[0-9]+$/, invalid: 'web.config.chat_id_invalid',
+    add: 'web.config.add_chat', remove: 'web.config.remove_chat_confirm', hint: 'web.config.hint.telegram_chat', placeholder: 'web.config.chat_id' },
+  ntfyTopics: { prefix: 'ntt:', sel: 'topic', path: 'clients.ntfy.topics', re: /^[A-Za-z0-9_-]+$/,
+    add: 'web.config.add_topic', remove: 'web.config.remove_chat_confirm', hint: 'web.config.hint.ntfy_topic', placeholder: 'web.config.topic_name' },
+  capyTargets: { prefix: 'cpt:', sel: 'name', path: 'clients.capy.targets', re: /^[@#]?[A-Za-z0-9][A-Za-z0-9_.-]*$/,
+    add: 'web.config.add_recipient', remove: 'web.config.remove_chat_confirm', hint: 'web.config.hint.capy_target' },
 };
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+const CLIENT_LISTS = { telegram: 'telegramChats', ntfy: 'ntfyTopics', capy: 'capyTargets' };
+let listItems = {};
 
 let formTree = [];
 let templates = {};
@@ -1202,9 +1211,10 @@ function settingsTree(data) {
   const node = id => ({ id, title: byId[id].title, fields: byId[id].fields || [] });
   const list = id => ({
     id, title: byId[id].title, fields: [], list: id,
-    children: (data[id] || []).map(it => itemNode(id, it.key, it.fields, false, it.clients, it))
+    children: (data[id] || []).map(it => itemNode(id, it.key, it.fields, false, it))
   });
   const clientFields = { telegram: byId.telegram.fields, ntfy: byId.ntfy.fields, capy: byId.capy.fields };
+  listItems = { telegramChats: data.telegramChats || [], ntfyTopics: data.ntfyTopics || [], capyTargets: data.capyTargets || [] };
   // System: mode and languages, with the settings of ghostline itself under it.
   const calls = Object.assign(node('calls'), { children: [node('cdr_db'), node('transcribe')] });
   const system = Object.assign(node('system'),
@@ -1212,12 +1222,13 @@ function settingsTree(data) {
   return [system, clientsNode('clients', '', data.clients || [], clientFields), list('gateways'), list('lines')];
 }
 
-// A gateway or a line. A gateway's managed.* fields and its modems, a line's phone, clients and calls
-// are subsections, shown when they apply. clients: the line's client sections, null: no "clients"
-// section. saved: the gateway as saved (its type and modems), none for a new one.
-function itemNode(listId, key, fields, isNew, clients, saved) {
+// A gateway, a line or a client's chat. A gateway's managed.* fields and its modems, a line's phone and
+// calls are subsections, shown when they apply. saved: the gateway as saved (its type and modems), none
+// for a new one.
+function itemNode(listId, key, fields, isNew, saved) {
   const id = LISTS[listId].prefix + key;
   const item = { id, title: key, key, fields, isNew };
+  if (listId !== 'gateways' && listId !== 'lines') return item;
   if (listId === 'gateways') {
     const managed = fields.filter(f => f.path.includes('].managed.'));
     const fail2ban = managed.filter(f => f.path.includes('].managed.fail2ban.'));
@@ -1238,14 +1249,12 @@ function itemNode(listId, key, fields, isNew, clients, saved) {
     return item;
   }
   const sub = (part) => fields.filter(f => f.path.includes(']' + '.' + part + '.'));
-  const telegram = sub('clients.telegram'), ntfy = sub('clients.ntfy'), capy = sub('clients.capy'), calls = sub('calls'), phone = sub('phone');
-  item.fields = fields.filter(f => ![telegram, ntfy, capy, calls, phone].some(x => x.includes(f)));
-  const base = `lines[name=${key}].`;
+  const calls = sub('calls'), phone = sub('phone');
+  item.fields = fields.filter(f => ![calls, phone].some(x => x.includes(f)));
   item.children = [
     { id: id + '/phone', title: t('web.config.group.phone'), fields: phone, hintKey: 'web.config.hint.phone',
       phone: { line: key, isNew, hasSecret: phoneSecrets.includes(key) },
       visible: () => gatewayState(lineGateway(item))?.managed },
-    clientsNode(id + '/clients', base, clients || [], { telegram, ntfy, capy }, clients == null),
     { id: id + '/calls', title: t('web.config.group.calls'), fields: calls, hintKey: 'web.config.hint.line_calls' }
   ];
   return item;
@@ -1294,31 +1303,62 @@ function walkShown(fn, nodes = formTree, parent = null) {
   }
 }
 
-// "Clients": Telegram and ntfy as optional subsections, added and removed like list items.
-// base: '' at the top, 'lines[name=…].' in a line. unset: a line without a "clients" section,
-// which goes to every client that is on.
+// "Clients": Telegram, ntfy and Capy as optional subsections, added and removed like list items. Each
+// has its chats (topics, recipients) as a list: what each of them gets is set on the chat.
 const CLIENTS = ['telegram', 'ntfy', 'capy'];
 const CLIENT_TITLES = { telegram: 'Telegram', ntfy: 'ntfy', capy: 'Capy' };
 
-function clientsNode(id, base, present, fieldsOf, unset) {
-  const line = base !== '';
+function clientsNode(id, base, present, fieldsOf) {
   const node = {
     id, title: t('web.config.group.clients'), fields: [], clientsBase: base, clientFields: fieldsOf,
-    hintKey: line ? (unset ? 'web.config.hint.line_clients_unset' : 'web.config.hint.line_clients') : 'web.config.hint.clients',
-    children: []
+    hintKey: 'web.config.hint.clients', children: []
   };
   present.forEach(c => node.children.push(clientNode(node, c)));
   return node;
 }
 
 function clientNode(parent, client) {
-  const line = parent.clientsBase !== '';
+  const list = CLIENT_LISTS[client];
   return {
     id: parent.id + '/' + client, title: CLIENT_TITLES[client], client,
     section: parent.clientsBase + 'clients.' + client,
     fields: parent.clientFields[client] || [],
-    hintKey: line ? 'web.config.hint.line_' + client : 'web.config.hint.' + client
+    hintKey: 'web.config.hint.' + client,
+    list, children: (listItems[list] || []).map(it => itemNode(list, it.key, it.fields, false))
   };
+}
+
+// The list node of a list (gateways, lines, a client's chats).
+function findList(listId) {
+  let found = null;
+  walkTree(n => { if (n.list === listId) found = n; });
+  return found;
+}
+
+// The lines a chat can subscribe to: the lines of the form, and any other name the value has.
+function lineNames() {
+  return (findNode('lines')?.children || []).map(c => c.key);
+}
+
+// Line checkboxes of a subscription field; the hidden input keeps the value ("a, b" or "*").
+function linesInput(f, attrs) {
+  const on = new Set((f.value || '').split(',').map(x => x.trim()).filter(Boolean));
+  const all = on.has('*');
+  const names = [...new Set(lineNames().concat([...on].filter(x => x !== '*')))];
+  const box = (v, label) => `<label class="chk"><input type="checkbox" data-lines-of="${esc(f.path)}" value="${esc(v)}"`
+    + `${on.has(v) ? ' checked' : ''}${v !== '*' && all ? ' disabled' : ''}> ${esc(label)}</label>`;
+  return `<div class="lines-pick"><span class="lines-pick-label">${esc(f.label)}</span><input type="hidden" ${attrs} value="${esc(f.value)}">`
+    + box('*', t('web.config.all_lines')) + names.map(n => box(n, n)).join('') + '</div>';
+}
+
+function linesChanged(e) {
+  const path = e.target.dataset.linesOf;
+  const boxes = [...document.querySelectorAll(`#config-form [data-lines-of="${CSS.escape(path)}"]`)];
+  const all = boxes.find(b => b.value === '*')?.checked;
+  boxes.forEach(b => { if (b.value !== '*') b.disabled = !!all; });
+  const hidden = document.querySelector(`#config-form input[type=hidden][data-path="${CSS.escape(path)}"]`);
+  hidden.value = all ? '*' : boxes.filter(b => b.checked && b.value !== '*').map(b => b.value).join(', ');
+  markChanged({ target: hidden });
 }
 
 function walkTree(fn, nodes = formTree, parent = null) {
@@ -1337,6 +1377,7 @@ function findNode(id) {
 function fieldInput(f) {
   const cls = f.value !== f.orig ? ' class="changed"' : '';
   const attrs = `data-path="${esc(f.path)}"${cls}`;
+  if (f.type === 'lines') return linesInput(f, attrs);
   if (f.type === 'checkbox')
     return `<label class="chk"><input type="checkbox" ${attrs}${f.value === 'true' ? ' checked' : ''}> ${esc(f.label)}</label>`;
   if (f.type === 'select')
@@ -1403,6 +1444,7 @@ function renderSettings(selected) {
   host.querySelectorAll('[data-del-client]').forEach(btn => btn.onclick = () => removeClient(btn.dataset.delClient));
   host.querySelectorAll('[data-path]').forEach(el => el.addEventListener('input', markChanged));
   host.querySelectorAll('[data-path]').forEach(el => el.addEventListener('change', markChanged));
+  host.querySelectorAll('[data-lines-of]').forEach(el => el.addEventListener('change', linesChanged));
   // The type, the PBX mode and a line's gateway decide which fields and sections are shown.
   host.querySelectorAll('select[data-path]').forEach(el => {
     if (/\]\.(type|pbx|gateway)$/.test(el.dataset.path))
@@ -1441,7 +1483,7 @@ function startAdd(ev) {
   const wrap = document.createElement('div');
   wrap.className = 'tree-add-form';
   wrap.style.setProperty('--d', getComputedStyle(btn).getPropertyValue('--d') || '1');
-  wrap.innerHTML = `<input type="text" class="tree-add-input" placeholder="${esc(t('web.config.item_name'))}" maxlength="64" spellcheck="false">`;
+  wrap.innerHTML = `<input type="text" class="tree-add-input" placeholder="${esc(t(LISTS[listId].placeholder || 'web.config.item_name'))}" maxlength="64" spellcheck="false">`;
   btn.replaceWith(wrap);
   const input = wrap.querySelector('input');
   input.focus();
@@ -1462,11 +1504,12 @@ function startAdd(ev) {
 
 function commitAdd(listId, name) {
   if (!name) return;
-  if (!NAME_RE.test(name)) { showToast(t('web.config.name_invalid'), 'err'); return; }
-  const list = findNode(listId);
-  const id = LISTS[listId].prefix + name;
+  const L = LISTS[listId];
+  if (!(L.re || NAME_RE).test(name)) { showToast(t(L.invalid || 'web.config.name_invalid'), 'err'); return; }
+  const list = findList(listId);
+  const id = L.prefix + name;
   if (list.children.some(c => c.id === id)) { showToast(t('web.config.name_exists', name), 'err'); return; }
-  removedItems = removedItems.filter(x => x !== `${listId}[${LISTS[listId].sel}=${name}]`);
+  removedItems = removedItems.filter(x => x !== `${L.path || listId}[${L.sel}=${name}]`);
   // Fields of a new item come from the template; they have no orig, so all non-empty ones are saved.
   const fields = (templates[listId] || []).map(f => Object.assign({}, f, {
     path: f.path.split('{key}').join(name),
@@ -1484,7 +1527,7 @@ function removeItem(nodeId) {
   if (!item || !list?.list || !confirm(t(LISTS[list.list].remove, item.title))) return;
   captureFields();
   list.children = list.children.filter(c => c !== item);
-  if (!item.isNew) removedItems.push(`${list.list}[${LISTS[list.list].sel}=${item.key}]`);
+  if (!item.isNew) removedItems.push(`${LISTS[list.list].path || list.list}[${LISTS[list.list].sel}=${item.key}]`);
   renderSettings(list.id);
   showConfigNode(list.id);
 }
@@ -1545,7 +1588,8 @@ async function loadConfigForm() {
     host.innerHTML = `<div class="empty">${esc(t('web.error', data.error || res.status))}</div>`;
     return;
   }
-  templates = { gateways: data.gatewayTemplate || [], lines: data.lineTemplate || [] };
+  templates = { gateways: data.gatewayTemplate || [], lines: data.lineTemplate || [],
+    telegramChats: data.telegramChatTemplate || [], ntfyTopics: data.ntfyTopicTemplate || [], capyTargets: data.capyTargetTemplate || [] };
   gatewayInfo = data.gatewayInfo || {};
   phoneSecrets = data.phoneSecrets || [];
   removedItems = [];

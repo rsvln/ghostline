@@ -30,10 +30,17 @@ The columns are the ones ghostline reads.
 ```
 [/var/spool/asterisk/gl-cdr/cdr.db]
 table => cdr
-columns => calldate, uniqueid, linkedid, src, dst, did, dcontext, channel, dstchannel, lastapp, disposition, duration, billsec, recordingfile
-values => '${CDR(start)}','${CDR(uniqueid)}','${CDR(linkedid)}','${CDR(src)}','${CDR(dst)}','${CDR(did)}','${CDR(dcontext)}','${CDR(channel)}','${CDR(dstchannel)}','${CDR(lastapp)}','${CDR(disposition)}','${CDR(duration)}','${CDR(billsec)}','${CDR(recordingfile)}'
+columns => calldate, uniqueid, linkedid, src, dst, did, dcontext, channel, dstchannel, lastapp, disposition, duration, billsec, recordingfile, userfield
+values => '${CDR(start)}','${CDR(uniqueid)}','${CDR(linkedid)}','${CDR(src)}','${CDR(dst)}','${CDR(did)}','${CDR(dcontext)}','${CDR(channel)}','${CDR(dstchannel)}','${CDR(lastapp)}','${CDR(disposition)}','${CDR(duration)}','${CDR(billsec)}','${CDR(recordingfile)}','${CDR(userfield)}'
 busy_timeout => 5000
 ```
+
+`userfield` keeps the call id a phone sent (`X-Asterisk-CallId`, a call placed
+from Capy); ghostline uses it, or `linkedid`, to add the transcript to Capy's
+call record. A journal from before 2026-11-27 lacks the column:
+`sqlite3 cdr.db "ALTER TABLE cdr ADD COLUMN userfield TEXT"`, add it to the
+config, and restart Asterisk. Without it ghostline uses `linkedid`, so only
+calls placed from Capy miss their transcript.
 
 ```
 asterisk -rx "module load cdr_sqlite3_custom.so"

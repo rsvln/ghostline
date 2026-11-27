@@ -289,6 +289,8 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .settings-grid .input-row input { flex: 1; min-width: 0; color: var(--muted); }
 .settings-grid .input-row .btn { white-space: nowrap; }
 .settings-grid .input-row .icon-btn { height: auto; }
+.settings-grid .lines-pick { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.settings-grid .lines-pick-label { flex-basis: 100%; }
 .settings-grid .input-row input.secret-value.shown { color: var(--text); font-family: 'JetBrains Mono', monospace; }
 .settings-grid input.changed, .settings-grid select.changed, .settings-grid textarea.changed { border-color: var(--yellow); }
 .settings-grid .chk { flex-direction: row; align-items: center; gap: 8px; color: var(--text); }

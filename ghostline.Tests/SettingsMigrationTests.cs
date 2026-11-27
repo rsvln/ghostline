@@ -14,6 +14,107 @@ namespace ghostline.Tests
             File.Delete(_path);
             File.Delete(_path + ".bak-v2");
             File.Delete(_path + ".bak-v3");
+            File.Delete(_path + ".bak-v4");
+        }
+
+        // Routes on the lines (before 2026-11-27): common chats, a line's own chats, calls.chat_ids, a line
+        // that goes nowhere (clients: {}), Capy recipients.
+        const string OldRoutes = """
+            # settings
+            clients:
+              telegram:
+                token: "1:x"
+                chat_ids: ["100"]       # common chats
+              ntfy:
+                url: https://ntfy.example.com
+                topic: sms
+              capy:
+                url: https://chat.example.com
+                token: rb_x
+                to: []
+            gateways:
+              - id: pbx
+                type: asterisk
+                ip: 10.0.0.10
+            lines:
+              - name: home
+                gateway: pbx
+                modem: gsm1
+                calls:
+                  voice: false
+                  chat_ids: ["300"]
+              - name: work              # work line
+                gateway: pbx
+                modem: gsm2
+                clients:
+                  telegram:
+                    chat_ids: ["-200"]
+                  capy:
+                    to: ["@alice"]
+              - name: test
+                gateway: pbx
+                modem: hw1
+                clients: {}
+            """;
+
+        [Fact]
+        public void RoutesMoveToTheChats()
+        {
+            var s = SettingsFile.Parse(OldRoutes);
+            Assert.True(s.Migration.RoutingMoved);
+            var tg = s.clients.telegram.chats;
+            var c100 = tg.Single(c => c.id == "100");
+            Assert.Equal(new[] { "home" }, c100.sms);
+            Assert.Null(c100.calls);
+            Assert.True(c100.alerts);
+            Assert.Equal(new[] { "home" }, tg.Single(c => c.id == "300").calls);
+            var c200 = tg.Single(c => c.id == "-200");
+            Assert.Equal(new[] { "work" }, c200.sms);
+            Assert.Equal(new[] { "work" }, c200.calls);
+            Assert.False(c200.alerts);
+            var topic = s.clients.ntfy.topics.Single();
+            Assert.Equal(("sms", true), (topic.topic, topic.alerts));
+            Assert.Equal(new[] { "home" }, topic.sms);
+            var owner = s.clients.capy.targets.Single(t => t.name == "owner");
+            Assert.Equal(new[] { "home" }, owner.sms);
+            Assert.True(owner.alerts);
+            Assert.Null(owner.to);
+            Assert.Equal(new[] { "work" }, s.clients.capy.targets.Single(t => t.name == "@alice").sms);
+            Assert.All(s.lines, l => Assert.Null(l.clients));
+            Assert.False(s.lines[0].calls.voice);
+            Assert.Null(s.lines[0].calls.chatIds);
+        }
+
+        // One line, every chat: "*", so a line added later gets there too.
+        [Fact]
+        public void EveryLineIsAStar()
+        {
+            var s = SettingsFile.Parse("""
+                clients:
+                  telegram:
+                    token: "1:x"
+                    chat_ids: ["100"]
+                lines:
+                  - name: home
+                  - name: work
+                """);
+            var c = s.clients.telegram.chats.Single();
+            Assert.Equal(new[] { "*" }, c.sms);
+            Assert.Equal(new[] { "*" }, c.calls);
+        }
+
+        [Fact]
+        public void RoutesAreRewrittenKeepingComments()
+        {
+            File.WriteAllText(_path, OldRoutes);
+            SettingsFile.Migrate(_path);
+            string text = File.ReadAllText(_path);
+            Assert.True(File.Exists(_path + ".bak-v4"));
+            Assert.Contains("# work line", text);
+            Assert.DoesNotContain("chat_ids", text);
+            var back = SettingsFile.Parse(text);
+            Assert.Null(back.Migration);
+            Assert.Equal(SettingsFile.Serialize(SettingsFile.Parse(OldRoutes)), SettingsFile.Serialize(back));
         }
 
         // Two PBXs during a move: FreePBX with two modems, the managed Asterisk with a Huawei stick.

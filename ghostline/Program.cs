@@ -157,7 +157,9 @@ namespace ghostline
             {
                 HealthStatus.MarkConfigured("capy");
                 Task.Run(() => CapyHealthLoop());
-                Task.Run(() => CapyPollLoop());
+                // Messages written to the bot: only the main bot's (a phone line's bot only adds transcripts).
+                if (CapyMainBot)
+                    Task.Run(() => CapyPollLoop());
             }
             SysLog.Info("app", $"clients: telegram={(TelegramEnabled ? "on" : "off")}, ntfy={(NtfyEnabled ? "on" : "off")}, capy={(CapyEnabled ? "on" : "off")}");
             Task.Run(() => TelegramOutboxWorker());

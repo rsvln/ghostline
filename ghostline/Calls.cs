@@ -84,8 +84,11 @@ namespace ghostline
                 await using var cmd = conn.CreateCommand();
                 // SQLite keeps calldate as "yyyy-MM-dd HH:mm:ss" text, which compares in time order; it has no
                 // sequence column, rowid is the insert order there.
+                // linkedid and userfield (the PBX call id shared with Capy) only where the CDR has them.
+                var cols = await CdrColumns(conn);
+                string extra = (cols.Contains("linkedid") ? ", linkedid" : ", ''") + (cols.Contains("userfield") ? ", userfield" : ", ''");
                 cmd.CommandText = @"SELECT calldate, uniqueid, src, dst, did, channel, dstchannel, disposition,
-                                           duration, billsec, recordingfile
+                                           duration, billsec, recordingfile" + extra + @"
                                     FROM cdr WHERE calldate >= @from ORDER BY calldate, " + (CdrIsSqlite ? "rowid" : "sequence");
                 var p = cmd.CreateParameter();
                 p.ParameterName = "@from";
@@ -107,7 +110,9 @@ namespace ghostline
                         Disposition = Text(7),
                         Duration = int.TryParse(Text(8), out var dur) ? dur : 0,
                         Billsec = int.TryParse(Text(9), out var bs) ? bs : 0,
-                        RecordingFile = Text(10)
+                        RecordingFile = Text(10),
+                        LinkedId = Text(11),
+                        UserField = Text(12)
                     });
                 }
             }
@@ -166,9 +171,27 @@ namespace ghostline
         private class CdrRow
         {
             public DateTime CallDate;
-            public string UniqueId, Src, Dst, Did, Channel, DstChannel, Disposition, RecordingFile;
+            public string UniqueId, Src, Dst, Did, Channel, DstChannel, Disposition, RecordingFile, LinkedId, UserField;
             public int Duration, Billsec;
         }
+
+        // Column names of the cdr table (the SQLite one gets linkedid / userfield only with a newer install).
+        private static async Task<HashSet<string>> CdrColumns(DbConnection conn)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM cdr WHERE 1 = 0";
+            await using var r = await cmd.ExecuteReaderAsync();
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < r.FieldCount; i++) set.Add(r.GetName(i));
+            return set;
+        }
+
+        // The call id the PBX sent Capy (X-Asterisk-CallId): for a call placed from Capy its own id, which the
+        // dialplan keeps in userfield; otherwise the linkedid, which the dialplan sends to the phones.
+        internal static string PbxCallIdOf(string userField, string linkedId, string uniqueId) =>
+            !string.IsNullOrWhiteSpace(userField) ? userField.Trim()
+            : !string.IsNullOrWhiteSpace(linkedId) ? linkedId.Trim()
+            : uniqueId;
 
         // Incoming: the GSM channel is the source (channel), or the line is in did (the call came
         // through a Local channel). Outgoing: the GSM channel is the destination (dstchannel). Everything
@@ -205,7 +228,8 @@ namespace ghostline
                 Duration = r.Duration,
                 Billsec = r.Billsec,
                 RecPath = recPath,
-                RecSize = -1
+                RecSize = -1,
+                PbxCallId = PbxCallIdOf(r.UserField, r.LinkedId, r.UniqueId)
             }, ch);
         }
 

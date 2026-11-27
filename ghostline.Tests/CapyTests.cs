@@ -3,8 +3,8 @@ using Xunit;
 
 namespace ghostline.Tests
 {
-    // Capy as a client: who gets a line's messages, which lines a chat the bot is in serves, and the
-    // pieces that go over the wire (markup, the idempotency key, the voice note's waveform).
+    // Clients and Capy: who gets a line's SMS, calls, transcripts and alerts, which lines a chat the bot is
+    // in serves, and the pieces that go over the wire (markup, the idempotency key, the waveform, the cut).
     [Collection("config file")]
     public class CapyTests : IDisposable
     {
@@ -15,11 +15,32 @@ namespace ghostline.Tests
             clients:
               telegram:
                 token: "1:x"
-                chat_ids: ["100"]
+                chats:
+                  - id: "100"
+                    sms: ["*"]
+                    calls: [home]
+                    alerts: true
+                  - id: "200"
+                    calls: [work]
               capy:
                 url: https://chat.example.com/
                 token: rb_test
-                to: []
+                targets:
+                  - name: owner
+                    sms: [home]
+                    alerts: true
+                  - name: alice
+                    to: "@Alice"
+                    sms: [work]
+                  - name: group
+                    to: "{Group}"
+                    sms: [work]
+                  - name: g13
+                    to: "#13"
+                    sms: [work]
+                  - name: home-phone
+                    token: rb_phone
+                    transcripts: [home]
             gateways:
               - id: pbx
                 type: asterisk
@@ -31,17 +52,9 @@ namespace ghostline.Tests
               - name: work
                 gateway: pbx
                 modem: gsm2
-                clients:
-                  telegram:
-                    chat_ids: []
-                  capy:
-                    to: ["@Alice", "{Group}", 13]
               - name: test
                 gateway: pbx
                 modem: hw1
-                clients:
-                  telegram:
-                    chat_ids: []
             """);
 
         public void Dispose() => Program.settings = _saved;
@@ -54,7 +67,8 @@ namespace ghostline.Tests
             var c = Program.settings.clients.capy;
             Assert.Equal("rb_test", c.token);
             Assert.True(Program.CapyEnabled);
-            Assert.Equal(new[] { "@Alice", Group.ToString(), "13" }, Line("work").clients.capy.to);
+            Assert.Equal("@Alice", c.targets.Single(t => t.name == "alice").to);
+            Assert.Null(Program.settings.Migration);
         }
 
         [Fact]
@@ -69,14 +83,30 @@ namespace ghostline.Tests
             Assert.Equal("#13", Program.CapyRecipient("#013"));
         }
 
-        // No common recipients: the bot's owner; a line with its own list: that list; a line whose
-        // clients do not include capy: nobody.
+        // A line's SMS go to the targets with it in sms; transcripts only through a phone line's bot.
         [Fact]
         public void LineRecipients()
         {
-            Assert.Equal(new[] { Program.CapyOwner }, Program.LineCapy(Line("home")));
-            Assert.Equal(new[] { "@alice", Group.ToString(), "#13" }, Program.LineCapy(Line("work")));
+            Assert.Equal(new[] { "owner" }, Program.LineCapy(Line("home")));
+            Assert.Equal(new[] { "alice", "group", "g13" }, Program.LineCapy(Line("work")));
             Assert.Empty(Program.LineCapy(Line("test")));
+            Assert.Equal(new[] { "home-phone" }, Program.LineCapyTranscripts(Line("home")));
+            Assert.Empty(Program.LineCapyTranscripts(Line("work")));
+            Assert.Equal(new[] { "owner" }, Program.CapyAlertTargets);
+        }
+
+        // Telegram: SMS, calls and alerts each to the chats that subscribed; "*" is every line.
+        [Fact]
+        public void TelegramSubscriptions()
+        {
+            Assert.Equal(new[] { "100" }, Program.LineChats(Line("test")));
+            Assert.Equal(new[] { "100" }, Program.LineCallChats(Line("home")));
+            Assert.Equal(new[] { "200" }, Program.LineCallChats(Line("work")));
+            Assert.Empty(Program.LineCallChats(Line("test")));
+            Assert.Equal(new[] { "100" }, Program.AlertChats);
+            // A chat serves the lines it gets SMS or calls of.
+            Assert.Equal(new[] { "work" }, Program.LinesOfChat("200").Select(c => c.name));
+            Assert.Equal(3, Program.LinesOfChat("100").Count);
         }
 
         [Fact]
@@ -92,12 +122,43 @@ namespace ghostline.Tests
             Assert.Empty(Program.LinesOfCapyChat(Guid.NewGuid(), 5, false, "alice", isOwner: false));
         }
 
+        // Without the main bot's token only the phone line bots work: no SMS, transcripts still.
         [Fact]
-        public void OffWithoutToken()
+        public void PhoneBotWithoutMainBot()
         {
             Program.settings.clients.capy.token = "";
-            Assert.False(Program.CapyEnabled);
+            Assert.True(Program.CapyEnabled);
+            Assert.False(Program.CapyMainBot);
             Assert.Empty(Program.LineCapy(Line("home")));
+            Assert.Equal(new[] { "home-phone" }, Program.LineCapyTranscripts(Line("home")));
+            Program.settings.clients.capy.url = "";
+            Assert.False(Program.CapyEnabled);
+            Assert.Empty(Program.LineCapyTranscripts(Line("home")));
+        }
+
+        // The transcript goes under Capy's call record as a cut, within Capy's text limit.
+        [Fact]
+        public void TranscriptIsACut()
+        {
+            var call = new CallRecord { TrState = "done", TrText = "hello there" };
+            string note = Program.CapyTranscriptNote(call);
+            Assert.StartsWith(">>> ", note);
+            Assert.Contains("\nhello there\n", note);
+            Assert.EndsWith("\n<<<", note);
+            call.TrText = new string('a', 40000);
+            note = Program.CapyTranscriptNote(call);
+            Assert.True(note.Length <= 15000);
+            Assert.EndsWith("…\n<<<", note);
+        }
+
+        // The id Capy keeps on its record: a call placed from Capy carries Capy's own (in userfield),
+        // a call to the phones the linkedid the dialplan sent.
+        [Fact]
+        public void PbxCallId()
+        {
+            Assert.Equal("abc", Program.PbxCallIdOf(" abc ", "1700000000.5", "1700000000.5"));
+            Assert.Equal("1700000000.4", Program.PbxCallIdOf("", "1700000000.4", "1700000000.5"));
+            Assert.Equal("1700000000.5", Program.PbxCallIdOf(null, null, "1700000000.5"));
         }
 
         [Fact]

@@ -129,20 +129,17 @@ clients:
   ntfy:
     url: http://10.0.0.30            # or https://ntfy.example.org
     token: tk_...
-    topic:                           # common topic, for lines without their own
-
-lines:
-  - name: home
-    ...
-    clients:
-      ntfy:
-        topic: gl-home               # empty: clients.ntfy.topic
+    topics:
+      - topic: gl-home
+        sms: [home]                  # SMS of these lines; "*": every line
+        calls: [home]                # calls of these lines
+        alerts: false                # no network on a line, PBX attacks, storage, certificate
 ```
 
-Each line goes to its own topic or to the common one, the same way as
-Telegram chats (`clients.telegram.chat_ids`). Both channels can be on at the
-same time; an empty `url` turns ntfy off. The same settings are in the web
-interface: Settings → Clients → ntfy, and Lines → line → Clients → ntfy.
+Each topic gets what it subscribes to, the same way as Telegram chats
+(`clients.telegram.chats`). Both channels can be on at the same time; an empty
+`url` turns ntfy off. The same settings are in the web interface: Settings →
+Clients → ntfy, a topic under it.
 
 The state of the connection is on the Status tab and in `/status`.
 

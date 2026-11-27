@@ -210,16 +210,29 @@ system:                       # ghostline itself
 clients:                      # notification channels, all optional
   telegram:                   # empty token — Telegram is off
     token: 123456789:AAExampleTelegramBotToken
-    chat_ids:                 # common chats, for lines without their own
-      - "100000001"
+    chats:                    # each chat gets what it subscribes to
+      - id: "100000001"
+        sms: ["*"]            # SMS of these lines; "*" — every line
+        calls: [personal]     # calls of these lines: recording, transcript
+        alerts: true          # no network on a line, PBX attacks, storage, certificate
   ntfy:                       # empty url — ntfy is off
     url: https://ntfy.example.org
     token: tk_exampleaccesstoken
-    topic:                    # common topic, for lines without their own
-  capy:                       # empty url or token — Capy is off
+    topics:
+      - topic: gl-personal
+        sms: [personal]
+        calls: [personal]
+  capy:                       # empty url — Capy is off
     url: https://chat.example.com
-    token: rb_examplebottoken
-    to: []                    # @username or chat ids; empty — the bot's owner
+    token: rb_examplebottoken # the main bot: SMS, alerts, commands
+    targets:
+      - name: me
+        to: ""                # @username, a chat id or #number; empty — the bot's owner
+        sms: [personal]
+        alerts: true
+      - name: personal-phone  # a phone line's bot: transcripts under Capy's call records
+        token: rb_examplephonebottoken
+        transcripts: [personal]
 
 gateways:
   - id: pbx
@@ -238,18 +251,10 @@ lines:
     pattern: gsm1
     modem: gsm1
     number: "+79001234567"    # optional; used when the SIM does not report its own number
-    clients:                  # optional; without it the common chats and topic
-      telegram:
-        chat_ids: []          # empty — clients.telegram.chat_ids
-      ntfy:
-        topic: gl-personal    # empty — clients.ntfy.topic
-      capy:
-        to: []                # empty — clients.capy.to
     calls:
       voice: true
       transcript: true
       missed: true
-      chat_ids: []            # chats for calls only; empty — the line's chats
 ```
 
 ### Reference
@@ -264,14 +269,19 @@ lines:
 | `system.logger.level` | System log level: `error`, `warning`, `info` (default) or `debug`. The log goes to journald with the level (`journalctl -p warning -u ghostline`), to `/var/log/ghostline/system-YYYY-MM-DD.log` (14 days) and to the System tab |
 | `system.logger.file` | Also write SMS and calls to `/var/log/ghostline/ghostline_YYYY-MM-DD.log`, text files for other systems. The PBX tab does not need them |
 | `system.goip.smtp.enabled` / `system.goip.smtp.port` | Built-in SMTP server for GoIP gateways that deliver SMS by e-mail |
-| `system.monitor.alert_minutes` | A monitored line without network this long gets a message in its chats/topic, and another when it is back; `0` — no messages. Default `2` |
+| `system.monitor.alert_minutes` | A monitored line without network this long gets an alert, and another when it is back; `0` — no messages. Default `2` |
 | `clients.telegram.token` | Bot token; empty — Telegram is off |
-| `clients.telegram.chat_ids` | Common chats, for lines without their own |
+| `clients.telegram.chats[]` | The chats: `id`, and what the chat gets: `sms` and `calls` (lists of line names, `"*"` — every line), `alerts` (`true` / `false`) |
 | `clients.ntfy.url` | ntfy server; empty — ntfy is off |
 | `clients.ntfy.token` | ntfy access token with read and write access to the topics |
-| `clients.ntfy.topic` | Common topic, for lines without their own |
-| `clients.capy.url` / `clients.capy.token` | Capy server and the bot's token (`rb_...`); either empty — Capy is off |
-| `clients.capy.to` | Common recipients: `@username` (the direct chat with that person) or a group's number from its link (`/chat/13` → `13`); empty — the bot's owner |
+| `clients.ntfy.topics[]` | The topics: `topic`, `sms`, `calls`, `alerts`, as for Telegram chats |
+| `clients.capy.url` / `clients.capy.token` | Capy server and the main bot's token (`rb_...`); empty url — Capy is off |
+| `clients.capy.targets[]` | The recipients: `name`; `to` — `@username` (the direct chat with that person), a chat id or a group's number from its link (`/chat/13` → `#13`), empty — the bot's owner; `sms`, `alerts`; `token` and `transcripts` — a phone line's bot, see [docs/capy.md](docs/capy.md) |
+
+What goes where is set on the chat: SMS of some lines, calls of some lines,
+alerts, in any combination, so one chat can get everything and another only
+the calls of one line. Alerts are a line without network, attacks on the
+PBX, the storage and the certificate.
 
 A client is on when its section is there (with a token / url); remove the
 section to turn it off. A top-level `telegram` section of older configs is
@@ -281,7 +291,10 @@ gateway types `quectel` / `dongle`, a top-level `pbx` section) are converted
 once on start, keeping the comments; the old file stays as
 `ghostline.yaml.bak-v2`. Likewise, files where `mode`, `locale`, `web`,
 `logger`, `monitor`, `calls` and `goip` are top-level sections get them moved
-into `system` (old file: `ghostline.yaml.bak-v3`).
+into `system` (old file: `ghostline.yaml.bak-v3`), and files where lines name
+their chats (`lines[].clients`, `calls.chat_ids`, `clients.telegram.chat_ids`,
+`clients.ntfy.topic`, `clients.capy.to`) get the same routes written on the
+chats (old file: `ghostline.yaml.bak-v4`).
 
 `gateways[]`:
 
@@ -308,12 +321,7 @@ into `system` (old file: `ghostline.yaml.bak-v3`).
 | `modem` | `asterisk`: one of the gateway's `modems[].name` |
 | `port` | `yeastar`, `goip`: port number |
 | `number` | The line's own phone number, for the Status tab and transcript headers; optional. A number the SIM reports itself (`asterisk` modems) takes precedence |
-| `clients` | Clients of the line: notifications go only to the ones listed. No `clients` section — every client that is on; `clients: {}` — nowhere |
-| `clients.telegram.chat_ids` | Telegram chats of the line (SMS and calls); empty — the common ones |
-| `clients.ntfy.topic` | ntfy topic of the line; empty — the common one |
-| `clients.capy.to` | Capy recipients of the line; empty — the common ones |
 | `calls.voice` / `calls.transcript` / `calls.missed` | What to send for calls on this line |
-| `calls.chat_ids` | Telegram chats for this line's calls only; empty — the line's chats |
 | `phone.extension` / `dial` / `encryption` | A line on the gateway with `pbx: managed` only: the line's SIP phone, see [docs/managed-pbx.md](docs/managed-pbx.md#settings) |
 
 `system.calls` (mode `full`):
@@ -345,14 +353,16 @@ All numbers are shown in E.164 form.
 
 ## Telegram, ntfy and Capy
 
-The channels work the same way. Each line goes to its own Telegram chats, ntfy
-topic and Capy recipients, or to the common ones; a chat or a topic can serve
+The channels work the same way. Each chat, topic or Capy recipient gets what
+it subscribes to: SMS of some lines, calls of some lines, alerts; it can serve
 one line or several.
 
-Incoming SMS, sent SMS and calls come to the chats and topics of their line.
-For a call with a recording, the recording comes first and the transcript is
-added to the same message when it is ready (in ntfy the notification is
-replaced, in Capy the message is edited).
+Incoming and sent SMS come to the chats subscribed to the line's SMS, calls to
+the ones subscribed to its calls. For a call with a recording, the recording
+comes first and the transcript is added to the same message when it is ready
+(in ntfy the notification is replaced). Capy posts its own call records (its
+SIP bridge is a phone of the line); a phone line's bot adds the transcript
+under each of them.
 
 To send an SMS, write a message in a chat or topic:
 
@@ -374,7 +384,8 @@ To send an SMS, write a message in a chat or topic:
 
 Commands: `/help` (the format above for this chat or topic, the lines),
 `/status` (state of gateways, channels and queues). Telegram and Capy show
-them in the bot menu. Only chats and topics of the configured lines are served.
+them in the bot menu. A chat or topic serves the lines it gets SMS or calls of;
+others are not served.
 
 ### ntfy
 

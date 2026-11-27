@@ -16,10 +16,12 @@ namespace ghostline
         private static void EnqueueCallNotifications(CallRecord c, Channel ch)
         {
             var cc = ch.calls ?? new ChannelCalls();
-            // Telegram chats of the line, its ntfy topic and its Capy recipients (Routing.cs, Capy.cs).
+            // Telegram chats and ntfy topics with the line in calls (Routing.cs). Capy posts its own call
+            // records; a phone line's bot only adds the transcript to them.
             var chats = new List<string>(LineCallChats(ch));
-            if (LineTopic(ch) is { } topic) chats.Add(NtfyTarget(topic));
-            chats.AddRange(LineCapy(ch).Select(CapyTarget));
+            chats.AddRange(LineCallTopics(ch).Select(NtfyTarget));
+            if (!c.Missed && cc.transcript && c.TrState == "pending")
+                Store.EnqueueCallTg(c.Id, LineCapyTranscripts(ch).Select(CapyTarget), "transcript", wantTranscript: true);
             if (chats.Count == 0) return;
 
             if (c.Missed)
@@ -57,6 +59,8 @@ namespace ghostline
                 var call = Store.GetCall(item.CallId);
                 if (call == null || !ChannelOn(item)) { Store.MarkCallTgFinal(item.Id); return; }
                 if (IsNtfyTarget(item.ChatId)) { await SendCallNtfy(item, call); return; }
+                // Nothing to send before the transcript: waits for it as a sent row.
+                if (item.Kind == "transcript") { Store.MarkCallTgSent(item.Id, 0, final: false); return; }
                 if (IsCapyTarget(item.ChatId)) { await SendCallCapy(item, call); return; }
 
                 bool trFinished = call.TrState is "done" or "error";

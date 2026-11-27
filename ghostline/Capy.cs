@@ -7,24 +7,32 @@ using Newtonsoft.Json.Linq;
 namespace ghostline
 {
     // Capy channel (a self-hosted messenger, docs/capy.md): ghostline is a bot there.
-    //  - out: SMS, calls (a voice note, the transcript added later by editing the message), line and PBX
-    //    alerts and replies to commands go through the same persistent queues as Telegram, with the target
-    //    "capy:<recipient>" (@username, a chat id, or the bot's owner);
+    //  - out: SMS, alerts and replies to commands go through the same persistent queues as Telegram, with
+    //    the target "capy:<name>" (clients.capy.targets[].name) or "capy:<recipient>" (a reply into a chat);
+    //  - calls: Capy posts its own call records (its SIP bridge is a phone of the line); a phone line's bot
+    //    (a target with its own token) adds the transcript under the record, found by the PBX call id
+    //    (X-Asterisk-CallId);
     //  - in: the bot's chats are polled (GET /chats, then /chats/{id}/events?after=seq), so ghostline needs
     //    no address reachable from the Capy server. A message written to the bot is an SMS to send
     //    (ParseSmsCommand) or a command (/status, /help).
     internal partial class Program
     {
         private const string CapyPrefix = "capy:";
-        // The bot's owner, the recipient when neither clients.capy.to nor the line's to is set. Resolved at
-        // send time: /bot/me tells who the owner is.
+        // The bot's owner, the recipient of a target without "to". Resolved at send time: /bot/me tells who
+        // the owner is.
         internal const string CapyOwner = "owner";
+        // The chat of a phone line's bot (a target with its own token and no "to"); resolved from /bot/me.
+        private const string CapyBotChat = "bot-chat";
         private const string KvCapySeq = "capy.seq.";
 
         private static readonly HttpClient capyHttp = new() { Timeout = TimeSpan.FromMinutes(2) };
 
+        // On with a server and a token: the main bot's, or a phone line bot's.
         internal static bool CapyEnabled =>
-            !string.IsNullOrWhiteSpace(settings?.clients?.capy?.url) && !string.IsNullOrWhiteSpace(settings?.clients?.capy?.token);
+            !string.IsNullOrWhiteSpace(settings?.clients?.capy?.url)
+            && (CapyMainBot || (settings.clients.capy.targets ?? new()).Any(t => !string.IsNullOrWhiteSpace(t.token)));
+
+        internal static bool CapyMainBot => !string.IsNullOrWhiteSpace(settings?.clients?.capy?.token);
 
         private static string CapyTarget(string to) => CapyPrefix + to;
         private static bool IsCapyTarget(string target) => target != null && target.StartsWith(CapyPrefix);
@@ -46,46 +54,63 @@ namespace ghostline
             return "@" + to.TrimStart('@').ToLowerInvariant();
         }
 
-        private static List<string> CapyList(List<string> to) =>
-            (to ?? new()).Select(CapyRecipient).Where(x => x != null).Distinct().ToList();
+        private static IEnumerable<CapyChat> CapyChats =>
+            CapyEnabled ? (settings.clients.capy.targets ?? new()).Where(t => !string.IsNullOrWhiteSpace(t.name)
+                && (CapyMainBot || !string.IsNullOrWhiteSpace(t.token))) : Enumerable.Empty<CapyChat>();
 
-        // The common recipients: clients.capy.to, or the bot's owner.
-        internal static List<string> CapyCommonTo() =>
-            CapyList(settings.clients.capy.to) is { Count: > 0 } list ? list : new List<string> { CapyOwner };
+        private static bool OwnBot(CapyChat t) => !string.IsNullOrWhiteSpace(t.token);
 
-        // Recipients of a line: its own to, or the common ones. Empty: the line does not go to Capy.
+        // Names of the targets that get the line's SMS.
         internal static List<string> LineCapy(Channel ch) =>
-            !CapyEnabled || !LineUses(ch, "capy") ? new List<string>()
-            : CapyList(ch.clients?.capy?.to) is { Count: > 0 } own ? own
-            : CapyCommonTo();
+            CapyChats.Where(t => Subscription.Covers(t.sms, ch)).Select(t => t.name.Trim()).Distinct().ToList();
 
-        // Lines a chat serves: any chat by its id or number; a direct chat by the person in it (@username, or the owner).
+        // Phone line bots that add the transcripts of the line's calls to Capy's call records.
+        internal static List<string> LineCapyTranscripts(Channel ch) =>
+            CapyChats.Where(t => OwnBot(t) && Subscription.Covers(t.transcripts, ch)).Select(t => t.name.Trim()).Distinct().ToList();
+
+        internal static List<string> CapyAlertTargets => CapyChats.Where(t => t.alerts).Select(t => t.name.Trim()).Distinct().ToList();
+
+        // A queued "capy:<key>": a target by its name (its bot's token, its recipient), or else a recipient
+        // of the main bot (a reply into the chat a message came from, rows queued before 2026-11-27).
+        private static (string token, string to) CapyRoute(string key)
+        {
+            var t = (settings.clients.capy.targets ?? new()).FirstOrDefault(x => x.name?.Trim() == key);
+            if (t == null) return (settings.clients.capy.token, CapyRecipient(key) ?? CapyOwner);
+            return OwnBot(t)
+                ? (t.token, CapyRecipient(t.to) ?? CapyBotChat)
+                : (settings.clients.capy.token, CapyRecipient(t.to) ?? CapyOwner);
+        }
+
+        // Lines a chat of the main bot serves: the targets that are that chat (its id or number; a direct chat
+        // by the person in it: @username, or the owner), and the lines they get SMS of.
         internal static List<Channel> LinesOfCapyChat(Guid chatId, long number, bool direct, string username, bool isOwner)
         {
             string user = username == null ? null : CapyRecipient(username);
-            return AllLines.Where(c =>
+            var mine = CapyChats.Where(t => !OwnBot(t)).Where(t =>
             {
-                var to = LineCapy(c);
-                return to.Contains(chatId.ToString()) || (number > 0 && to.Contains("#" + number))
-                    || (direct && ((user != null && to.Contains(user)) || (isOwner && to.Contains(CapyOwner))));
+                string to = CapyRecipient(t.to) ?? CapyOwner;
+                return to == chatId.ToString() || (number > 0 && to == "#" + number)
+                    || (direct && ((user != null && to == user) || (isOwner && to == CapyOwner)));
             }).ToList();
+            return AllLines.Where(l => mine.Any(t => Subscription.Covers(t.sms, l))).ToList();
         }
 
         private static void EnqueueCapyForLine(Channel line, string text)
         {
-            foreach (string to in LineCapy(line))
-                Store.EnqueueTelegramMessage(CapyTarget(to), text);
+            foreach (string name in LineCapy(line))
+                Store.EnqueueTelegramMessage(CapyTarget(name), text);
         }
 
         // ---- HTTP ----
 
         private static string CapyApi(string path) => settings.clients.capy.url.TrimEnd('/') + "/api/v1" + path;
 
+        // token: a phone line bot's; null: the main bot's.
         private static async Task<JToken> CapyRequest(HttpMethod method, string path, object body = null, HttpContent content = null,
-                                                      Action<HttpRequestMessage> setup = null)
+                                                      Action<HttpRequestMessage> setup = null, string token = null)
         {
             using var req = new HttpRequestMessage(method, CapyApi(path));
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.clients.capy.token.Trim());
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", (token ?? settings.clients.capy.token ?? "").Trim());
             if (body != null)
                 req.Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(body), Encoding.UTF8, "application/json");
             else if (content != null)
@@ -94,7 +119,7 @@ namespace ghostline
             using var resp = await capyHttp.SendAsync(req);
             string text = await resp.Content.ReadAsStringAsync();
             if (!resp.IsSuccessStatusCode)
-                throw new HttpRequestException($"Capy HTTP {(int)resp.StatusCode}: {Trim(text.Trim(), 200)}");
+                throw new HttpRequestException($"Capy HTTP {(int)resp.StatusCode}: {Trim(text.Trim(), 200)}", null, resp.StatusCode);
             return text.Length == 0 ? null : JToken.Parse(text);
         }
 
@@ -112,9 +137,23 @@ namespace ghostline
                     _capyChatNumbers[n] = (Guid)c["id"];
         }
 
-        // A recipient for /bot/send: @username or a chat id; the owner by name, a chat number by its id.
-        private static async Task<string> CapyTo(string to)
+        // The chat of a phone line's bot, by its token (GET /bot/me gives chatId).
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Guid> _capyBotChats = new();
+
+        private static async Task<Guid> CapyBotChatOf(string token)
         {
+            if (_capyBotChats.TryGetValue(token, out var id)) return id;
+            var me = await CapyRequest(HttpMethod.Get, "/bot/me", token: token);
+            id = (Guid?)me["chatId"] ?? throw new InvalidOperationException("this Capy bot is not a phone line's bot (no chatId)");
+            _capyBotChats[token] = id;
+            return id;
+        }
+
+        // A recipient for /bot/send: @username or a chat id; the owner by name, a chat number by its id.
+        private static async Task<string> CapyTo(string to, string token = null)
+        {
+            if (to == CapyBotChat)
+                return (await CapyBotChatOf(token)).ToString();
             if (to == CapyOwner)
             {
                 if (_capyOwnerName == null) await CapyWhoAmI();
@@ -130,16 +169,17 @@ namespace ghostline
             return to;
         }
 
-        // (chat id, message id) of the sent message.
-        private static async Task<(Guid chatId, long messageId)> CapySend(string to, string text, string key, Guid? attachmentId = null)
+        // (chat id, message id) of the sent message. target: what follows "capy:" in the queue.
+        private static async Task<(Guid chatId, long messageId)> CapySend(string target, string text, string key, Guid? attachmentId = null)
         {
+            var (token, to) = CapyRoute(target);
             var r = await CapyRequest(HttpMethod.Post, "/bot/send", new
             {
-                to = await CapyTo(to),
+                to = await CapyTo(to, token),
                 text = CapyText(text),
                 attachmentIds = attachmentId == null ? null : new[] { attachmentId.Value },
                 clientMsgId = CapyMsgId(key)
-            });
+            }, token: token);
             HealthStatus.MarkActivity("capy");
             return ((Guid)r["chatId"], (long)r["messageId"]);
         }
@@ -231,8 +271,59 @@ namespace ghostline
                 : await CapyUpload(wav, name + ".wav", "audio/wav", durationMs: durationMs);
         }
 
+        // The transcript under Capy's own record of the call: PATCH with pbxCallId finds the record in the
+        // bot's chat (the message id in the path is ignored then) and replaces its note. 404: Capy posts the
+        // record when the call ends, and its SIP bridge may be slower than our CDR poll: tried again later.
+        private static readonly int[] CapyAttachRetryMinutes = { 1, 2, 5, 10, 15 };
+
+        private static async Task AttachTranscriptCapy(CallTgItem item, CallRecord call)
+        {
+            if (call.TrState != "done" || string.IsNullOrEmpty(call.PbxCallId))
+            {
+                if (string.IsNullOrEmpty(call.PbxCallId))
+                    SysLog.Debug("capy", $"call {call.Id}: no PBX call id, the transcript is not added to Capy");
+                Store.MarkCallTgFinal(item.Id);
+                return;
+            }
+            var (token, _) = CapyRoute(item.ChatId.Substring(CapyPrefix.Length));
+            try
+            {
+                Guid chatId = await CapyBotChatOf(token);
+                await CapyRequest(new HttpMethod("PATCH"), $"/chats/{chatId}/messages/0",
+                    new { text = CapyTranscriptNote(call), pbxCallId = call.PbxCallId }, token: token);
+                HealthStatus.MarkActivity("capy");
+                Store.MarkCallTgFinal(item.Id);
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                if (item.Attempts >= CapyAttachRetryMinutes.Length)
+                {
+                    SysLog.Warn("capy", $"call {call.Id}: no Capy call record with id {call.PbxCallId}, the transcript is not added");
+                    Store.MarkCallTgFinal(item.Id);
+                    return;
+                }
+                Store.DeferCallTg(item.Id, "no call record yet", TimeSpan.FromMinutes(CapyAttachRetryMinutes[item.Attempts]));
+            }
+        }
+
+        // The transcript under a cut (">>> title" ... "<<<"), within Capy's text limit.
+        internal static string CapyTranscriptNote(CallRecord call)
+        {
+            string head = ">>> " + L10n.Tg.T("tg.call.transcript_cut") + "\n";
+            const string tail = "\n<<<";
+            string body = TranscriptText(call);
+            int room = CapyTextLimit - head.Length - tail.Length;
+            if (body.Length > room) body = body.Substring(0, room - 1) + "…";
+            return head + body + tail;
+        }
+
         private static async Task EditCallCapy(CallTgItem item, CallRecord call)
         {
+            if (item.Kind == "transcript")
+            {
+                await AttachTranscriptCapy(item, call);
+                return;
+            }
             if (!Guid.TryParse(item.Ext, out var chatId) || item.MessageId == 0)
             {
                 Store.MarkCallTgFinal(item.Id);
@@ -265,6 +356,16 @@ namespace ghostline
             {
                 try
                 {
+                    // Every phone line bot's token is checked too: a revoked one would lose transcripts silently.
+                    foreach (var t in CapyChats.Where(OwnBot).Select(t => t.token.Trim()).Distinct())
+                        _capyBotChats[t] = (Guid?)(await CapyRequest(HttpMethod.Get, "/bot/me", token: t))["chatId"]
+                            ?? throw new InvalidOperationException("a target's token is not a phone line's bot (no chatId)");
+                    if (!CapyMainBot)
+                    {
+                        HealthStatus.MarkConnected("capy");
+                        await Task.Delay(TimeSpan.FromMinutes(1));
+                        continue;
+                    }
                     await CapyWhoAmI();
                     HealthStatus.MarkConnected("capy");
                     if (!commandsSet)
@@ -355,9 +456,8 @@ namespace ghostline
                 // Group chats are not answered: the bot may sit in a group for other reasons. The log says
                 // what would make the chat a line's: a line that uses Capy at all, or the chat as a recipient.
                 string who = direct ? $"@{username}" : $"group {chatNumber} ({chatId})";
-                string fix = !AllLines.Any(c => LineUses(c, "capy"))
-                    ? "no line has capy in its clients (add it to lines[].clients)"
-                    : direct ? "not a recipient of any line" : $"not a recipient of any line (add {chatNumber} to clients.capy.to)";
+                string fix = direct ? "not a target with lines in sms (clients.capy.targets)"
+                    : $"not a target with lines in sms (add a target with to: \"#{chatNumber}\" to clients.capy.targets)";
                 SysLog.Info("capy", $"message from {who}: {fix}; " + (direct ? "refused" : "ignored"));
                 if (direct) Store.EnqueueTelegramMessage(reply, l.T("tg.sms.go_away"));
                 return;

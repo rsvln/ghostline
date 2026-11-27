@@ -164,8 +164,7 @@ namespace ghostline
                 {
                     int down = (int)Math.Round((DateTime.Now - r.DownSince.Value).TotalMinutes);
                     SysLog.Info("line", $"{ch.name}: network is back after {down} min");
-                    EnqueueTelegramForLine(ch, l.T("tg.radio.back", ch.name, down));
-                    EnqueueNtfy(ch, l.T("tg.radio.back.title", ch.name), l.T("tg.radio.back.text", down));
+                    EnqueueAdminAlert(l.T("tg.radio.back.title", ch.name), l.T("tg.radio.back.text", down));
                 }
                 r.DownSince = null;
                 r.Alerted = false;
@@ -179,8 +178,7 @@ namespace ghostline
             // The driver state says more when the device itself is down ("Not connected").
             string state = (r.State is null or "Free" ? r.Registration : r.State) ?? "";
             SysLog.Warn("line", $"{ch.name}: no network since {since} ({r.State}, {r.Registration})");
-            EnqueueTelegramForLine(ch, l.T("tg.radio.lost", ch.name, since, state));
-            EnqueueNtfy(ch, l.T("tg.radio.lost.title", ch.name), l.T("tg.radio.lost.text", since, state));
+            EnqueueAdminAlert(l.T("tg.radio.lost.title", ch.name), l.T("tg.radio.lost.text", since, state));
         }
 
         // "MTS · 4G · ▂▄▆█ -55 dBm" for /status; "no network 5 min" when down.

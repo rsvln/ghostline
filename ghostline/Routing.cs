@@ -1,25 +1,14 @@
 namespace ghostline
 {
-    // Which Telegram chats and ntfy topics a line goes to, and the other way round: which lines a chat
-    // or a topic serves. The same rules for both channels:
-    //  - a line has its own chats (channels[].clients.telegram.chat_ids) and topic (channels[].clients.ntfy.topic), or the
-    //    common ones (clients.telegram.chat_ids, clients.ntfy.topic);
+    // Which chats a line goes to, and the other way round: which lines a chat serves. Each chat (a Telegram
+    // chat, an ntfy topic, a Capy recipient) subscribes to what it gets (Subscription): SMS of some lines,
+    // calls of some lines, alerts.
     //  - an SMS is sent from a chat/topic as "number / text" when it serves one line, and as
-    //    "line / number / text" when it serves several (the line name first is accepted anyway).
+    //    "line / number / text" when it serves several (the line name first is accepted anyway); a chat
+    //    serves the lines it has in sms or calls.
     internal partial class Program
     {
         private static IEnumerable<Channel> AllLines => settings.lines ?? new List<Channel>();
-
-        // A line uses the clients of its "clients" section; a line without that section (older configs)
-        // uses every client that is on. Inside a client section empty chats / topic mean the common ones.
-        private static bool LineUses(Channel ch, string client) =>
-            ch.clients == null || client switch
-            {
-                "telegram" => ch.clients.telegram != null,
-                "ntfy" => ch.clients.ntfy != null,
-                "capy" => ch.clients.capy != null,
-                _ => false
-            };
 
         // The client a queued target goes to: "ntfy:<topic>", "capy:<recipient>", otherwise a Telegram chat.
         internal static string TargetKind(string target) =>
@@ -32,28 +21,40 @@ namespace ghostline
             _ => TelegramEnabled
         };
 
+        private static IEnumerable<TelegramChat> TgChats =>
+            TelegramEnabled ? (settings.clients.telegram.chats ?? new()).Where(c => !string.IsNullOrWhiteSpace(c.id)) : Enumerable.Empty<TelegramChat>();
+
+        private static IEnumerable<NtfyTopic> NtfyTopics =>
+            NtfyEnabled ? (settings.clients.ntfy.topics ?? new()).Where(t => !string.IsNullOrWhiteSpace(t.topic)) : Enumerable.Empty<NtfyTopic>();
+
+        // Telegram chats that get the line's SMS (and its "no network" notices).
         internal static List<string> LineChats(Channel ch) =>
-            !TelegramEnabled || !LineUses(ch, "telegram") ? new List<string>()
-            : ch.clients?.telegram?.chatIds is { Count: > 0 } ? ch.clients.telegram.chatIds
-            : settings.clients.telegram.chatIds ?? new List<string>();
+            TgChats.Where(c => Subscription.Covers(c.sms, ch)).Select(c => c.id.Trim()).Distinct().ToList();
 
-        // calls.chat_ids still overrides the chats for calls only.
         internal static List<string> LineCallChats(Channel ch) =>
-            !TelegramEnabled || !LineUses(ch, "telegram") ? new List<string>()
-            : ch.calls?.chatIds is { Count: > 0 } ? ch.calls.chatIds
-            : LineChats(ch);
+            TgChats.Where(c => Subscription.Covers(c.calls, ch)).Select(c => c.id.Trim()).Distinct().ToList();
 
-        // null: the line does not go to ntfy (ntfy off, no ntfy in the line's clients, or no topic at all).
-        internal static string LineTopic(Channel ch) =>
-            !NtfyEnabled || !LineUses(ch, "ntfy") ? null
-            : !string.IsNullOrWhiteSpace(ch.clients?.ntfy?.topic) ? ch.clients.ntfy.topic.Trim()
-            : string.IsNullOrWhiteSpace(settings.clients.ntfy.topic) ? null : settings.clients.ntfy.topic.Trim();
+        internal static List<string> LineTopics(Channel ch) =>
+            NtfyTopics.Where(t => Subscription.Covers(t.sms, ch)).Select(t => t.topic.Trim()).Distinct().ToList();
 
-        internal static List<Channel> LinesOfChat(string chatId) =>
-            AllLines.Where(c => LineChats(c).Contains(chatId) || (c.calls?.chatIds?.Contains(chatId) ?? false)).ToList();
+        internal static List<string> LineCallTopics(Channel ch) =>
+            NtfyTopics.Where(t => Subscription.Covers(t.calls, ch)).Select(t => t.topic.Trim()).Distinct().ToList();
 
-        internal static List<Channel> LinesOfTopic(string topic) =>
-            AllLines.Where(c => LineTopic(c) == topic).ToList();
+        internal static List<string> AlertChats => TgChats.Where(c => c.alerts).Select(c => c.id.Trim()).Distinct().ToList();
+        internal static List<string> AlertTopics => NtfyTopics.Where(t => t.alerts).Select(t => t.topic.Trim()).Distinct().ToList();
+
+        // Lines a chat serves (sends SMS on, answers /help for): the ones it gets SMS or calls of.
+        internal static List<Channel> LinesOfChat(string chatId)
+        {
+            var chats = TgChats.Where(c => c.id.Trim() == chatId).ToList();
+            return AllLines.Where(l => chats.Any(c => Subscription.Covers(c.sms, l) || Subscription.Covers(c.calls, l))).ToList();
+        }
+
+        internal static List<Channel> LinesOfTopic(string topic)
+        {
+            var topics = NtfyTopics.Where(t => t.topic.Trim() == topic).ToList();
+            return AllLines.Where(l => topics.Any(t => Subscription.Covers(t.sms, l) || Subscription.Covers(t.calls, l))).ToList();
+        }
 
         // An SMS to send, written in a chat or topic that serves these lines; line == null: not understood.
         internal static (Channel line, string number, string text) ParseSmsCommand(List<Channel> lines, string message)

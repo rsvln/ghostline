@@ -1,9 +1,9 @@
 # Capy
 
 Capy is a self-hosted messenger with a bot API. ghostline is a bot there: it
-writes SMS, calls and alerts to the recipients and takes SMS to send and
-commands from the messages written to it, the same way it works with Telegram
-and ntfy.
+writes SMS and alerts to the recipients and takes SMS to send and commands
+from the messages written to it, the same way it works with Telegram and ntfy.
+Calls Capy records itself; ghostline adds the transcript to its records.
 
 ## The bot
 
@@ -15,30 +15,54 @@ The person who created the bot is its owner.
 clients:
   capy:
     url: https://chat.example.com     # the Capy server
-    token: rb_...                     # the bot's token
-    to: []                            # empty: the bot's owner
+    token: rb_...                     # the main bot's token
+    targets:
+      - name: me
+        to: ""                        # empty: the bot's owner
+        sms: [home, work]             # SMS of these lines; "*": every line
+        alerts: true                  # no network on a line, PBX attacks, storage, certificate
+      - name: home-phone              # the phone line's bot of the "home" line
+        token: rb_...
+        transcripts: [home]
 ```
 
-`to` lists the recipients:
+Each target gets what it subscribes to. `to`:
 
 - `@username`: the direct chat with that person (the bot opens it itself);
 - a group the bot has been added to: its number from the link
-  (`chat.example.com/chat/13` → `13`) or its id.
+  (`chat.example.com/chat/13` → `#13`) or its id;
+- empty: the bot's owner (for a phone line's bot: its own chat).
 
-Empty `to`: the bot's owner only. A line can have its own recipients
-(`lines[].clients.capy.to`); empty, it uses the common ones. As with Telegram
-and ntfy, a line with a `clients` section goes to Capy only when `capy` is in
-it.
+## Calls: the transcript under Capy's record
+
+Capy records calls itself: its SIP bridge registers on the line's phone
+account (a second client next to the phone, `max_contacts=2`), and when a call
+ends Capy posts a call record into the phone line's chat. ghostline does not
+send calls to Capy; it adds the transcript under that record, as a cut
+(`>>> 📝 Transcript` … `<<<`).
+
+Only the chat's own bot may do that: in Capy, the phone line's settings show
+its bot (`@<chat>_phonebot`) and its token. Put that token into a target with
+`transcripts: [line]`. ghostline then, once the transcript is ready, sends
+`PATCH /chats/{chat}/messages/0` with the call's `pbxCallId`; Capy finds its
+record by that id and replaces its note. A record not there yet (Capy posts
+it at the end of the call) is tried again after 1, 2, 5, 10 and 15 minutes.
+
+The id both sides know is the `X-Asterisk-CallId` SIP header:
+
+- a call to the phones: the dialplan adds it (the call's `linkedid`) to the
+  INVITE of every ringing client (`b(gl-callid)`); Capy's bridge keeps it;
+- a call placed from Capy: Asterisk cannot add headers to its answers, so
+  Capy's bridge sends its own id in the INVITE; the dialplan keeps it in
+  `CDR(userfield)`, and ghostline reads it from there. The CDR needs the
+  `userfield` column ([cdr-sqlite.md](cdr-sqlite.md)).
 
 ## What comes
 
 - Incoming and sent SMS, with the same text as in Telegram.
-- Calls: a voice note with the recording right after the call (with a
-  waveform), and the transcript added to the same message by editing it when
-  it is ready. Missed calls as a text message (`calls.missed`).
-- Line monitoring: no network, and back.
-- PBX alerts (password guessing, the certificate, call storage) go to the
-  common recipients.
+- The transcript of each call, under Capy's own record of it.
+- Alerts: a line without network and back, password guessing, the
+  certificate, call storage.
 
 Messages are queued in ghostline's database and retried until they go out.
 Each one carries a fixed `clientMsgId`, so a retry after a lost answer does not
@@ -55,9 +79,11 @@ Commands: `/help` (this format and the lines of the chat), `/status` (the
 state of gateways, channels and queues). They are in the bot's command menu
 above the message box.
 
-A direct chat is served when its person is a recipient of some line (or is the
-owner, with empty `to`). A stranger who writes to the bot gets a refusal. A
-group is served when its chat id is a recipient; other groups are ignored.
+A direct chat is served when its person is a target with lines in `sms` (or
+is the owner, with empty `to`). A stranger who writes to the bot gets a
+refusal. A group is served when it is such a target; other groups are
+ignored. Only the main bot is polled; a phone line's bot only adds
+transcripts.
 
 ## How ghostline talks to Capy
 
@@ -70,5 +96,5 @@ in the database, so messages written while ghostline was down are handled
 after its start; a chat seen for the first time starts from its current state,
 its history is not replayed.
 
-Capy is "connected" on the Status tab while `GET /bot/me` (once a minute) and
-the polling work.
+Capy is "connected" on the Status tab while `GET /bot/me` (once a minute, for
+the main bot and every phone line's bot) and the polling work.

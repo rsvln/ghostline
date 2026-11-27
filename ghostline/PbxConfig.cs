@@ -23,10 +23,16 @@ namespace ghostline
         // Rings every client registered on the account: Dial(PJSIP/ext) only takes its first contact.
         // With none registered the plain endpoint is dialed, so the call ends as unanswered as before.
         // ExecIf with LEN: the contacts contain colons, which IF would take as its separator.
+        // b(): gl-callid runs on each ringing contact and gives it the call id (X-Asterisk-CallId).
         private static string DialPhone(string ext) =>
             $" same => n,Set(GL_DEV=${{PJSIP_DIAL_CONTACTS({ext})}})\n" +
             $" same => n,ExecIf($[${{LEN(${{GL_DEV}})}}=0]?Set(GL_DEV=PJSIP/{ext}))\n" +
-            " same => n,Dial(${GL_DEV},60)\n";
+            " same => n,Dial(${GL_DEV},60,b(gl-callid^s^1))\n";
+
+        // The header that ties a call to the record a phone keeps of it: Capy's SIP bridge stores it on its
+        // call record, and ghostline adds the transcript to the record with it. Calls placed from Capy carry
+        // Capy's own id instead (Asterisk cannot add headers to its answers); gl-call keeps it in userfield.
+        internal const string CallIdHeader = "X-Asterisk-CallId";
 
         public const string PjsipFile = "pjsip_ghostline.conf";
         public const string DialplanFile = "extensions_ghostline.conf";
@@ -312,6 +318,11 @@ namespace ghostline
             sb.Append(" same => n,MixMonitor(${GL_DIR}/${GL_FILE}.wav,r(${GL_DIR}/${GL_FILE}-r.wav)t(${GL_DIR}/${GL_FILE}-t.wav))\n");
             sb.Append(" same => n,Return()\n");
 
+            // Pre-dial handler on each channel ringing a phone: the call id in the INVITE.
+            sb.Append("\n[gl-callid]\n");
+            sb.Append($"exten => s,1,Set(PJSIP_HEADER(add,{CallIdHeader})=${{CHANNEL(linkedid)}})\n");
+            sb.Append(" same => n,Return()\n");
+
             // A modem without a phone: SMS and USSD as usual, calls are not answered.
             foreach (var m in (gw.modems ?? new()).Where(m => lines.All(l => l.Device != m.name)))
             {
@@ -357,7 +368,10 @@ namespace ghostline
 
                 // Goto keeps the dialed number as the extension, so it stays the CDR dst.
                 sb.Append($"\n[gl-call-{dev}]\n");
-                sb.Append("exten => _[+0-9].,1,Gosub(gl-record,s,1(out-${EXTEN}))\n");
+                // A phone that sent its own call id (Capy): kept in the CDR, ghostline reads it from there.
+                sb.Append($"exten => _[+0-9].,1,Set(GL_CALLID=${{PJSIP_HEADER(read,{CallIdHeader})}})\n");
+                sb.Append(" same => n,ExecIf($[${LEN(${GL_CALLID})}>0]?Set(CDR(userfield)=${GL_CALLID}))\n");
+                sb.Append(" same => n,Gosub(gl-record,s,1(out-${EXTEN}))\n");
                 sb.Append($" same => n,Dial({l.Tech}/{dev}/${{GL_NUM}},120)\n");
                 sb.Append(" same => n,Hangup()\n");
             }
