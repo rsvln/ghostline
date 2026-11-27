@@ -473,5 +473,6 @@
   "web.config.group.capy": "Capy",
   "web.config.hint.capy": "The Capy messenger, as bots (create one in Capy: Settings → Bots and API, copy the token). An empty address turns it off. The main token is optional when every recipient below has its own bot. Capy posts call records itself (its SIP bridge is a phone of the line): a phone line's bot (@<chat>_phonebot, its own token) adds the transcript under each record. A message written to a bot with SMS lines is sent as an SMS; commands: /status, /help.",
   "web.field.capy.url": "Server address (https://...)",
-  "web.field.capy.token": "Bot token (rb_...)"
+  "web.field.capy.token": "Bot token (rb_...)",
+  "web.field.capy.check_minutes": "Check the bots every, min"
 }

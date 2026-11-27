@@ -449,6 +449,8 @@ namespace ghostline
         // bot is in), or a phone line's bot with its own token.
         public List<CapyChat> targets { get; set; } = new();
         public List<string> to { get; set; }          // before 2026-11-27: the common recipients (Normalize)
+        // Every bot is asked /bot/me once in this many minutes, the bots spread evenly over it; at least 1.
+        public int checkMinutes { get; set; } = 5;
     }
 
     // Line monitoring (gateways[].monitor): a message to the line's chats and topic when the line has

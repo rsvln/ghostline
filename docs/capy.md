@@ -101,8 +101,8 @@ in the database, so messages written while ghostline was down are handled
 after its start; a chat seen for the first time starts from its current state,
 its history is not replayed.
 
-Every bot is checked once a minute, all of them in one window: one request
-at a time, spaced evenly over the minute, `GET /bot/me` for every bot, polled
+Every bot is checked once in `check_minutes` (default 5, at least 1), all of
+them in one window: one request at a time, spaced evenly over it, `GET /bot/me` for every bot, polled
 or not. Capy is "connected" on the Status tab
 while every bot works, "partly connected" (yellow, the failing bots named)
 while some do, "no connection" while none does. A bot whose polling fails is

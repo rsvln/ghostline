@@ -46,6 +46,7 @@ clients:
   capy:                       # empty url: Capy is off (docs/capy.md)
     url:
     token:                    # the main bot's token, rb_...; optional when the targets have their own
+    check_minutes: 5          # every bot's /bot/me once in this many minutes, one request at a time
     targets: []               # - { name: me, to: "", sms: ["*"], alerts: true }   (to empty: the bot's owner)
                               # - { name: personal-phone, token: rb_..., transcripts: [personal] }   (a phone line's bot)
 

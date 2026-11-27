@@ -393,10 +393,10 @@ namespace ghostline
 
         // ---- who the bot is; health ----
 
-        // The health of every bot in one window: a minute, the bots one after another, evenly spaced, one
+        // The health of every bot in one window (clients.capy.check_minutes): the bots one after another, evenly spaced, one
         // request at a time, so Capy gets a steady trickle rather than a burst. Every bot is asked /bot/me
         // every round, polled or not. A bot with transcripts and no chat of its own is not a phone line's bot.
-        private static readonly TimeSpan CapyHealthWindow = TimeSpan.FromMinutes(1);
+        private static TimeSpan CapyHealthWindow => TimeSpan.FromMinutes(Math.Max(1, settings.clients.capy.checkMinutes));
 
         private static async Task CapyHealthLoop()
         {
