@@ -45,10 +45,9 @@ namespace ghostline
             public string OwnerName;
             public bool CommandsSet;
             public readonly System.Collections.Concurrent.ConcurrentDictionary<long, Guid> Numbers = new();
-            // Health: the last check's or poll's error (null: fine), when /bot/me was last asked, when the
-            // last poll went through, and when a failing bot is polled again.
+            // Health: the last check's or poll's error (null: fine), and when a failing bot is polled again.
             public string Error;
-            public DateTime WhoAmIAt, PolledAt, PollAgainAt;
+            public DateTime PollAgainAt;
         }
 
         // By token; a token is never logged or queued, the queue names a bot by its target's name.
@@ -187,7 +186,6 @@ namespace ghostline
         {
             var bot = BotOf(token);
             var me = await CapyRequest(HttpMethod.Get, "/bot/me", token: token);
-            bot.WhoAmIAt = DateTime.UtcNow;
             bot.Id = (Guid)me["id"];
             bot.ChatId = (Guid?)me["chatId"];
             var owner = (Guid)me["ownerId"];
@@ -396,12 +394,9 @@ namespace ghostline
         // ---- who the bot is; health ----
 
         // The health of every bot in one window: a minute, the bots one after another, evenly spaced, one
-        // request at a time, so Capy gets a steady trickle rather than a burst. A bot whose poll went through
-        // within the window counts as checked (its /bot/me is asked every 10 minutes then, for its owner);
-        // a phone line bot, not polled, is asked every round. A bot with transcripts and no chat of its own
-        // is not a phone line's bot.
+        // request at a time, so Capy gets a steady trickle rather than a burst. Every bot is asked /bot/me
+        // every round, polled or not. A bot with transcripts and no chat of its own is not a phone line's bot.
         private static readonly TimeSpan CapyHealthWindow = TimeSpan.FromMinutes(1);
-        private static readonly TimeSpan CapyWhoAmIEvery = TimeSpan.FromMinutes(10);
 
         private static async Task CapyHealthLoop()
         {
@@ -415,10 +410,7 @@ namespace ghostline
                     var bot = BotOf(token);
                     try
                     {
-                        var now = DateTime.UtcNow;
-                        bool pollFresh = polled.Contains(token) && bot.Error == null && now - bot.PolledAt < CapyHealthWindow;
-                        if (!pollFresh || now - bot.WhoAmIAt >= CapyWhoAmIEvery)
-                            await CapyWhoAmI(token);
+                        await CapyWhoAmI(token);
                         if (bot.ChatId == null && NeedsBotChat(token))
                             throw new InvalidOperationException("has transcripts, but its token is not a phone line's bot (no chatId)");
                         if (!bot.CommandsSet && polled.Contains(token))
@@ -485,7 +477,6 @@ namespace ghostline
                     try
                     {
                         await CapyPollBot(token, users);
-                        bot.PolledAt = DateTime.UtcNow;
                         if (bot.Error != null) { bot.Error = null; UpdateCapyHealth(); }
                     }
                     catch (Exception ex)

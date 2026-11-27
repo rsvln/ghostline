@@ -102,8 +102,8 @@ after its start; a chat seen for the first time starts from its current state,
 its history is not replayed.
 
 Every bot is checked once a minute, all of them in one window: one request
-at a time, spaced evenly over the minute (a bot whose polling works is asked
-`GET /bot/me` only every 10 minutes). Capy is "connected" on the Status tab
+at a time, spaced evenly over the minute, `GET /bot/me` for every bot, polled
+or not. Capy is "connected" on the Status tab
 while every bot works, "partly connected" (yellow, the failing bots named)
 while some do, "no connection" while none does. A bot whose polling fails is
 polled again after 30 seconds.
